@@ -1,0 +1,968 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		B7FFBE732EEF586300E3750E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B7FFBE2A2EEF50A000E3750E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B7FFBE632EEF586300E3750E;
+			remoteInfo = AirCatchHost;
+		};
+		B7FFBE7D2EEF586300E3750E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B7FFBE2A2EEF50A000E3750E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B7FFBE632EEF586300E3750E;
+			remoteInfo = AirCatchHost;
+		};
+		B7FFBEAB2EEF58A700E3750E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B7FFBE2A2EEF50A000E3750E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B7FFBE9B2EEF58A700E3750E;
+			remoteInfo = AirCatchClient;
+		};
+		B7FFBEB52EEF58A700E3750E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B7FFBE2A2EEF50A000E3750E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B7FFBE9B2EEF58A700E3750E;
+			remoteInfo = AirCatchClient;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		B7FFBE642EEF586300E3750E /* AirCatchHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AirCatchHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7FFBE722EEF586300E3750E /* AirCatchHostTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirCatchHostTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7FFBE7C2EEF586300E3750E /* AirCatchHostUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirCatchHostUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7FFBE9C2EEF58A700E3750E /* AirCatchClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AirCatchClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7FFBEAA2EEF58A700E3750E /* AirCatchClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirCatchClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7FFBEB42EEF58A700E3750E /* AirCatchClientUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirCatchClientUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B7D2950F2EEF852F0042027F /* Exceptions for "AirCatchClient" folder in "AirCatchClient" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B7FFBE9B2EEF58A700E3750E /* AirCatchClient */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		B7FFBE652EEF586300E3750E /* AirCatchHost */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AirCatchHost;
+			sourceTree = "<group>";
+		};
+		B7FFBE9D2EEF58A700E3750E /* AirCatchClient */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B7D2950F2EEF852F0042027F /* Exceptions for "AirCatchClient" folder in "AirCatchClient" target */,
+			);
+			path = AirCatchClient;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B7FFBE612EEF586300E3750E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE6F2EEF586300E3750E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE792EEF586300E3750E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE992EEF58A700E3750E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBEA72EEF58A700E3750E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBEB12EEF58A700E3750E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B7FFBE292EEF50A000E3750E = {
+			isa = PBXGroup;
+			children = (
+				B7FFBE652EEF586300E3750E /* AirCatchHost */,
+				B7FFBE9D2EEF58A700E3750E /* AirCatchClient */,
+				B7FFBE332EEF50A000E3750E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B7FFBE332EEF50A000E3750E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B7FFBE642EEF586300E3750E /* AirCatchHost.app */,
+				B7FFBE722EEF586300E3750E /* AirCatchHostTests.xctest */,
+				B7FFBE7C2EEF586300E3750E /* AirCatchHostUITests.xctest */,
+				B7FFBE9C2EEF58A700E3750E /* AirCatchClient.app */,
+				B7FFBEAA2EEF58A700E3750E /* AirCatchClientTests.xctest */,
+				B7FFBEB42EEF58A700E3750E /* AirCatchClientUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B7FFBE632EEF586300E3750E /* AirCatchHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7FFBE842EEF586300E3750E /* Build configuration list for PBXNativeTarget "AirCatchHost" */;
+			buildPhases = (
+				B7FFBE602EEF586300E3750E /* Sources */,
+				B7FFBE612EEF586300E3750E /* Frameworks */,
+				B7FFBE622EEF586300E3750E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B7FFBE652EEF586300E3750E /* AirCatchHost */,
+			);
+			name = AirCatchHost;
+			packageProductDependencies = (
+			);
+			productName = AirCatchHost;
+			productReference = B7FFBE642EEF586300E3750E /* AirCatchHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B7FFBE712EEF586300E3750E /* AirCatchHostTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7FFBE872EEF586300E3750E /* Build configuration list for PBXNativeTarget "AirCatchHostTests" */;
+			buildPhases = (
+				B7FFBE6E2EEF586300E3750E /* Sources */,
+				B7FFBE6F2EEF586300E3750E /* Frameworks */,
+				B7FFBE702EEF586300E3750E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B7FFBE742EEF586300E3750E /* PBXTargetDependency */,
+			);
+			name = AirCatchHostTests;
+			packageProductDependencies = (
+			);
+			productName = AirCatchHostTests;
+			productReference = B7FFBE722EEF586300E3750E /* AirCatchHostTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B7FFBE7B2EEF586300E3750E /* AirCatchHostUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7FFBE8A2EEF586300E3750E /* Build configuration list for PBXNativeTarget "AirCatchHostUITests" */;
+			buildPhases = (
+				B7FFBE782EEF586300E3750E /* Sources */,
+				B7FFBE792EEF586300E3750E /* Frameworks */,
+				B7FFBE7A2EEF586300E3750E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B7FFBE7E2EEF586300E3750E /* PBXTargetDependency */,
+			);
+			name = AirCatchHostUITests;
+			packageProductDependencies = (
+			);
+			productName = AirCatchHostUITests;
+			productReference = B7FFBE7C2EEF586300E3750E /* AirCatchHostUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		B7FFBE9B2EEF58A700E3750E /* AirCatchClient */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7FFBEBC2EEF58A700E3750E /* Build configuration list for PBXNativeTarget "AirCatchClient" */;
+			buildPhases = (
+				B7FFBE982EEF58A700E3750E /* Sources */,
+				B7FFBE992EEF58A700E3750E /* Frameworks */,
+				B7FFBE9A2EEF58A700E3750E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B7FFBE9D2EEF58A700E3750E /* AirCatchClient */,
+			);
+			name = AirCatchClient;
+			packageProductDependencies = (
+			);
+			productName = AirCatchClient;
+			productReference = B7FFBE9C2EEF58A700E3750E /* AirCatchClient.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B7FFBEA92EEF58A700E3750E /* AirCatchClientTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7FFBEBF2EEF58A700E3750E /* Build configuration list for PBXNativeTarget "AirCatchClientTests" */;
+			buildPhases = (
+				B7FFBEA62EEF58A700E3750E /* Sources */,
+				B7FFBEA72EEF58A700E3750E /* Frameworks */,
+				B7FFBEA82EEF58A700E3750E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B7FFBEAC2EEF58A700E3750E /* PBXTargetDependency */,
+			);
+			name = AirCatchClientTests;
+			packageProductDependencies = (
+			);
+			productName = AirCatchClientTests;
+			productReference = B7FFBEAA2EEF58A700E3750E /* AirCatchClientTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B7FFBEB32EEF58A700E3750E /* AirCatchClientUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7FFBEC22EEF58A700E3750E /* Build configuration list for PBXNativeTarget "AirCatchClientUITests" */;
+			buildPhases = (
+				B7FFBEB02EEF58A700E3750E /* Sources */,
+				B7FFBEB12EEF58A700E3750E /* Frameworks */,
+				B7FFBEB22EEF58A700E3750E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B7FFBEB62EEF58A700E3750E /* PBXTargetDependency */,
+			);
+			name = AirCatchClientUITests;
+			packageProductDependencies = (
+			);
+			productName = AirCatchClientUITests;
+			productReference = B7FFBEB42EEF58A700E3750E /* AirCatchClientUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B7FFBE2A2EEF50A000E3750E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					B7FFBE632EEF586300E3750E = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					B7FFBE712EEF586300E3750E = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B7FFBE632EEF586300E3750E;
+					};
+					B7FFBE7B2EEF586300E3750E = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B7FFBE632EEF586300E3750E;
+					};
+					B7FFBE9B2EEF58A700E3750E = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					B7FFBEA92EEF58A700E3750E = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B7FFBE9B2EEF58A700E3750E;
+					};
+					B7FFBEB32EEF58A700E3750E = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B7FFBE9B2EEF58A700E3750E;
+					};
+				};
+			};
+			buildConfigurationList = B7FFBE2D2EEF50A000E3750E /* Build configuration list for PBXProject "AirCatch" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B7FFBE292EEF50A000E3750E;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B7FFBE332EEF50A000E3750E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B7FFBE632EEF586300E3750E /* AirCatchHost */,
+				B7FFBE712EEF586300E3750E /* AirCatchHostTests */,
+				B7FFBE7B2EEF586300E3750E /* AirCatchHostUITests */,
+				B7FFBE9B2EEF58A700E3750E /* AirCatchClient */,
+				B7FFBEA92EEF58A700E3750E /* AirCatchClientTests */,
+				B7FFBEB32EEF58A700E3750E /* AirCatchClientUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B7FFBE622EEF586300E3750E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE702EEF586300E3750E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE7A2EEF586300E3750E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE9A2EEF58A700E3750E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBEA82EEF58A700E3750E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBEB22EEF58A700E3750E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B7FFBE602EEF586300E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE6E2EEF586300E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE782EEF586300E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBE982EEF58A700E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBEA62EEF58A700E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B7FFBEB02EEF58A700E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B7FFBE742EEF586300E3750E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B7FFBE632EEF586300E3750E /* AirCatchHost */;
+			targetProxy = B7FFBE732EEF586300E3750E /* PBXContainerItemProxy */;
+		};
+		B7FFBE7E2EEF586300E3750E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B7FFBE632EEF586300E3750E /* AirCatchHost */;
+			targetProxy = B7FFBE7D2EEF586300E3750E /* PBXContainerItemProxy */;
+		};
+		B7FFBEAC2EEF58A700E3750E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B7FFBE9B2EEF58A700E3750E /* AirCatchClient */;
+			targetProxy = B7FFBEAB2EEF58A700E3750E /* PBXContainerItemProxy */;
+		};
+		B7FFBEB62EEF58A700E3750E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B7FFBE9B2EEF58A700E3750E /* AirCatchClient */;
+			targetProxy = B7FFBEB52EEF58A700E3750E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		B7FFBE532EEF50A100E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B7FFBE542EEF50A100E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		B7FFBE852EEF586300E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = AirCatchHost/AirCatchHost.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B7FFBE862EEF586300E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = AirCatchHost/AirCatchHost.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B7FFBE882EEF586300E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHostTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AirCatchHost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AirCatchHost";
+			};
+			name = Debug;
+		};
+		B7FFBE892EEF586300E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHostTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AirCatchHost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AirCatchHost";
+			};
+			name = Release;
+		};
+		B7FFBE8B2EEF586300E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHostUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = AirCatchHost;
+			};
+			name = Debug;
+		};
+		B7FFBE8C2EEF586300E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHostUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = AirCatchHost;
+			};
+			name = Release;
+		};
+		B7FFBEBD2EEF58A700E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AirCatchClient/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSBonjourServices = _aircatch._udp;
+				INFOPLIST_KEY_NSCameraUsageDescription = "please allow access";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Required to discover and connect to your Mac for screen streaming.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Required for AR tracking.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchClient;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		B7FFBEBE2EEF58A700E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AirCatchClient/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSBonjourServices = _aircatch._udp;
+				INFOPLIST_KEY_NSCameraUsageDescription = "please allow access";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Required to discover and connect to your Mac for screen streaming.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Required for AR tracking.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchClient;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B7FFBEC02EEF58A700E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchClientTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AirCatchClient.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AirCatchClient";
+			};
+			name = Debug;
+		};
+		B7FFBEC12EEF58A700E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchClientTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AirCatchClient.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AirCatchClient";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B7FFBEC32EEF58A700E3750E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchClientUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AirCatchClient;
+			};
+			name = Debug;
+		};
+		B7FFBEC42EEF58A700E3750E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VLQA7VVBTU;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchClientUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AirCatchClient;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B7FFBE2D2EEF50A000E3750E /* Build configuration list for PBXProject "AirCatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBE532EEF50A100E3750E /* Debug */,
+				B7FFBE542EEF50A100E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7FFBE842EEF586300E3750E /* Build configuration list for PBXNativeTarget "AirCatchHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBE852EEF586300E3750E /* Debug */,
+				B7FFBE862EEF586300E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7FFBE872EEF586300E3750E /* Build configuration list for PBXNativeTarget "AirCatchHostTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBE882EEF586300E3750E /* Debug */,
+				B7FFBE892EEF586300E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7FFBE8A2EEF586300E3750E /* Build configuration list for PBXNativeTarget "AirCatchHostUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBE8B2EEF586300E3750E /* Debug */,
+				B7FFBE8C2EEF586300E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7FFBEBC2EEF58A700E3750E /* Build configuration list for PBXNativeTarget "AirCatchClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBEBD2EEF58A700E3750E /* Debug */,
+				B7FFBEBE2EEF58A700E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7FFBEBF2EEF58A700E3750E /* Build configuration list for PBXNativeTarget "AirCatchClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBEC02EEF58A700E3750E /* Debug */,
+				B7FFBEC12EEF58A700E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7FFBEC22EEF58A700E3750E /* Build configuration list for PBXNativeTarget "AirCatchClientUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7FFBEC32EEF58A700E3750E /* Debug */,
+				B7FFBEC42EEF58A700E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B7FFBE2A2EEF50A000E3750E /* Project object */;
+}

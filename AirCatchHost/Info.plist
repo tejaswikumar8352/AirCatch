@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Menu Bar App - No Dock Icon -->
+    <key>LSUIElement</key>
+    <true/>
+    
+    <!-- App Transport Security - Allow local network -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    
+    <!-- Privacy Descriptions -->
+    <key>NSScreenRecordingUsageDescription</key>
+    <string>AirCatch needs screen recording permission to stream your display to connected devices.</string>
+    
+    <!-- Bonjour Services -->
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_aircatch._udp.</string>
+        <string>_aircatch._tcp.</string>
+    </array>
+    
+    <!-- Local Network Usage -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>AirCatch needs local network access to communicate with your iPad.</string>
+    
+    <!-- Launch at Login Support -->
+    <key>LSBackgroundOnly</key>
+    <false/>
+</dict>
+</plist>
