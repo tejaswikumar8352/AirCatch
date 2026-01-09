@@ -9,17 +9,17 @@ import Foundation
 import ScreenCaptureKit
 import VideoToolbox
 import CoreMedia
-import CoreAudio
 import AppKit
+import IOSurface
 
-/// Captures the screen using ScreenCaptureKit and compresses frames to H.264.
+/// Captures the screen using ScreenCaptureKit and compresses frames to HEVC.
 final class ScreenStreamer: NSObject {
     
     // MARK: - Configuration
     
     private var currentPreset: QualityPreset
-    private var maxClientWidth: Int?
-    private var maxClientHeight: Int?
+    private var clientWidth: Int?
+    private var clientHeight: Int?
     private var targetDisplayID: CGDirectDisplayID?
 
     private(set) var captureWidth: Int = 0
@@ -29,7 +29,6 @@ final class ScreenStreamer: NSObject {
     
     private var stream: SCStream?
     private var streamOutput: StreamOutput?
-    private var audioOutput: AudioStreamOutput?
     private var videoQueue: DispatchQueue?
     private var encodeQueue: DispatchQueue?
     
@@ -37,7 +36,7 @@ final class ScreenStreamer: NSObject {
     
     private var compressionSession: VTCompressionSession?
     private var frameCallback: ((Data) -> Void)?
-    private var audioCallback: ((Data) -> Void)?
+    private var cachedVPS: Data?  // HEVC only
     private var cachedSPS: Data?
     private var cachedPPS: Data?
     
@@ -49,16 +48,15 @@ final class ScreenStreamer: NSObject {
          maxClientWidth: Int? = nil,
          maxClientHeight: Int? = nil,
          targetDisplayID: CGDirectDisplayID? = nil,
-         onFrame: @escaping (Data) -> Void,
-         onAudio: ((Data) -> Void)? = nil) {
+         onFrame: @escaping (Data) -> Void) {
         self.currentPreset = preset
-        self.maxClientWidth = maxClientWidth
-        self.maxClientHeight = maxClientHeight
+        self.clientWidth = maxClientWidth
+        self.clientHeight = maxClientHeight
         self.targetDisplayID = targetDisplayID
         self.frameCallback = onFrame
-        self.audioCallback = onAudio
         super.init()
     }
+
     
     // MARK: - Public API
     
@@ -68,10 +66,10 @@ final class ScreenStreamer: NSObject {
         // 1. Get available content
         let availableContent = try await SCShareableContent.excludingDesktopWindows(
             false,
-            onScreenWindowsOnly: true
+            onScreenWindowsOnly: false
         )
         
-        // 2. Select the requested display (or default)
+        // Get the target display
         let display: SCDisplay?
         if let targetDisplayID {
             display = availableContent.displays.first(where: { $0.displayID == targetDisplayID })
@@ -84,15 +82,17 @@ final class ScreenStreamer: NSObject {
             throw StreamerError.noDisplayFound
         }
         
-        // Use native resolution, optionally clamped to client max size
-        let sourceWidth = display.width
-        let sourceHeight = display.height
-        let (width, height) = scaledDimensionsToFit(
-            sourceWidth: sourceWidth,
-            sourceHeight: sourceHeight,
-            maxWidth: maxClientWidth,
-            maxHeight: maxClientHeight
+        // Calculate output resolution based on client's iPad screen
+        // Goal: Match iPad's aspect ratio for pixel-perfect display
+        let (width, height) = calculateOptimalOutputResolution(
+            sourceWidth: display.width,
+            sourceHeight: display.height,
+            clientWidth: clientWidth,
+            clientHeight: clientHeight
         )
+        
+        // Create content filter (capture entire display)
+        let filter = SCContentFilter(display: display, excludingWindows: [])
 
         captureWidth = width
         captureHeight = height
@@ -103,18 +103,13 @@ final class ScreenStreamer: NSObject {
         config.height = height
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(currentPreset.frameRate))
         config.queueDepth = 5 // Allow buffer for compression pipeline
+        
+        // Use compatible pixel format - BGRA works with both H.264 and HEVC
+        // VideoToolbox will handle color space conversion internally
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
 
-        if audioCallback != nil {
-            config.capturesAudio = true
-            config.excludesCurrentProcessAudio = true
-            config.sampleRate = 48_000
-            config.channelCount = 2
-        }
-        
-        // 4. Create content filter (capture entire display)
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+
         
         // 5. Setup compression session
         try setupCompressionSession(width: width, height: height)
@@ -132,13 +127,7 @@ final class ScreenStreamer: NSObject {
 
         try stream.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: queue)
 
-        if audioCallback != nil {
-            let audioQueue = DispatchQueue(label: "com.aircatch.audiocapture", qos: .userInteractive)
-            audioOutput = AudioStreamOutput { [weak self] sampleBuffer in
-                self?.handleAudioSample(sampleBuffer)
-            }
-            try stream.addStreamOutput(audioOutput!, type: .audio, sampleHandlerQueue: audioQueue)
-        }
+
         
         try await stream.startCapture()
         
@@ -157,7 +146,6 @@ final class ScreenStreamer: NSObject {
         
         stream = nil
         streamOutput = nil
-        audioOutput = nil
         
         if let session = compressionSession {
             VTCompressionSessionInvalidate(session)
@@ -168,83 +156,38 @@ final class ScreenStreamer: NSObject {
         NSLog("[ScreenStreamer] Stopped")
     }
 
-    // MARK: - Audio
 
-    private func handleAudioSample(_ sampleBuffer: CMSampleBuffer) {
-        guard let audioCallback else { return }
-        guard CMSampleBufferIsValid(sampleBuffer) else { return }
-
-        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
-            return
-        }
-
-        let asbd = asbdPtr.pointee
-        let isFloat32 = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-        let channels = Int(asbd.mChannelsPerFrame)
-        guard isFloat32, channels > 0 else { return }
-
-        var audioBufferList = AudioBufferList(
-            mNumberBuffers: 0,
-            mBuffers: AudioBuffer(mNumberChannels: 0, mDataByteSize: 0, mData: nil)
-        )
-        var blockBuffer: CMBlockBuffer?
-        var sizeNeeded: Int = 0
-
-        CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer,
-            bufferListSizeNeededOut: &sizeNeeded,
-            bufferListOut: &audioBufferList,
-            bufferListSize: MemoryLayout<AudioBufferList>.size,
-            blockBufferAllocator: kCFAllocatorDefault,
-            blockBufferMemoryAllocator: kCFAllocatorDefault,
-            flags: 0,
-            blockBufferOut: &blockBuffer
-        )
-
-        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
-        guard frameCount > 0 else { return }
-
-        // AudioBufferList can be interleaved (1 buffer) or planar (N buffers).
-        if audioBufferList.mNumberBuffers == 1 {
-            let buffer = audioBufferList.mBuffers
-            guard let mData = buffer.mData, buffer.mDataByteSize > 0 else { return }
-            audioCallback(Data(bytes: mData, count: Int(buffer.mDataByteSize)))
-            return
-        }
-
-        let abl = UnsafeMutableAudioBufferListPointer(&audioBufferList)
-        guard abl.count == channels else { return }
-
-        // Interleave float32 planar buffers into a single interleaved payload.
-        var out = Data(count: frameCount * channels * MemoryLayout<Float>.size)
-        out.withUnsafeMutableBytes { outBytes in
-            guard let outBase = outBytes.baseAddress?.assumingMemoryBound(to: Float.self) else { return }
-            for c in 0..<channels {
-                let inBuf = abl[c]
-                guard let inData = inBuf.mData else { return }
-                let inBase = inData.assumingMemoryBound(to: Float.self)
-                for f in 0..<frameCount {
-                    outBase[(f * channels) + c] = inBase[f]
-                }
-            }
-        }
-
-        audioCallback(out)
-    }
     
     // MARK: - VideoToolbox Compression
     
     private func setupCompressionSession(width: Int, height: Int) throws {
         var session: VTCompressionSession?
         
+        // Choose codec based on quality preset
+        let codecType = currentPreset.useHEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
+        let codecName = currentPreset.useHEVC ? "HEVC" : "H.264"
+        
+        // Force hardware encoding for best quality and performance
+        let encoderSpec: [String: Any] = [
+            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: true,
+            kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: true
+        ]
+        
+        // Specify source pixel format attributes to match ScreenCaptureKit output
+        let sourcePixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] // Enable IOSurface backing
+        ]
+        
         let status = VTCompressionSessionCreate(
             allocator: nil,
             width: Int32(width),
             height: Int32(height),
-            codecType: kCMVideoCodecType_H264,
-            encoderSpecification: nil,
-            imageBufferAttributes: nil,
+            codecType: codecType,
+            encoderSpecification: encoderSpec as CFDictionary,
+            imageBufferAttributes: sourcePixelBufferAttributes as CFDictionary,
             compressedDataAllocator: nil,
             outputCallback: nil,
             refcon: nil,
@@ -255,52 +198,87 @@ final class ScreenStreamer: NSObject {
             throw StreamerError.compressionSessionCreationFailed(status)
         }
         
-        // Configure for low latency streaming
+        // Real-time encoding with minimal latency
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel) // High Profile for better quality
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-        // Use ~1s keyframe interval for better compression efficiency vs forcing frequent IDRs.
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: currentPreset.frameRate as CFNumber)
+        
+        // THE SONY/APPLE SECRET: Perceptual quality optimization
+        // Quality 0.85 uses psychovisual modeling to allocate bits where eyes notice most
+        // This is better than Quality 1.0 which just tries to preserve everything
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.75 as CFNumber)
+        
+        // Ultra-low latency: process frames immediately
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
+        
+        if currentPreset.useHEVC {
+            // HEVC Main profile (Main10 is overkill for streaming)
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
+        } else {
+            // H.264 High Profile with CABAC for better compression
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
+        }
+        
+        // Keyframe interval: 1 second for faster stream recovery after packet loss
+        let keyframeInterval = currentPreset.frameRate
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
+        
+        // Frame rate configuration
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: currentPreset.frameRate as CFNumber)
+        
+        // CRITICAL: Variable bitrate with quality target (like PS Remote Play)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: currentPreset.bitrate as CFNumber)
-
-        // Cap instantaneous rate spikes to reduce Wi‑Fi burst loss/jitter.
-        let bytesPerSecondCap = Int(Double(currentPreset.bitrate) / 8.0 * 1.10)
+        
+        // More generous burst allowance for complex scenes (50% headroom)
+        let bytesPerSecondCap = Int(Double(currentPreset.bitrate) / 8.0 * 1.5)
         let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
         
-        VTCompressionSessionPrepareToEncodeFrames(session)
+        // Color accuracy
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PreserveDynamicHDRMetadata, value: kCFBooleanTrue)
         
+        let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(session)
+        if prepareStatus != noErr {
+            NSLog("[ScreenStreamer] ⚠️ Warning: PrepareToEncodeFrames returned status \(prepareStatus)")
+        }
+        
+        NSLog("[ScreenStreamer] ✅ \(codecName) compression session created: \(currentPreset.bitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - \(currentPreset.displayName)")
         self.compressionSession = session
     }
 
-    private func scaledDimensionsToFit(
+
+    /// Calculate optimal output resolution - Strictly matches Client Resolution
+    /// As requested: "Stream only at iPad's native resolution"
+    /// ScreenCaptureKit will handle aspect ratio by letterboxing/pillarboxing the content within this frame.
+    private func calculateOptimalOutputResolution(
         sourceWidth: Int,
         sourceHeight: Int,
-        maxWidth: Int?,
-        maxHeight: Int?
+        clientWidth: Int?,
+        clientHeight: Int?
     ) -> (Int, Int) {
-        guard let maxWidth, let maxHeight, maxWidth > 0, maxHeight > 0 else {
+        // If no client dimensions provided, use source
+        guard let clientWidth = clientWidth, let clientHeight = clientHeight,
+              clientWidth > 0, clientHeight > 0 else {
+            NSLog("[ScreenStreamer] No client dimensions, using source: \(sourceWidth)x\(sourceHeight)")
             return (sourceWidth, sourceHeight)
         }
-
-        let scaleW = Double(maxWidth) / Double(sourceWidth)
-        let scaleH = Double(maxHeight) / Double(sourceHeight)
-        let scale = min(1.0, min(scaleW, scaleH))
-
-        if scale >= 1.0 {
-            return (sourceWidth, sourceHeight)
-        }
-
-        var w = Int((Double(sourceWidth) * scale).rounded(.down))
-        var h = Int((Double(sourceHeight) * scale).rounded(.down))
-
-        // H.264 generally expects even dimensions.
-        w = max(2, w & ~1)
-        h = max(2, h & ~1)
-
-        return (w, h)
+        
+        // Strictly use Client's Native Resolution
+        // Ensure even dimensions for video encoding
+        let targetWidth = max(2, clientWidth & ~1)
+        let targetHeight = max(2, clientHeight & ~1)
+        
+        let sourceAspect = Double(sourceWidth) / Double(sourceHeight)
+        
+        NSLog("[ScreenStreamer] Resolution: source=\(sourceWidth)x\(sourceHeight), client=\(clientWidth)x\(clientHeight), output=\(targetWidth)x\(targetHeight), sourceAspect=\(String(format: "%.3f", sourceAspect))")
+        
+        return (targetWidth, targetHeight)
     }
+
+
+
+
     
     /// Dynamically updates the bitrate during an active session.
     func setBitrate(_ bps: Int) {
@@ -310,22 +288,44 @@ final class ScreenStreamer: NSObject {
     }
     
     private var compressCount = 0
+    private var skippedFrames = 0
     
     private func compressFrame(_ sampleBuffer: CMSampleBuffer) {
         compressCount += 1
-        if compressCount <= 3 || compressCount % 60 == 0 {
-            NSLog("[ScreenStreamer] compressFrame called: \(compressCount)")
-        }
         
         guard let session = compressionSession else {
-            NSLog("[ScreenStreamer] compressFrame: No compressionSession!")
+            #if DEBUG
+            if compressCount <= 3 {
+                NSLog("[ScreenStreamer] compressFrame: No compressionSession!")
+            }
+            #endif
             return
         }
         
+        // ScreenCaptureKit provides sample buffers with CVPixelBuffers
+        // Some callbacks may not have imageBuffer - just skip them silently
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            NSLog("[ScreenStreamer] compressFrame: No imageBuffer (sampleBuffer valid: \(CMSampleBufferIsValid(sampleBuffer)))")
+            skippedFrames += 1
+            #if DEBUG
+            // Only log first few skipped frames - this is normal for some ScreenCaptureKit callbacks
+            if skippedFrames <= 2 {
+                let dataReady = CMSampleBufferDataIsReady(sampleBuffer)
+                let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+                NSLog("[ScreenStreamer] Skipped frame %d (no imageBuffer, dataReady=%d, samples=%d)", 
+                      skippedFrames, dataReady ? 1 : 0, numSamples)
+            }
+            #endif
             return
         }
+        
+        #if DEBUG
+        // Log pixel buffer details for first successful frame only
+        if compressCount - skippedFrames == 1 {
+            let pbWidth = CVPixelBufferGetWidth(imageBuffer)
+            let pbHeight = CVPixelBufferGetHeight(imageBuffer)
+            NSLog("[ScreenStreamer] First imageBuffer: %dx%d", pbWidth, pbHeight)
+        }
+        #endif
         
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let duration = CMSampleBufferGetDuration(sampleBuffer)
@@ -340,32 +340,62 @@ final class ScreenStreamer: NSObject {
             frameProperties: nil,
             infoFlagsOut: &flags
         ) { [weak self] status, _, sampleBuffer in
+            guard let strongSelf = self else { return }
             if status != noErr {
+                #if DEBUG
                 NSLog("[ScreenStreamer] Encode callback error: \(status)")
+                #endif
+                // Error recovery: invalidate session on persistent errors
+                // The next frame will trigger session recreation
+                if status == kVTInvalidSessionErr || status == kVTVideoEncoderMalfunctionErr {
+                    Task { @MainActor in
+                        strongSelf.handleCompressionError()
+                    }
+                }
                 return
             }
             guard let sampleBuffer = sampleBuffer else {
+                #if DEBUG
                 NSLog("[ScreenStreamer] Encode callback: nil sampleBuffer")
+                #endif
                 return
             }
-            self?.handleCompressedFrame(sampleBuffer)
+            strongSelf.handleCompressedFrame(sampleBuffer)
         }
         
         if status != noErr {
+            #if DEBUG
             NSLog("[ScreenStreamer] Compression failed: \(status)")
+            #endif
         }
+    }
+    
+    /// Handle compression errors by resetting the session
+    @MainActor
+    private func handleCompressionError() {
+        guard let session = compressionSession else { return }
+        VTCompressionSessionInvalidate(session)
+        compressionSession = nil
+        cachedSPS = nil
+        cachedPPS = nil
+        cachedVPS = nil
+        // Session will be recreated on next start
+        #if DEBUG
+        NSLog("[ScreenStreamer] Compression session reset due to error")
+        #endif
     }
     
     private var handleCount = 0
     
     private func handleCompressedFrame(_ sampleBuffer: CMSampleBuffer) {
         handleCount += 1
-        if handleCount <= 3 || handleCount % 60 == 0 {
-            NSLog("[ScreenStreamer] handleCompressedFrame called: \(handleCount)")
-        }
         
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
-            NSLog("[ScreenStreamer] handleCompressedFrame: No dataBuffer")
+            #if DEBUG
+            if handleCount <= 3 {
+                NSLog("[ScreenStreamer] handleCompressedFrame: No dataBuffer")
+            }
+            #endif
             return
         }
 
@@ -387,9 +417,11 @@ final class ScreenStreamer: NSObject {
         frameData.append(Data(bytes: &timestampValue, count: 8))
         frameData.append(elementaryStream)
         
+        #if DEBUG
         if Int.random(in: 0...60) == 0 {
             NSLog("[ScreenStreamer] Compressed frame: \(frameData.count) bytes")
         }
+        #endif
         
         frameCallback?(frameData)
     }
@@ -406,45 +438,110 @@ final class ScreenStreamer: NSObject {
         return !notSync
     }
 
-    /// Caches SPS/PPS from the format description if not already captured.
+    /// Caches SPS/PPS (H.264) or VPS/SPS/PPS (HEVC) from the format description.
     private func cacheParameterSetsIfNeeded(from sampleBuffer: CMSampleBuffer) {
-        guard cachedSPS == nil || cachedPPS == nil,
-              let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
             return
         }
-        var spsPointer: UnsafePointer<UInt8>?
-        var spsSize: Int = 0
-        var ppsPointer: UnsafePointer<UInt8>?
-        var ppsSize: Int = 0
+        
+        let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
+        
+        if codecType == kCMVideoCodecType_HEVC {
+            // HEVC: Extract VPS, SPS, PPS (3 parameter sets)
+            guard cachedVPS == nil || cachedSPS == nil || cachedPPS == nil else { return }
+            
+            var vpsPointer: UnsafePointer<UInt8>?
+            var vpsSize: Int = 0
+            var spsPointer: UnsafePointer<UInt8>?
+            var spsSize: Int = 0
+            var ppsPointer: UnsafePointer<UInt8>?
+            var ppsSize: Int = 0
+            
+            // VPS (index 0)
+            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 0,
+                parameterSetPointerOut: &vpsPointer,
+                parameterSetSizeOut: &vpsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
+            
+            // SPS (index 1)
+            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 1,
+                parameterSetPointerOut: &spsPointer,
+                parameterSetSizeOut: &spsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
+            
+            // PPS (index 2)
+            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 2,
+                parameterSetPointerOut: &ppsPointer,
+                parameterSetSizeOut: &ppsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
+            
+            if let vpsPointer, vpsSize > 0 {
+                cachedVPS = Data(bytes: vpsPointer, count: vpsSize)
+            }
+            if let spsPointer, spsSize > 0 {
+                cachedSPS = Data(bytes: spsPointer, count: spsSize)
+            }
+            if let ppsPointer, ppsSize > 0 {
+                cachedPPS = Data(bytes: ppsPointer, count: ppsSize)
+            }
+            
+            if cachedVPS != nil && cachedSPS != nil && cachedPPS != nil {
+                NSLog("[ScreenStreamer] HEVC parameter sets cached (VPS: \(cachedVPS?.count ?? 0)B, SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
+            }
+        } else {
+            // H.264: Extract SPS, PPS (2 parameter sets)
+            guard cachedSPS == nil || cachedPPS == nil else { return }
+            
+            var spsPointer: UnsafePointer<UInt8>?
+            var spsSize: Int = 0
+            var ppsPointer: UnsafePointer<UInt8>?
+            var ppsSize: Int = 0
 
-        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-            formatDescription,
-            parameterSetIndex: 0,
-            parameterSetPointerOut: &spsPointer,
-            parameterSetSizeOut: &spsSize,
-            parameterSetCountOut: nil,
-            nalUnitHeaderLengthOut: nil
-        )
+            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 0,
+                parameterSetPointerOut: &spsPointer,
+                parameterSetSizeOut: &spsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
 
-        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-            formatDescription,
-            parameterSetIndex: 1,
-            parameterSetPointerOut: &ppsPointer,
-            parameterSetSizeOut: &ppsSize,
-            parameterSetCountOut: nil,
-            nalUnitHeaderLengthOut: nil
-        )
+            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 1,
+                parameterSetPointerOut: &ppsPointer,
+                parameterSetSizeOut: &ppsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
 
-        if let spsPointer, spsSize > 0 {
-            cachedSPS = Data(bytes: spsPointer, count: spsSize)
-        }
-        if let ppsPointer, ppsSize > 0 {
-            cachedPPS = Data(bytes: ppsPointer, count: ppsSize)
+            if let spsPointer, spsSize > 0 {
+                cachedSPS = Data(bytes: spsPointer, count: spsSize)
+            }
+            if let ppsPointer, ppsSize > 0 {
+                cachedPPS = Data(bytes: ppsPointer, count: ppsSize)
+            }
+            
+            if cachedSPS != nil && cachedPPS != nil {
+                NSLog("[ScreenStreamer] H.264 parameter sets cached (SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
+            }
         }
     }
 
     /// Converts the compressed block buffer into an Annex B elementary stream, optionally
-    /// prefixing with SPS/PPS for keyframes.
+    /// prefixing with parameter sets for keyframes (SPS/PPS for H.264, VPS/SPS/PPS for HEVC).
     private func makeAnnexBStream(from dataBuffer: CMBlockBuffer, includeParameterSets: Bool) -> Data? {
         var length: Int = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
@@ -462,16 +559,27 @@ final class ScreenStreamer: NSObject {
         let startCode: [UInt8] = [0, 0, 0, 1]
         var stream = Data()
 
-        if includeParameterSets, let sps = cachedSPS, let pps = cachedPPS {
-            stream.append(contentsOf: startCode)
-            stream.append(sps)
-            stream.append(contentsOf: startCode)
-            stream.append(pps)
+        if includeParameterSets {
+            if let vps = cachedVPS {
+                // HEVC: Include VPS, SPS, PPS
+                guard let sps = cachedSPS, let pps = cachedPPS else { return nil }
+                stream.append(contentsOf: startCode)
+                stream.append(vps)
+                stream.append(contentsOf: startCode)
+                stream.append(sps)
+                stream.append(contentsOf: startCode)
+                stream.append(pps)
+            } else if let sps = cachedSPS, let pps = cachedPPS {
+                // H.264: Include SPS, PPS
+                stream.append(contentsOf: startCode)
+                stream.append(sps)
+                stream.append(contentsOf: startCode)
+                stream.append(pps)
+            }
         }
 
         var offset = 0
         while offset + 4 <= length {
-            // Read the NAL length (big endian)
             // Read the NAL length (big endian) safely to avoid alignment crashes
             var lengthVal: UInt32 = 0
             withUnsafeMutableBytes(of: &lengthVal) { buffer in
@@ -512,29 +620,18 @@ private final class StreamOutput: NSObject, SCStreamOutput {
     
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         frameCount += 1
-        if frameCount <= 3 || frameCount % 60 == 0 {
-            NSLog("[ScreenStreamer] StreamOutput called: frame \(frameCount), type: \(type)")
-        }
         guard type == .screen else { return }
-        if frameCount % 60 == 0 {
-            NSLog("[ScreenStreamer] Processing frame \(frameCount)")
+        #if DEBUG
+        // Only log occasionally to reduce noise - streaming is working
+        if frameCount == 1 || frameCount % 300 == 0 {
+            NSLog("[ScreenStreamer] Frame %d captured", frameCount)
         }
+        #endif
         handler(sampleBuffer)
     }
 }
 
-private final class AudioStreamOutput: NSObject, SCStreamOutput {
-    private let handler: (CMSampleBuffer) -> Void
 
-    init(handler: @escaping (CMSampleBuffer) -> Void) {
-        self.handler = handler
-    }
-
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio else { return }
-        handler(sampleBuffer)
-    }
-}
 
 // MARK: - Errors
 

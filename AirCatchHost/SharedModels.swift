@@ -47,9 +47,9 @@ enum AirCatchConfig {
     static let defaultUDPPort: UInt16 = udpPort
     static let defaultTCPPort: UInt16 = tcpPort
     
-    // Streaming defaults (use Balanced preset values)
-    static let defaultBitrate: Int = 30_000_000  // 30 Mbps
-    static let defaultFrameRate: Int = 45
+    // Streaming defaults (optimized for HEVC on Apple Silicon)
+    static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot
+    static let defaultFrameRate: Int = 60        // Always 60 FPS
     static let maxTouchEventsPerSecond: Int = 60
     
     // Quality presets defaults
@@ -59,7 +59,7 @@ enum AirCatchConfig {
 // MARK: - Network Mode
 
 enum NetworkMode: String, Codable {
-    case local   // Same network, P2P - max quality
+    case local   // Same network, P2P/AWDL - max quality
     case remote  // Internet/NAT - adaptive quality
     
     var displayName: String {
@@ -71,54 +71,48 @@ enum NetworkMode: String, Codable {
 }
 
 // MARK: - Quality Presets
+// Optimized for HEVC on Apple Silicon (M2/M3)
+// 3 presets: one for each use case
 
 enum QualityPreset: String, Codable, CaseIterable {
-    case clarity   // 35 Mbps, 30fps - best for text/documents
-    case balanced  // 30 Mbps, 45fps - general use (default)
-    case smooth    // 25 Mbps, 60fps - video/animations
-    case max       // 50 Mbps, 60fps - maximum quality
+    case performance  // Lowest latency, great for interaction-heavy use
+    case balanced     // Default - best balance of quality and responsiveness
+    case quality      // Maximum quality - best for static content/reading
     
     var bitrate: Int {
         switch self {
-        case .clarity: return 35_000_000
-        case .balanced: return 30_000_000
-        case .smooth: return 25_000_000
-        case .max: return 50_000_000
+        case .performance: return 14_000_000  // 14 Mbps - minimal network load
+        case .balanced: return 20_000_000     // 20 Mbps - sweet spot
+        case .quality: return 30_000_000      // 30 Mbps - maximum quality
         }
     }
     
     var frameRate: Int {
-        switch self {
-        case .clarity: return 30
-        case .balanced: return 45
-        case .smooth, .max: return 60
-        }
+        return 60  // Always 60 FPS
+    }
+    
+    /// Always use HEVC for best quality-per-bit
+    var useHEVC: Bool {
+        return true
     }
     
     var displayName: String {
         switch self {
-        case .clarity: return "Clarity (30fps)"
-        case .balanced: return "Balanced (45fps)"
-        case .smooth: return "Smooth (60fps)"
-        case .max: return "Max Quality"
+        case .performance: return "Performance"
+        case .balanced: return "Balanced"
+        case .quality: return "Quality"
         }
     }
     
     var shortName: String {
-        switch self {
-        case .clarity: return "Clarity"
-        case .balanced: return "Balanced"
-        case .smooth: return "Smooth"
-        case .max: return "Max"
-        }
+        displayName
     }
     
     var description: String {
         switch self {
-        case .clarity: return "Best for text & documents"
-        case .balanced: return "General use"
-        case .smooth: return "Video & animations"
-        case .max: return "Maximum quality"
+        case .performance: return "Lowest latency"
+        case .balanced: return "Best balance"
+        case .quality: return "Maximum quality"
         }
     }
 }
@@ -132,7 +126,6 @@ enum PacketType: UInt8 {
     case handshakeAck = 0x04
     case disconnect = 0x05
     case scrollEvent = 0x06
-    case keyboardEvent = 0x07
     case qualityReport = 0x08  // Client reports quality metrics
     case ping = 0x09
     case pong = 0x0A
@@ -174,12 +167,10 @@ struct HandshakeRequest: Codable {
     let screenHeight: Int?          // Client screen height
     let preferredQuality: QualityPreset?
     let requestedMode: NetworkMode? // Client can request specific mode
-    /// When true, client prefers streaming a non-main (extended) display if the host has one.
-    let extendedDisplay: Bool?
+    /// Extended display configuration (for virtual display mode)
+    let displayConfig: ExtendedDisplayConfig?
     /// Requested session features. If nil, host may assume defaults.
     let requestVideo: Bool?
-    let requestKeyboard: Bool?
-    let requestTrackpad: Bool?
     /// Prefer low-latency transport when host must fall back from AirCatch.
     let preferLowLatency: Bool?
     /// When true, client requests lossless-ish video delivery (UDP + retransmit over TCP).
@@ -191,12 +182,10 @@ struct HandshakeRequest: Codable {
          screenWidth: Int? = nil, screenHeight: Int? = nil,
          preferredQuality: QualityPreset? = nil,
          requestedMode: NetworkMode? = nil,
-         extendedDisplay: Bool? = nil,
+         displayConfig: ExtendedDisplayConfig? = nil,
          requestVideo: Bool? = nil,
-         requestKeyboard: Bool? = nil,
-         requestTrackpad: Bool? = nil,
          preferLowLatency: Bool? = nil,
-            losslessVideo: Bool? = nil,
+         losslessVideo: Bool? = nil,
          deviceId: String? = nil,
          pin: String? = nil) {
         self.clientName = clientName
@@ -206,10 +195,8 @@ struct HandshakeRequest: Codable {
         self.screenHeight = screenHeight
         self.preferredQuality = preferredQuality
         self.requestedMode = requestedMode
-        self.extendedDisplay = extendedDisplay
+        self.displayConfig = displayConfig
         self.requestVideo = requestVideo
-        self.requestKeyboard = requestKeyboard
-        self.requestTrackpad = requestTrackpad
         self.preferLowLatency = preferLowLatency
         self.losslessVideo = losslessVideo
         self.deviceId = deviceId
@@ -226,9 +213,17 @@ struct HandshakeAck: Codable {
     let networkMode: NetworkMode?   // Detected network mode
     let qualityPreset: QualityPreset?
     let bitrate: Int?
+    /// Whether virtual display mode is active
+    let isVirtualDisplay: Bool?
+    /// The display mode (mirror/extend)
+    let displayMode: StreamDisplayMode?
+    /// Position of extended display (if virtual display is active)
+    let displayPosition: ExtendedDisplayPosition?
     
     init(width: Int, height: Int, frameRate: Int, hostName: String,
-         networkMode: NetworkMode? = nil, qualityPreset: QualityPreset? = nil, bitrate: Int? = nil) {
+         networkMode: NetworkMode? = nil, qualityPreset: QualityPreset? = nil, bitrate: Int? = nil,
+         isVirtualDisplay: Bool? = nil, displayMode: StreamDisplayMode? = nil,
+         displayPosition: ExtendedDisplayPosition? = nil) {
         self.width = width
         self.height = height
         self.frameRate = frameRate
@@ -236,6 +231,9 @@ struct HandshakeAck: Codable {
         self.networkMode = networkMode
         self.qualityPreset = qualityPreset
         self.bitrate = bitrate
+        self.isVirtualDisplay = isVirtualDisplay
+        self.displayMode = displayMode
+        self.displayPosition = displayPosition
     }
 }
 
@@ -246,28 +244,17 @@ struct TouchEvent: Codable {
     let normalizedX: Double
     let normalizedY: Double
     let eventType: TouchEventType
-    /// When true, host interprets motion events as pointer movement (not dragging).
-    let isTrackpad: Bool?
-    /// Delta movement for trackpad mode (relative movement)
-    let deltaX: Double?
-    let deltaY: Double?
     let timestamp: TimeInterval
     let sequenceNumber: UInt32?  // For ordering/deduplication
     
     init(normalizedX: Double,
          normalizedY: Double,
          eventType: TouchEventType,
-         isTrackpad: Bool? = nil,
-         deltaX: Double? = nil,
-         deltaY: Double? = nil,
          timestamp: TimeInterval = Date().timeIntervalSince1970,
          sequenceNumber: UInt32? = nil) {
         self.normalizedX = normalizedX
         self.normalizedY = normalizedY
         self.eventType = eventType
-        self.isTrackpad = isTrackpad
-        self.deltaX = deltaX
-        self.deltaY = deltaY
         self.timestamp = timestamp
         self.sequenceNumber = sequenceNumber
     }
@@ -298,39 +285,6 @@ struct ScrollEvent: Codable {
         self.deltaX = deltaX
         self.deltaY = deltaY
         self.timestamp = timestamp
-    }
-}
-
-// MARK: - Keyboard Event
-
-struct KeyboardEvent: Codable {
-    let keyCode: UInt16
-    let characters: String?
-    let isKeyDown: Bool
-    let modifiers: KeyModifiers
-    let timestamp: TimeInterval
-    
-    init(keyCode: UInt16, characters: String? = nil, isKeyDown: Bool,
-         modifiers: KeyModifiers = KeyModifiers(), timestamp: TimeInterval = Date().timeIntervalSince1970) {
-        self.keyCode = keyCode
-        self.characters = characters
-        self.isKeyDown = isKeyDown
-        self.modifiers = modifiers
-        self.timestamp = timestamp
-    }
-}
-
-struct KeyModifiers: Codable {
-    let shift: Bool
-    let control: Bool
-    let option: Bool
-    let command: Bool
-    
-    init(shift: Bool = false, control: Bool = false, option: Bool = false, command: Bool = false) {
-        self.shift = shift
-        self.control = control
-        self.option = option
-        self.command = command
     }
 }
 
@@ -390,6 +344,58 @@ struct VideoFrameHeader {
     let isKeyFrame: Bool
 }
 
+// MARK: - Extended Display Types
+
+/// Display streaming mode - mirror vs extend
+enum StreamDisplayMode: String, Codable, CaseIterable {
+    case mirror = "Mirror"
+    case extend = "Extend Display"
+    
+    var displayName: String { rawValue }
+    
+    var description: String {
+        switch self {
+        case .mirror: return "Mirror your Mac screen to iPad"
+        case .extend: return "Use iPad as a second display"
+        }
+    }
+}
+
+/// Position of extended display relative to main display
+enum ExtendedDisplayPosition: String, Codable, CaseIterable {
+    case right = "Right"
+    case left = "Left"
+    case above = "Above"
+    case below = "Below"
+    
+    var displayName: String { rawValue }
+}
+
+/// Extended display configuration sent from client
+struct ExtendedDisplayConfig: Codable {
+    let mode: StreamDisplayMode
+    let position: ExtendedDisplayPosition
+    let resolution: ExtendedDisplayResolution?
+    
+    init(mode: StreamDisplayMode = .mirror,
+         position: ExtendedDisplayPosition = .right,
+         resolution: ExtendedDisplayResolution? = nil) {
+        self.mode = mode
+        self.position = position
+        self.resolution = resolution
+    }
+}
+
+/// Resolution options for extended display
+enum ExtendedDisplayResolution: String, Codable, CaseIterable {
+    case native = "Native"           // iPad native resolution
+    case matched = "Matched"         // Match main display scale
+    case retina = "Retina"           // 2x scaling for HiDPI
+    case standard = "Standard"       // 1x scaling
+    
+    var displayName: String { rawValue }
+}
+
 // MARK: - Display Info
 
 struct DisplayInfo: Identifiable, Hashable {
@@ -407,3 +413,4 @@ struct DisplayInfo: Identifiable, Hashable {
         self.isMain = isMain
     }
 }
+

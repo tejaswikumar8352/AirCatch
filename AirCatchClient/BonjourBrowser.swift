@@ -15,6 +15,11 @@ final class BonjourBrowser {
     
     var onHostFound: (@MainActor (DiscoveredHost) -> Void)?
     var onHostLost: (@MainActor (DiscoveredHost) -> Void)?
+
+    private func parsePort(_ value: String?) -> UInt16? {
+        guard let value, let port = UInt16(value), port > 0 else { return nil }
+        return port
+    }
     
     /// Starts browsing for the specified Bonjour service type.
     func startBrowsing(serviceType: String) {
@@ -47,10 +52,22 @@ final class BonjourBrowser {
                 switch change {
                 case .added(let result):
                     if case .service(let name, _, _, _) = result.endpoint {
+                        var udpPort: UInt16? = nil
+                        var tcpPort: UInt16? = nil
+
+                           switch result.metadata {
+                           case .bonjour(let txt):
+                               udpPort = parsePort(txt["udpPort"])
+                               tcpPort = parsePort(txt["tcpPort"])
+                           default:
+                               break
+                           }
                         let host = DiscoveredHost(
                             id: name,
                             name: name,
                             endpoint: result.endpoint,
+                            udpPort: udpPort,
+                            tcpPort: tcpPort,
                             isDirectIP: false
                         )
                         let handler = self.onHostFound

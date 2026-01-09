@@ -93,11 +93,6 @@ final class ClientManager: ObservableObject {
     /// Connection mode for video/control.
     @Published var connectionOption: ConnectionOption = .udpPeerToPeerAWDL
 
-    /// Input-only features (independent of video streaming).
-    @Published var keyboardEnabled: Bool = false
-    @Published var trackpadEnabled: Bool = false
-    @Published private(set) var inputBoundHost: DiscoveredHost?
-
     /// Whether the current/next handshake is requesting video streaming.
     @Published private(set) var videoRequested: Bool = false
     
@@ -138,7 +133,9 @@ final class ClientManager: ObservableObject {
         state = .discovering
         bonjourBrowser.startBrowsing(serviceType: AirCatchConfig.bonjourServiceType)
         mpcClient.startBrowsing()
+        #if DEBUG
         NSLog("[ClientManager] Started Bonjour discovery")
+        #endif
     }
     
     func stopDiscovery() {
@@ -165,7 +162,9 @@ final class ClientManager: ObservableObject {
             state = .disconnected
             // Restart discovery
             startDiscovery()
+            #if DEBUG
             NSLog("[ClientManager] Disconnected")
+            #endif
         }
     }
     
@@ -181,6 +180,8 @@ final class ClientManager: ObservableObject {
                     id: existing.id,
                     name: existing.name,
                     endpoint: host.endpoint ?? existing.endpoint,
+                    udpPort: host.udpPort ?? existing.udpPort,
+                    tcpPort: host.tcpPort ?? existing.tcpPort,
                     mpcPeerName: existing.mpcPeerName,
                     hostId: existing.hostId,
                     isDirectIP: existing.isDirectIP
@@ -188,7 +189,9 @@ final class ClientManager: ObservableObject {
             } else {
                 ClientManager.shared.discoveredHosts.append(host)
             }
+            #if DEBUG
             NSLog("[ClientManager] Found host: \(host.name)")
+            #endif
         }
 
         bonjourBrowser.onHostLost = { host in
@@ -200,6 +203,8 @@ final class ClientManager: ObservableObject {
                         id: existing.id,
                         name: existing.name,
                         endpoint: nil,
+                        udpPort: existing.udpPort,
+                        tcpPort: existing.tcpPort,
                         mpcPeerName: existing.mpcPeerName,
                         hostId: existing.hostId,
                         isDirectIP: existing.isDirectIP
@@ -208,7 +213,9 @@ final class ClientManager: ObservableObject {
                     ClientManager.shared.discoveredHosts.remove(at: idx)
                 }
             }
+            #if DEBUG
             NSLog("[ClientManager] Lost host: \(host.name)")
+            #endif
         }
     }
 
@@ -224,6 +231,8 @@ final class ClientManager: ObservableObject {
                     id: existing.id,
                     name: existing.name,
                     endpoint: existing.endpoint,
+                    udpPort: existing.udpPort,
+                    tcpPort: existing.tcpPort,
                     mpcPeerName: peer.displayName,
                     hostId: hostId ?? existing.hostId,
                     isDirectIP: existing.isDirectIP
@@ -234,6 +243,8 @@ final class ClientManager: ObservableObject {
                         id: hostName,
                         name: hostName,
                         endpoint: nil,
+                        udpPort: nil,
+                        tcpPort: nil,
                         mpcPeerName: peer.displayName,
                         hostId: hostId,
                         isDirectIP: false
@@ -251,6 +262,8 @@ final class ClientManager: ObservableObject {
                         id: existing.id,
                         name: existing.name,
                         endpoint: existing.endpoint,
+                        udpPort: existing.udpPort,
+                        tcpPort: existing.tcpPort,
                         mpcPeerName: nil,
                         hostId: existing.hostId,
                         isDirectIP: existing.isDirectIP
@@ -266,7 +279,7 @@ final class ClientManager: ObservableObject {
                 self.handleTCPPacket(packet)
             case .videoFrame, .videoFrameChunk:
                 self.handleAirCatchPacket(packet)
-            case .touchEvent, .keyboardEvent:
+            case .touchEvent:
                 break
             default:
                 break
@@ -300,59 +313,81 @@ final class ClientManager: ObservableObject {
     private let maxReconnectAttempts = 5
 
     private var pendingRequestVideo: Bool = true
-    private var pendingRequestKeyboard: Bool = false
-    private var pendingRequestTrackpad: Bool = false
 
     /// Connects to a host with the requested session features.
     func connect(
         to host: DiscoveredHost,
-        requestVideo: Bool = true,
-        requestKeyboard: Bool = false,
-        requestTrackpad: Bool = false
+        requestVideo: Bool = true
     ) {
         // Removed: guard state == .discovering else { return }
         // This allows reconnection logic to work
 
-        // Enforce: input stays bound to the first selected Mac until turned off.
-        if let bound = inputBoundHost, (keyboardEnabled || trackpadEnabled), bound != host {
-            state = .error("Keyboard/Trackpad is active. Turn it off to switch Macs.")
-            return
-        }
-
         pendingRequestVideo = requestVideo
-        pendingRequestKeyboard = requestKeyboard
-        pendingRequestTrackpad = requestTrackpad
         videoRequested = requestVideo
         
         state = .connecting
         connectedHost = host
         reconnectAttempts = 0 // Reset on manual connect
 
-        // Practical note: MultipeerConnectivity is great for discovery/control, but is
-        // often worse than raw UDP/TCP for real-time high-bitrate video.
-        // Use AirCatch (MPC) only for input-only sessions; keep video on Network.framework.
-        if !requestVideo, let peerName = host.mpcPeerName, let peer = mpcClient.peer(named: peerName) {
-            debugConnectionStatus = "Connecting (AirCatch)..."
-            activeLink = .aircatch
-            mpcClient.connect(to: peer)
-
-            // Fallback timer in case AirCatch isn't available at range.
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2))
-                await MainActor.run {
-                    guard let self else { return }
-                    if self.state == .connecting && self.activeLink == .aircatch {
-                        self.activeLink = .network
-                        self.mpcClient.disconnect()
-                        self.resolveAndConnect(host: host)
-                    }
-                }
+        // MultipeerConnectivity is kept for discovery, but we always use Network.framework
+        // for the actual stream/control connection.
+        
+        // For direct IP hosts, connect immediately
+        if host.isDirectIP, let endpoint = host.endpoint,
+           case .hostPort(let nwHost, _) = endpoint {
+            let hostString: String
+            switch nwHost {
+            case .ipv4(let addr):
+                hostString = "\(addr)"
+            case .ipv6(let addr):
+                hostString = "\(addr)"
+            case .name(let name, _):
+                hostString = name
+            @unknown default:
+                hostString = "\(nwHost)"
             }
+            debugConnectionStatus = "Connecting to \(hostString) (Remote)..."
+            establishConnection(hostIP: hostString)
             return
         }
         
         // Resolve the service endpoint to get IP address
         resolveAndConnect(host: host)
+    }
+    
+    /// Connects directly to a Mac via IP address (for remote/internet connections)
+    /// - Parameters:
+    ///   - ipAddress: The public IP or hostname of the Mac
+    ///   - port: The TCP port (default: 5556)
+    ///   - name: Display name for the host
+    func connectByIP(
+        ipAddress: String,
+        port: UInt16 = AirCatchConfig.tcpPort,
+        name: String = "Remote Mac"
+    ) {
+        #if DEBUG
+        NSLog("[ClientManager] Connecting by direct IP: \(ipAddress):\(port)")
+        #endif
+        
+        // Create a discovered host entry for the direct IP
+        let directHost = DiscoveredHost(
+            id: "direct-\(ipAddress)-\(port)",
+            name: name,
+            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(ipAddress), port: NWEndpoint.Port(rawValue: port)!),
+            udpPort: nil,
+            tcpPort: port,
+            mpcPeerName: nil,
+            hostId: nil,
+            isDirectIP: true
+        )
+        
+        // Add to discovered hosts if not already there
+        if !discoveredHosts.contains(where: { $0.id == directHost.id }) {
+            discoveredHosts.append(directHost)
+        }
+        
+        // Connect to it
+        connect(to: directHost, requestVideo: true)
     }
 
     private func sendHandshakeViaAirCatch() {
@@ -362,11 +397,20 @@ final class ClientManager: ObservableObject {
             .first(where: { $0.activationState == .foregroundActive })?
             .screen
             ?? windowScenes.first?.screen
-        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 1024, height: 768)
-        let nativeW = Int(nativeBounds.size.width)
-        let nativeH = Int(nativeBounds.size.height)
-        let maxW = max(nativeW, nativeH)
-        let maxH = min(nativeW, nativeH)
+        
+        // Use bounds * scale to get actual render resolution (accounts for "More Space" mode)
+        let bounds = screen?.bounds ?? CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let scale = screen?.scale ?? 2.0
+        let renderW = Int(bounds.size.width * scale)
+        let renderH = Int(bounds.size.height * scale)
+        let capped = capRenderResolution(width: renderW, height: renderH)
+        let maxW = max(capped.width, capped.height)
+        let maxH = min(capped.width, capped.height)
+        
+        #if DEBUG
+        NSLog("[ClientManager] Screen resolution: bounds=%.0fx%.0f scale=%.1f render=%dx%d", 
+              bounds.width, bounds.height, scale, maxW, maxH)
+        #endif
 
         let request = HandshakeRequest(
             clientName: UIDevice.current.name,
@@ -375,10 +419,10 @@ final class ClientManager: ObservableObject {
             screenWidth: maxW,
             screenHeight: maxH,
             preferredQuality: selectedPreset,
+            displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
-            requestKeyboard: pendingRequestKeyboard,
-            requestTrackpad: pendingRequestTrackpad,
             preferLowLatency: true,
+            losslessVideo: true,
             pin: enteredPIN.isEmpty ? nil : enteredPIN
         )
 
@@ -417,7 +461,9 @@ final class ClientManager: ObservableObject {
         
         reconnectAttempts += 1
         let delay = pow(2.0, Double(reconnectAttempts)) // 2, 4, 8, 16...
+        #if DEBUG
         NSLog("[ClientManager] Reconnecting in \(delay)s (Attempt \(reconnectAttempts))")
+        #endif
         state = .connecting // Updates UI to "Connecting..."
         
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -426,10 +472,14 @@ final class ClientManager: ObservableObject {
     }
     
     private func resolveAndConnect(host: DiscoveredHost) {
+        #if DEBUG
         debugConnectionStatus = "Resolving endpoint..."
+        #endif
 
         guard let endpoint = host.endpoint else {
+            #if DEBUG
             NSLog("[ClientManager] No Bonjour endpoint for host: \(host.name)")
+            #endif
             disconnect(shouldRetry: true)
             return
         }
@@ -476,14 +526,19 @@ final class ClientManager: ObservableObject {
     }
     
     private func establishConnection(hostIP: String) {
+        #if DEBUG
         debugConnectionStatus = "Connecting to \(hostIP)..."
         NSLog("[ClientManager] Connecting to \(hostIP)")
+        #endif
         
+        let tcpPort = connectedHost?.tcpPort ?? AirCatchConfig.tcpPort
+        let udpPort = connectedHost?.udpPort ?? AirCatchConfig.udpPort
+
         // Connect TCP for touch events and handshake
         // We now wait for onConnected to send the handshake to avoid race condition
         networkManager.connectTCP(
             to: hostIP,
-            port: AirCatchConfig.tcpPort,
+            port: tcpPort,
             includePeerToPeer: connectionOption.includePeerToPeer,
             requiredInterfaceType: nil,
             onConnected: { _ in
@@ -497,7 +552,7 @@ final class ClientManager: ObservableObject {
         // Connect UDP for video frames
         networkManager.connectUDP(
             to: hostIP,
-            port: AirCatchConfig.udpPort,
+            port: udpPort,
             includePeerToPeer: connectionOption.includePeerToPeer,
             requiredInterfaceType: nil
         ) { packet, _ in
@@ -509,7 +564,9 @@ final class ClientManager: ObservableObject {
         Task {
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay to ensure socket ready
             NetworkManager.shared.sendUDP(type: .handshake, payload: Data())
+            #if DEBUG
             NSLog("[ClientManager] Sent UDP ping")
+            #endif
         }
     }
     
@@ -521,11 +578,20 @@ final class ClientManager: ObservableObject {
             .first(where: { $0.activationState == .foregroundActive })?
             .screen
             ?? windowScenes.first?.screen
-        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 1024, height: 768)
-        let nativeW = Int(nativeBounds.size.width)
-        let nativeH = Int(nativeBounds.size.height)
-        let maxW = max(nativeW, nativeH)
-        let maxH = min(nativeW, nativeH)
+        
+        // Use bounds * scale to get actual render resolution (accounts for "More Space" mode)
+        let bounds = screen?.bounds ?? CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let scale = screen?.scale ?? 2.0
+        let renderW = Int(bounds.size.width * scale)
+        let renderH = Int(bounds.size.height * scale)
+        let capped = capRenderResolution(width: renderW, height: renderH)
+        let maxW = max(capped.width, capped.height)
+        let maxH = min(capped.width, capped.height)
+        
+        #if DEBUG
+        NSLog("[ClientManager] Screen resolution: bounds=%.0fx%.0f scale=%.1f render=%dx%d", 
+              bounds.width, bounds.height, scale, maxW, maxH)
+        #endif
 
         let request = HandshakeRequest(
             clientName: UIDevice.current.name,
@@ -534,17 +600,43 @@ final class ClientManager: ObservableObject {
             screenWidth: maxW,
             screenHeight: maxH,
             preferredQuality: selectedPreset,
+            displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
-            requestKeyboard: pendingRequestKeyboard,
-            requestTrackpad: pendingRequestTrackpad,
             preferLowLatency: true,
+            losslessVideo: true,
             pin: enteredPIN.isEmpty ? nil : enteredPIN
         )
         
         if let data = try? JSONEncoder().encode(request) {
             networkManager.sendTCP(type: .handshake, payload: data)
-            NSLog("[ClientManager] Sent handshake: video=\(pendingRequestVideo) kb=\(pendingRequestKeyboard) tp=\(pendingRequestTrackpad) connection=\(connectionOption.displayName) preset=\(selectedPreset.displayName)")
+            #if DEBUG
+            NSLog("[ClientManager] Sent handshake: video=\(pendingRequestVideo) preset=\(selectedPreset.displayName)")
+            #endif
         }
+    }
+
+    /// Caps the streaming render resolution to improve sharp text and reduce encoder pressure.
+    ///
+    /// iPad “More Space” can report very high render sizes (e.g., 2778×1940). At the current
+    /// bitrates, that tends to reduce text clarity. Capping to ~4MP preserves sharpness.
+    private func capRenderResolution(width: Int, height: Int) -> (width: Int, height: Int) {
+        let w = max(1, width)
+        let h = max(1, height)
+
+        // ~iPad Pro 11" default render size is ~3.98MP. Keep near that budget for clarity.
+        let maxPixels = 4_000_000.0
+        let pixels = Double(w) * Double(h)
+        guard pixels > maxPixels else { return (w, h) }
+
+        let scale = sqrt(maxPixels / pixels)
+        var newW = Int(Double(w) * scale)
+        var newH = Int(Double(h) * scale)
+
+        // Align to even values (VideoToolbox friendly).
+        newW = max(2, newW & ~1)
+        newH = max(2, newH & ~1)
+
+        return (newW, newH)
     }
     
     // MARK: - Packet Handling
@@ -563,7 +655,9 @@ final class ClientManager: ObservableObject {
             }
         case .pairingFailed:
             // Wrong PIN - disconnect and show error
+            #if DEBUG
             NSLog("[ClientManager] Pairing failed - wrong PIN")
+            #endif
             state = .error("Wrong PIN")
             enteredPIN = "" // Clear the PIN
             // Don't call disconnect() as we're already handling state
@@ -581,9 +675,11 @@ final class ClientManager: ObservableObject {
     
     private func handleUDPPacket(_ packet: Packet) {
         udpPacketCount += 1
+        #if DEBUG
         if udpPacketCount <= 5 {
             NSLog("[ClientManager] Received UDP packet #\(udpPacketCount): type=\(packet.type)")
         }
+        #endif
         
         switch packet.type {
         case .videoFrame:
@@ -617,12 +713,12 @@ final class ClientManager: ObservableObject {
         let chunkIdx = Int(UInt16(data[4]) << 8 | UInt16(data[5]))
         
         if frameId % 60 == 0 && chunkIdx == 0 {
-             NSLog("[ClientManager] Rx Chunk: F\(frameId) C\(chunkIdx)")
+             // NSLog("[ClientManager] Rx Chunk: F\(frameId) C\(chunkIdx)") -- Removed for performance
         }
         
         reassembler.process(
             chunk: data,
-            losslessEnabled: false,
+            losslessEnabled: true,
             onNack: { [weak self] frameId, missingChunkIndices in
                 guard let self else { return }
                 guard self.activeLink == .network else { return }
@@ -635,7 +731,7 @@ final class ClientManager: ObservableObject {
             onComplete: { [weak self] fullFrame in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                NSLog("[ClientManager] Sending frame to decoder: \(fullFrame.count) bytes, state=\(self.state)")
+                // Send frame to decoder (no logging - streaming is working)
                 self.videoFrameSubject.send(fullFrame)
                 self.updateStreamingState()
             }
@@ -645,14 +741,18 @@ final class ClientManager: ObservableObject {
     
     private func handleHandshakeAck(_ payload: Data) {
         guard let ack = try? JSONDecoder().decode(HandshakeAck.self, from: payload) else {
+            #if DEBUG
             NSLog("[ClientManager] Failed to decode handshake ack")
+            #endif
             return
         }
         
         screenInfo = ack
         state = .connected
         
+        #if DEBUG
         NSLog("[ClientManager] Connected! Screen: \(ack.width)x\(ack.height) @ \(ack.frameRate)fps")
+        #endif
     }
     
     // MARK: - Touch Events
@@ -671,8 +771,7 @@ final class ClientManager: ObservableObject {
         let event = TouchEvent(
             normalizedX: normalizedX,
             normalizedY: normalizedY,
-            eventType: eventType,
-            isTrackpad: nil
+            eventType: eventType
         )
         
         if let data = try? JSONEncoder().encode(event) {
@@ -685,174 +784,6 @@ final class ClientManager: ObservableObject {
         }
     }
 
-    /// Sends a trackpad-style pointer event to the Mac host.
-    func sendTrackpadEvent(normalizedX: Double, normalizedY: Double, eventType: TouchEventType) {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: normalizedX,
-            normalizedY: normalizedY,
-            eventType: eventType,
-            isTrackpad: true
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
-    /// Sends a trackpad delta movement (relative pointer movement like a Mac trackpad).
-    func sendTrackpadDelta(deltaX: Double, deltaY: Double) {
-        guard state == .connected || state == .streaming else {
-            NSLog("[ClientManager] sendTrackpadDelta BLOCKED - state is \(state)")
-            return
-        }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .moved,
-            isTrackpad: true,
-            deltaX: deltaX,
-            deltaY: deltaY
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .unreliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
-    /// Sends a trackpad click (left click at current mouse position).
-    func sendTrackpadClick() {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .began,
-            isTrackpad: true
-        )
-        let endEvent = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .ended,
-            isTrackpad: true
-        )
-        if let downData = try? JSONEncoder().encode(event),
-           let upData = try? JSONEncoder().encode(endEvent) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: downData, mode: .reliable)
-                mpcClient.send(type: .touchEvent, payload: upData, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: downData)
-                networkManager.sendTCP(type: .touchEvent, payload: upData)
-            }
-        }
-    }
-    
-    /// Sends a trackpad right-click.
-    func sendTrackpadRightClick() {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .rightClick,
-            isTrackpad: true
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
-    /// Sends a trackpad double-click.
-    func sendTrackpadDoubleClick() {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .doubleClick,
-            isTrackpad: true
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
-    /// Sends a drag begin event (mouse down and hold).
-    func sendTrackpadDragBegan() {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .dragBegan,
-            isTrackpad: true
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
-    /// Sends a drag move event (mouse drag with button held).
-    func sendTrackpadDragMove(deltaX: Double, deltaY: Double) {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .dragMoved,
-            isTrackpad: true,
-            deltaX: deltaX,
-            deltaY: deltaY
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .unreliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
-    /// Sends a drag end event (mouse up after drag).
-    func sendTrackpadDragEnded() {
-        guard state == .connected || state == .streaming else { return }
-        let event = TouchEvent(
-            normalizedX: 0,
-            normalizedY: 0,
-            eventType: .dragEnded,
-            isTrackpad: true
-        )
-        if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
-            }
-        }
-    }
-    
     /// Sends a pinch/zoom event to the Mac host.
     func sendPinchEvent(scale: Double, velocity: Double) {
         guard state == .connected || state == .streaming else { return }
@@ -884,80 +815,6 @@ final class ClientManager: ObservableObject {
         }
     }
 
-    /// Sends a keyboard text payload (unicode) to the Mac host.
-    func sendKeyboardText(_ text: String) {
-        guard (state == .connected || state == .streaming), !text.isEmpty else { return }
-
-        let evt = KeyboardEvent(
-            keyCode: 0,
-            characters: text,
-            isKeyDown: true,
-            modifiers: KeyModifiers()
-        )
-        if let data = try? JSONEncoder().encode(evt) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .keyboardEvent, payload: data, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .keyboardEvent, payload: data)
-            }
-        }
-    }
-
-    /// Sends a special key (e.g. backspace) to the Mac host.
-    func sendSpecialKeyCode(_ keyCode: UInt16) {
-        sendKeyCode(keyCode, modifiers: KeyModifiers())
-    }
-
-    /// Sends a key code with modifiers to the Mac host.
-    func sendKeyCode(_ keyCode: UInt16, modifiers: KeyModifiers) {
-        guard state == .connected || state == .streaming else { return }
-        let evtDown = KeyboardEvent(keyCode: keyCode, characters: nil, isKeyDown: true, modifiers: modifiers)
-        let evtUp = KeyboardEvent(keyCode: keyCode, characters: nil, isKeyDown: false, modifiers: modifiers)
-        if let down = try? JSONEncoder().encode(evtDown) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .keyboardEvent, payload: down, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .keyboardEvent, payload: down)
-            }
-        }
-        if let up = try? JSONEncoder().encode(evtUp) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .keyboardEvent, payload: up, mode: .reliable)
-            case .network:
-                networkManager.sendTCP(type: .keyboardEvent, payload: up)
-            }
-        }
-    }
-
-    // MARK: - Input-only Session Control
-
-    func beginInputSession(host: DiscoveredHost, keyboard: Bool, trackpad: Bool) {
-        if inputBoundHost == nil {
-            inputBoundHost = host
-        }
-        guard inputBoundHost == host else { return }
-
-        keyboardEnabled = keyboard
-        trackpadEnabled = trackpad
-
-        if state == .connected || state == .streaming, connectedHost == host {
-            return
-        }
-
-        connect(to: host, requestVideo: false, requestKeyboard: keyboard, requestTrackpad: trackpad)
-    }
-
-    func endInputSession() {
-        keyboardEnabled = false
-        trackpadEnabled = false
-        inputBoundHost = nil
-        if !videoRequested {
-            disconnect(shouldRetry: false)
-        }
-    }
 }
 
 // MARK: - Video Reassembler (Thread-Safe)
@@ -992,9 +849,11 @@ private final class VideoReassembler {
         let chunkData = data.subdata(in: 8..<data.count)
         
         chunkCount += 1
+        #if DEBUG
         if chunkCount <= 10 {
             NSLog("[Reassembler] Chunk \(chunkCount): F\(frameId) C\(chunkIdx)/\(totalChunks) size=\(chunkData.count)")
         }
+        #endif
         
         queue.async { [weak self] in
             guard let self else { return }
@@ -1014,9 +873,12 @@ private final class VideoReassembler {
             
             // Store chunk
             if self.reassemblyBuffer[frameId] == nil {
+                // Pre-allocate dictionary with expected capacity to reduce memory churn
+                var chunksDict = [Int: Data]()
+                chunksDict.reserveCapacity(totalChunks)
                 self.reassemblyBuffer[frameId] = FrameAssembly(
                     totalChunks: totalChunks,
-                    chunks: [:],
+                    chunks: chunksDict,
                     firstSeenAt: now,
                     lastNackSentAt: 0,
                     nackedIndices: []
@@ -1030,6 +892,7 @@ private final class VideoReassembler {
             if let assembly = self.reassemblyBuffer[frameId], assembly.chunks.count == totalChunks {
                 // Reassemble
                 var fullFrame = Data()
+                fullFrame.reserveCapacity(assembly.chunks.values.reduce(0) { $0 + $1.count })
                 for i in 0..<totalChunks {
                     if let part = assembly.chunks[i] {
                         fullFrame.append(part)
@@ -1041,9 +904,11 @@ private final class VideoReassembler {
                 
                 // Success
                 self.frameCount += 1
+                #if DEBUG
                 if self.frameCount <= 5 {
                     NSLog("[Reassembler] Completed frame \(self.frameCount): \(fullFrame.count) bytes")
                 }
+                #endif
                 self.reassemblyBuffer.removeValue(forKey: frameId)
                 onComplete(fullFrame)
                 return

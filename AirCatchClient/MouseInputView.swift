@@ -3,7 +3,6 @@
 //  AirCatchClient
 //
 //  Unified input handler for Touch and Mouse events.
-//  Replaces SwiftUI gestures to avoid conflict and z-index issues.
 //
 
 import SwiftUI
@@ -11,9 +10,6 @@ import UIKit
 
 struct MouseInputView: UIViewRepresentable {
     @EnvironmentObject var clientManager: ClientManager
-    
-    // No need for containerSize passed in, we rely on the view's own bounds 
-    // which are set by the parent frame modifier.
     
     func makeUIView(context: Context) -> MouseHandlingView {
         let view = MouseHandlingView()
@@ -26,6 +22,7 @@ struct MouseInputView: UIViewRepresentable {
         uiView.clientManager = clientManager
     }
 }
+
 
 class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     weak var clientManager: ClientManager?
@@ -152,7 +149,6 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
             let deltaY = -translation.y * scrollScale  // Invert for natural scrolling
             
             if abs(deltaX) > 0.5 || abs(deltaY) > 0.5 {
-                print("[MouseInputView] Two-finger scroll: deltaX=\(deltaX), deltaY=\(deltaY)")
                 clientManager?.sendScrollEvent(deltaX: Double(deltaX), deltaY: Double(deltaY))
             }
         default:
@@ -167,12 +163,19 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
         let height = bounds.height
         guard width > 0, height > 0 else { return }
         
+        // Since this view is now sized to match the video content exactly,
+        // normalization is straightforward
         let normalizedX = location.x / width
         let normalizedY = location.y / height
         
-        // Clamp
+        // Clamp to 0-1 range
         let clampedX = max(0, min(1, Double(normalizedX)))
         let clampedY = max(0, min(1, Double(normalizedY)))
+        
+        #if DEBUG
+        // Log touch coordinates for first few touches to debug offset
+        // NSLog("[MouseInputView] Touch: loc=(%.1f,%.1f) bounds=(%.1f,%.1f) norm=(%.3f,%.3f)", location.x, location.y, width, height, clampedX, clampedY) -- Disabled for performance
+        #endif
         
         clientManager?.sendTouchEvent(
             normalizedX: clampedX,
@@ -180,4 +183,5 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
             eventType: type
         )
     }
+
 }

@@ -20,11 +20,23 @@ struct MetalVideoView: UIViewRepresentable {
         mtkView.delegate = context.coordinator
         mtkView.framebufferOnly = false
         mtkView.colorPixelFormat = .bgra8Unorm
-        mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1) // Black background for letterboxing
+        mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         mtkView.enableSetNeedsDisplay = true
         mtkView.isPaused = true // Event-driven rendering (critical for power saving)
         mtkView.preferredFramesPerSecond = 60
+        // Disable vsync wait for immediate frame display (lowest latency)
+        mtkView.presentsWithTransaction = false
         context.coordinator.setupMetal(device: mtkView.device!, view: mtkView)
+        
+        // Subscribe to memory warnings for cache flushing
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            context.coordinator.flushTextureCache()
+        }
+        
         return mtkView
     }
     
@@ -48,6 +60,7 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
     
     var currentPixelBuffer: CVPixelBuffer?
     private var viewportSize: CGSize = .zero
+    private var frameCount: Int = 0
     
     func setupMetal(device: MTLDevice, view: MTKView) {
         self.device = device
@@ -66,6 +79,13 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         
         // Create pipeline
         setupPipeline(view: view)
+    }
+    
+    /// Flush the texture cache to free memory (call on memory warning)
+    func flushTextureCache() {
+        if let cache = textureCache {
+            CVMetalTextureCacheFlush(cache, 0)
+        }
     }
     
     private func setupPipeline(view: MTKView) {
@@ -135,6 +155,13 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
             return
         }
         
+        frameCount += 1
+        
+        // Periodically flush texture cache to prevent memory buildup (every 300 frames ~5 seconds at 60fps)
+        if frameCount % 300 == 0 {
+            CVMetalTextureCacheFlush(textureCache, 0)
+        }
+        
         // Create texture from pixel buffer
         guard let texture = createTexture(from: pixelBuffer) else {
             encoder.endEncoding()
@@ -142,12 +169,8 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
             return
         }
         
-        // Calculate aspect-fit vertices
-        let vertices = calculateAspectFitVertices(
-            textureSize: CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
-                               height: CVPixelBufferGetHeight(pixelBuffer)),
-            viewSize: viewportSize
-        )
+        // Calculate fullscreen vertices
+        let vertices = calculateFullscreenVertices()
         
         let texCoords: [SIMD2<Float>] = [
             SIMD2(0, 1), SIMD2(1, 1), SIMD2(0, 0),
@@ -190,31 +213,11 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         return CVMetalTextureGetTexture(cvTex)
     }
     
-    private func calculateAspectFitVertices(textureSize: CGSize, viewSize: CGSize) -> [SIMD2<Float>] {
-        guard viewSize.width > 0 && viewSize.height > 0 else {
-            return [
-                SIMD2(-1, -1), SIMD2(1, -1), SIMD2(-1, 1),
-                SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)
-            ]
-        }
-        
-        let textureAspect = textureSize.width / textureSize.height
-        let viewAspect = viewSize.width / viewSize.height
-        
-        var scaleX: Float = 1.0
-        var scaleY: Float = 1.0
-        
-        if textureAspect > viewAspect {
-            // Texture is wider - fit to width, letterbox top/bottom
-            scaleY = Float(viewAspect / textureAspect)
-        } else {
-            // Texture is taller - fit to height, pillarbox sides
-            scaleX = Float(textureAspect / viewAspect)
-        }
-        
+    /// Returns fullscreen vertices - fills entire viewport
+    private func calculateFullscreenVertices() -> [SIMD2<Float>] {
         return [
-            SIMD2(-scaleX, -scaleY), SIMD2(scaleX, -scaleY), SIMD2(-scaleX, scaleY),
-            SIMD2(scaleX, -scaleY), SIMD2(scaleX, scaleY), SIMD2(-scaleX, scaleY)
+            SIMD2(-1, -1), SIMD2(1, -1), SIMD2(-1, 1),
+            SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)
         ]
     }
 }

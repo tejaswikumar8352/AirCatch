@@ -85,7 +85,9 @@ final class InputInjector {
             mouseCursorPosition: point,
             mouseButton: .left
         ) else {
+            #if DEBUG
             NSLog("[InputInjector] Failed to create mouse down event")
+            #endif
             return
         }
         event.post(tap: .cghidEventTap)
@@ -99,7 +101,9 @@ final class InputInjector {
             mouseCursorPosition: point,
             mouseButton: .left
         ) else {
+            #if DEBUG
             NSLog("[InputInjector] Failed to create mouse up event")
+            #endif
             return
         }
         event.post(tap: .cghidEventTap)
@@ -113,7 +117,9 @@ final class InputInjector {
             mouseCursorPosition: point,
             mouseButton: .left
         ) else {
+            #if DEBUG
             NSLog("[InputInjector] Failed to create mouse drag event")
+            #endif
             return
         }
         event.post(tap: .cghidEventTap)
@@ -127,7 +133,9 @@ final class InputInjector {
             mouseCursorPosition: point,
             mouseButton: .left
         ) else {
+            #if DEBUG
             NSLog("[InputInjector] Failed to create mouse move event")
+            #endif
             return
         }
         event.post(tap: .cghidEventTap)
@@ -185,7 +193,9 @@ final class InputInjector {
             mouseCursorPosition: point,
             mouseButton: .right
         ) else {
+            #if DEBUG
             NSLog("[InputInjector] Failed to create right click events")
+            #endif
             return
         }
         
@@ -205,67 +215,6 @@ final class InputInjector {
         injectClickEvent(at: point, type: .leftMouseUp, count: 2)
     }
     
-    /// Injects a click at the current mouse position (for trackpad-style input).
-    func injectClickAtCurrentPosition(eventType: TouchEventType) {
-        let currentPoint = NSEvent.mouseLocation
-        // Convert from AppKit coordinates (origin bottom-left) to CG coordinates (origin top-left)
-        guard let screen = NSScreen.main else { return }
-        let cgPoint = CGPoint(x: currentPoint.x, y: screen.frame.height - currentPoint.y)
-        
-        switch eventType {
-        case .began:
-            injectClickEvent(at: cgPoint, type: .leftMouseDown, count: 1)
-        case .ended:
-            injectClickEvent(at: cgPoint, type: .leftMouseUp, count: 1)
-        case .cancelled:
-            injectClickEvent(at: cgPoint, type: .leftMouseUp, count: 1)
-        case .rightClick:
-            injectRightClickEvent(at: cgPoint, type: .rightMouseDown, count: 1)
-            injectRightClickEvent(at: cgPoint, type: .rightMouseUp, count: 1)
-        case .doubleClick:
-            injectClickEvent(at: cgPoint, type: .leftMouseDown, count: 1)
-            injectClickEvent(at: cgPoint, type: .leftMouseUp, count: 1)
-            injectClickEvent(at: cgPoint, type: .leftMouseDown, count: 2)
-            injectClickEvent(at: cgPoint, type: .leftMouseUp, count: 2)
-        case .moved:
-            break // No action for moved
-        case .dragBegan:
-            // Mouse down to start drag
-            injectClickEvent(at: cgPoint, type: .leftMouseDown, count: 1)
-        case .dragEnded:
-            // Mouse up to end drag
-            injectClickEvent(at: cgPoint, type: .leftMouseUp, count: 1)
-        case .dragMoved:
-            break // Handled by dragMouseRelative
-        }
-    }
-    
-    /// Drags the mouse by a relative delta (mouse button held down).
-    func dragMouseRelative(deltaX: Double, deltaY: Double) {
-        let currentLocation = NSEvent.mouseLocation
-        guard let primaryScreen = NSScreen.screens.first else { return }
-        
-        let sensitivity: Double = 1.5
-        let newAppKitX = currentLocation.x + (deltaX * sensitivity)
-        let newAppKitY = currentLocation.y - (deltaY * sensitivity)
-        
-        let allScreensBounds = NSScreen.screens.reduce(CGRect.zero) { $0.union($1.frame) }
-        let clampedX = max(allScreensBounds.minX, min(allScreensBounds.maxX, newAppKitX))
-        let clampedY = max(allScreensBounds.minY, min(allScreensBounds.maxY, newAppKitY))
-        
-        let primaryHeight = primaryScreen.frame.height
-        let cgPoint = CGPoint(x: clampedX, y: primaryHeight - clampedY)
-        
-        // Create a mouse drag event (left button held)
-        guard let event = CGEvent(
-            mouseEventSource: nil,
-            mouseType: .leftMouseDragged,
-            mouseCursorPosition: cgPoint,
-            mouseButton: .left
-        ) else { return }
-        
-        event.post(tap: .cghidEventTap)
-    }
     
     private func injectClickEvent(at point: CGPoint, type: CGEventType, count: Int64) {
         guard let event = CGEvent(
@@ -296,7 +245,9 @@ final class InputInjector {
         // First move mouse to position
         moveMouse(to: point)
         
+        #if DEBUG
         NSLog("[InputInjector] Scroll at (\(point.x), \(point.y)) deltaX=\(deltaX) deltaY=\(deltaY)")
+        #endif
         
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
@@ -306,110 +257,14 @@ final class InputInjector {
             wheel2: deltaX,
             wheel3: 0
         ) else {
+            #if DEBUG
             NSLog("[InputInjector] Failed to create scroll event")
+            #endif
             return
         }
         event.post(tap: .cghidEventTap)
     }
 
-    /// Types a unicode string (does not require keycode mapping).
-    func typeText(_ text: String) {
-        guard !text.isEmpty else { return }
-        let utf16 = Array(text.utf16)
-
-        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-            NSLog("[InputInjector] Failed to create keyboard events")
-            return
-        }
-
-        down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-        up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-    }
-
-    /// Presses a macOS virtual key code (e.g. Return=36, Delete=51).
-    func pressKey(virtualKey: CGKeyCode) {
-        pressKey(virtualKey: virtualKey, shift: false, control: false, option: false, command: false)
-    }
-
-    /// Presses a macOS virtual key code with modifier keys.
-    func pressKey(virtualKey: CGKeyCode, shift: Bool, control: Bool, option: Bool, command: Bool) {
-        // Check if this is a media key (F1-F12 with special functions)
-        if let mediaKey = mediaKeyForVirtualKey(virtualKey) {
-            postMediaKey(mediaKey)
-            return
-        }
-        
-        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: false) else {
-            NSLog("[InputInjector] Failed to create key press events")
-            return
-        }
-        
-        var flags: CGEventFlags = []
-        if shift { flags.insert(.maskShift) }
-        if control { flags.insert(.maskControl) }
-        if option { flags.insert(.maskAlternate) }
-        if command { flags.insert(.maskCommand) }
-        
-        down.flags = flags
-        up.flags = flags
-        
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-    }
-    
-    // MARK: - Media Keys (NX Key Codes)
-    
-    /// Maps virtual key codes to NX media key codes
-    private func mediaKeyForVirtualKey(_ virtualKey: CGKeyCode) -> Int32? {
-        NSLog("[InputInjector] mediaKeyForVirtualKey called with: \(virtualKey)")
-        switch virtualKey {
-        case 122: return NX_KEYTYPE_BRIGHTNESS_DOWN  // F1 - Brightness Down
-        case 120: return NX_KEYTYPE_BRIGHTNESS_UP    // F2 - Brightness Up
-        case 99:  return nil  // F3 - Mission Control (use Ctrl+Up or key code)
-        case 118: return nil  // F4 - Spotlight (use Cmd+Space)
-        case 96:  return nil  // F5 - Dictation
-        case 97:  return nil  // F6 - Do Not Disturb
-        case 98:  return NX_KEYTYPE_PREVIOUS         // F7 - Previous Track
-        case 100: return NX_KEYTYPE_PLAY             // F8 - Play/Pause
-        case 101: return NX_KEYTYPE_NEXT             // F9 - Next Track
-        case 109: return NX_KEYTYPE_MUTE             // F10 - Mute
-        case 103: return NX_KEYTYPE_SOUND_DOWN       // F11 - Volume Down
-        case 111: return NX_KEYTYPE_SOUND_UP         // F12 - Volume Up
-        case 53:  return nil  // Escape - handle as regular key
-        default:
-            NSLog("[InputInjector] No media key mapping for virtualKey: \(virtualKey)")
-            return nil
-        }
-    }
-    
-    /// Posts a media key event (like volume, brightness, play/pause)
-    private func postMediaKey(_ key: Int32) {
-        NSLog("[InputInjector] Posting media key: \(key)")
-        func doKey(down: Bool) {
-            let flags: UInt32 = (down ? 0xa00 : 0xb00)
-            guard let event = NSEvent.otherEvent(
-                with: .systemDefined,
-                location: .zero,
-                modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags)),
-                timestamp: 0,
-                windowNumber: 0,
-                context: nil,
-                subtype: 8,
-                data1: Int((key << 16) | Int32(flags)),
-                data2: -1
-            ) else {
-                NSLog("[InputInjector] Failed to create media key event")
-                return
-            }
-            event.cgEvent?.post(tap: .cghidEventTap)
-        }
-        doKey(down: true)
-        doKey(down: false)
-    }
     
     /// Check if accessibility permissions are granted.
     var hasAccessibilityPermission: Bool {
@@ -419,7 +274,9 @@ final class InputInjector {
     /// Gets the current main screen frame (always queries fresh to handle resolution changes)
     private func currentMainScreenFrame() -> CGRect? {
         guard let screen = NSScreen.main else {
+            #if DEBUG
             NSLog("[InputInjector] No main screen available")
+            #endif
             return nil
         }
         return screen.frame
@@ -427,43 +284,40 @@ final class InputInjector {
 
     private func pointForNormalized(xPercent: Double, yPercent: Double) -> CGPoint? {
         guard let screenFrame = currentMainScreenFrame() else { return nil }
+        // CGEvent uses global display coordinates with origin at top-left of primary display
         let x = xPercent * screenFrame.width
         let y = yPercent * screenFrame.height
         return CGPoint(x: x, y: y)
     }
 
+    /// Converts normalized (0-1) coordinates to CGEvent screen coordinates.
+    /// CGEvent uses a coordinate system with origin at the top-left of the primary display.
+    /// For multi-monitor setups, secondary displays can have negative or offset origins.
     private func pointForNormalized(xPercent: Double, yPercent: Double, in screenFrame: CGRect) -> CGPoint {
-        let x = screenFrame.origin.x + (xPercent * screenFrame.width)
-        let y = screenFrame.origin.y + (yPercent * screenFrame.height)
-        return CGPoint(x: x, y: y)
+        // screenFrame is in AppKit coordinates (origin at bottom-left of primary screen)
+        // CGEvent coordinates have origin at top-left of primary screen
+        // We need to convert properly
+        
+        guard let primaryScreen = NSScreen.screens.first else {
+            // Fallback - assume simple case
+            let x = screenFrame.origin.x + (xPercent * screenFrame.width)
+            let y = screenFrame.origin.y + (yPercent * screenFrame.height)
+            return CGPoint(x: x, y: y)
+        }
+        
+        let primaryHeight = primaryScreen.frame.height
+        
+        // Calculate the position within the target screen (in AppKit coords)
+        let appKitX = screenFrame.origin.x + (xPercent * screenFrame.width)
+        // In AppKit, Y increases upward, but we want yPercent=0 to be at TOP of screen
+        let appKitY = screenFrame.origin.y + screenFrame.height - (yPercent * screenFrame.height)
+        
+        // Convert from AppKit (bottom-left origin) to CG (top-left origin)
+        let cgX = appKitX
+        let cgY = primaryHeight - appKitY
+        
+        return CGPoint(x: cgX, y: cgY)
     }
 
-    /// Moves the mouse cursor by a relative delta amount (for trackpad mode)
-    func moveMouseRelative(deltaX: Double, deltaY: Double) {
-        let currentLocation = NSEvent.mouseLocation
-        
-        // NSEvent.mouseLocation is in AppKit global coordinates (origin at bottom-left of primary screen)
-        // Apply delta directly - trackpad sensitivity multiplier for comfortable movement
-        let sensitivity: Double = 1.5  // Adjust for trackpad feel
-        let newAppKitX = currentLocation.x + (deltaX * sensitivity)
-        let newAppKitY = currentLocation.y - (deltaY * sensitivity)  // Subtract because AppKit Y is flipped vs touch
-        
-        // Get total screen bounds (all screens) in AppKit coordinates
-        let allScreensBounds = NSScreen.screens.reduce(CGRect.zero) { $0.union($1.frame) }
-        
-        // Clamp to screen bounds (AppKit coordinates)
-        let clampedX = max(allScreensBounds.minX, min(allScreensBounds.maxX, newAppKitX))
-        let clampedY = max(allScreensBounds.minY, min(allScreensBounds.maxY, newAppKitY))
-        
-        // In AppKit, the origin (0,0) is at the bottom-left of the PRIMARY screen.
-        // In CoreGraphics/Quartz, the origin (0,0) is at the top-left of the PRIMARY screen.
-        // The primary screen is the one containing the menu bar (NSScreen.screens[0]).
-        // For CG conversion: cgY = primaryScreenHeight - appKitY
-        guard let primaryScreen = NSScreen.screens.first else { return }
-        let primaryHeight = primaryScreen.frame.height
-        let cgPoint = CGPoint(x: clampedX, y: primaryHeight - clampedY)
-        
-        moveMouse(to: cgPoint)
-    }
 }
 

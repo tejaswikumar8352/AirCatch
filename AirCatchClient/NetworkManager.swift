@@ -104,10 +104,13 @@ final class NetworkManager {
         // Optimize for interactive video streaming
         parameters.serviceClass = .interactiveVideo
         
-        let tcpOption = parameters.defaultProtocolStack.transportProtocol! as! NWProtocolTCP.Options
-        tcpOption.enableKeepalive = true
-        tcpOption.keepaliveIdle = 2
-        tcpOption.noDelay = true // Disable Nagle's algorithm for instant sending
+        if let tcpOption = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcpOption.enableKeepalive = true
+            tcpOption.keepaliveIdle = 2
+            tcpOption.noDelay = true // Disable Nagle's algorithm for instant sending
+        } else {
+            NSLog("[NetworkManager] ⚠️ TCP options unavailable; using defaults")
+        }
         
         let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: parameters)
         connection.stateUpdateHandler = { [weak self] (state: NWConnection.State) in

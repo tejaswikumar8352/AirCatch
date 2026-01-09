@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- DriverKit entitlement - Required for all DriverKit extensions -->
+    <key>com.apple.developer.driverkit</key>
+    <true/>
+    
+    <!-- 
+    NOTE: The following entitlements are commented out until Apple approves them.
+    Re-enable after receiving approval (Request ID: NV4K6V34TD)
+    
+    <key>com.apple.developer.driverkit.allow-any-userclient-access</key>
+    <true/>
+    
+    <key>com.apple.developer.driverkit.transport.virtual</key>
+    <true/>
+    
+    <key>com.apple.developer.driverkit.family.graphics</key>
+    <true/>
+    
+    <key>com.apple.developer.driverkit.userclient-access</key>
+    <array>
+        <string>com.teja.AirCatchHost</string>
+    </array>
+    -->
+</dict>
+</plist>

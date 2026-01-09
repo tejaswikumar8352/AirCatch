@@ -44,6 +44,8 @@ final class NetworkManager {
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
         parameters.includePeerToPeer = true
+        // Priority QoS for video streaming (like PS Remote Play)
+        parameters.serviceClass = .interactiveVideo
 
         // Use NWEndpoint.Port(integerLiteral: 0) to get any available port
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
@@ -94,10 +96,13 @@ final class NetworkManager {
         // Optimize for interactive video streaming
         parameters.serviceClass = .interactiveVideo
         
-        let tcpOption = parameters.defaultProtocolStack.transportProtocol! as! NWProtocolTCP.Options
-        tcpOption.enableKeepalive = true
-        tcpOption.keepaliveIdle = 2
-        tcpOption.noDelay = true // Disable Nagle's algorithm for instant sending
+        if let tcpOption = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcpOption.enableKeepalive = true
+            tcpOption.keepaliveIdle = 2
+            tcpOption.noDelay = true // Disable Nagle's algorithm for instant sending
+        } else {
+            NSLog("[NetworkManager] ⚠️ TCP options unavailable; using defaults")
+        }
         
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
         
@@ -215,31 +220,36 @@ final class NetworkManager {
     
     /// Registers a client endpoint for UDP broadcasting (called when receiving UDP packets from clients)
     func registerUDPClient(endpoint: NWEndpoint) {
-        // Check if already registered
-        guard !udpClientEndpoints.contains(where: { $0 == endpoint }) else { return }
-        
-        udpClientEndpoints.append(endpoint)
+        queue.async { [weak self] in
+            guard let self else { return }
+            // Check if already registered
+            guard !self.udpClientEndpoints.contains(where: { $0 == endpoint }) else { return }
+            
+            self.udpClientEndpoints.append(endpoint)
 
-        if case .hostPort(let host, _) = endpoint {
-            udpEndpointByHost["\(host)"] = endpoint
-        }
-        
-        // Create a connection to send data back to this client
-        let connection = NWConnection(to: endpoint, using: .udp)
-        connection.stateUpdateHandler = { state in
-            switch state {
-            case .ready:
-                NSLog("UDP client connection ready: \(endpoint)")
-            case .failed(let error):
-                NSLog("UDP client connection failed: \(error)")
-            default:
-                break
+            if case .hostPort(let host, _) = endpoint {
+                self.udpEndpointByHost["\(host)"] = endpoint
             }
+            
+            // Create a connection to send data back to this client
+            let connection = NWConnection(to: endpoint, using: .udp)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    NSLog("UDP client connection ready: \(endpoint)")
+                case .failed(let error):
+                    NSLog("UDP client connection failed: \(error)")
+                default:
+                    break
+                }
+            }
+            connection.start(queue: self.queue)
+            self.registeredUDPClients.append(connection)
+            
+            #if DEBUG
+            NSLog("[NetworkManager] Registered UDP client: \(endpoint)")
+            #endif
         }
-        connection.start(queue: queue)
-        registeredUDPClients.append(connection)
-        
-        NSLog("[NetworkManager] Registered UDP client: \(endpoint)")
     }
 
     func udpEndpoint(forHostString hostString: String) -> NWEndpoint? {

@@ -13,14 +13,20 @@ import AppKit
 final class BonjourAdvertiser {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "com.aircatch.bonjour")
+
+    private var advertisedUDPPort: UInt16 = 0
+    private var advertisedTCPPort: UInt16 = 0
     
     /// Starts advertising the service.
     /// - Parameters:
     ///   - serviceType: The Bonjour service type (e.g., "_aircatch._udp.")
     ///   - port: The port number to advertise
     ///   - name: The service name (typically the Mac's name)
-    func startAdvertising(serviceType: String, port: UInt16, name: String) {
+    func startAdvertising(serviceType: String, udpPort: UInt16, tcpPort: UInt16 = 0, name: String) {
         stopAdvertising() // Stop any existing advertiser first
+
+        advertisedUDPPort = udpPort
+        advertisedTCPPort = tcpPort
         
         do {
             // Create a listener that will advertise our service
@@ -55,7 +61,7 @@ final class BonjourAdvertiser {
             listener.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    AirCatchLog.info("Started advertising '\(name)' as \(serviceType) on port \(port)", category: .network)
+                    AirCatchLog.info("Started advertising '\(name)' as \(serviceType) (udp=\(udpPort), tcp=\(tcpPort))", category: .network)
                 case .failed(let error):
                     AirCatchLog.error("Bonjour listener failed: \(error)", category: .network)
                 case .cancelled:
@@ -88,6 +94,14 @@ final class BonjourAdvertiser {
         var record = NWTXTRecord()
         record["version"] = "1.0"
         record["platform"] = "macOS"
+
+        // Advertise the actual service ports (useful for diagnostics/future flexibility).
+        if advertisedUDPPort != 0 {
+            record["udpPort"] = String(advertisedUDPPort)
+        }
+        if advertisedTCPPort != 0 {
+            record["tcpPort"] = String(advertisedTCPPort)
+        }
         
         // Include screen info
         if let screen = NSScreen.main {

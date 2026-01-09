@@ -46,7 +46,7 @@ final class HostManager: ObservableObject {
     /// Generates a new random 4-digit PIN
     func regeneratePIN() {
         currentPIN = String(format: "%04d", Int.random(in: 0...9999))
-        NSLog("[AirCatchHost] New PIN generated: \(currentPIN)")
+        NSLog("[AirCatchHost] New PIN generated")
     }
     
     // MARK: - Network Components
@@ -58,6 +58,7 @@ final class HostManager: ObservableObject {
     // MARK: - Screen Capture
     
     private var screenStreamer: ScreenStreamer?
+    private var currentClientDimensions: (width: Int, height: Int)?
     private var currentFrameId: UInt32 = 0
     private let maxUDPPayloadSize = 1200 // Safe UDP payload size (below MTU)
 
@@ -65,7 +66,7 @@ final class HostManager: ObservableObject {
     private var preferLowLatency: Bool = true
 
     /// When true, keep a short retransmit window for UDP video chunks (wired mode).
-    private var losslessVideoEnabled: Bool = false
+    private var losslessVideoEnabled: Bool = true
 
     private struct CachedFrame {
         let createdAt: TimeInterval
@@ -79,6 +80,11 @@ final class HostManager: ObservableObject {
     // Target display selection (main vs extended)
     private var targetDisplayID: CGDirectDisplayID? = nil
     private var targetScreenFrame: CGRect? = nil
+    
+    // Extended display state
+    private var virtualDisplayManager = VirtualDisplayManager.shared
+    private var isExtendedDisplayActive = false
+    private var currentDisplayConfig: ExtendedDisplayConfig?
     
     private init() {}
     
@@ -135,7 +141,8 @@ final class HostManager: ObservableObject {
                 // Advertise via Bonjour with the actual port
                 bonjourAdvertiser.startAdvertising(
                     serviceType: AirCatchConfig.bonjourServiceType,
-                    port: udpPort,
+                    udpPort: udpPort,
+                    tcpPort: tcpPort,
                     name: Host.current().localizedName ?? "Mac"
                 )
 
@@ -173,7 +180,9 @@ final class HostManager: ObservableObject {
     // MARK: - Packet Handling
     
     private nonisolated func handleIncomingPacket(_ packet: Packet, from endpoint: NWEndpoint?) {
+        #if DEBUG
         NSLog("[AirCatchHost] Received UDP packet type: \(packet.type)")
+        #endif
         
         // Register the client endpoint so we can broadcast video frames to it
         if let endpoint = endpoint {
@@ -200,10 +209,6 @@ final class HostManager: ObservableObject {
         case .scrollEvent:
             Task { @MainActor in
                 self.handleScrollEvent(packet.payload)
-            }
-        case .keyboardEvent:
-            Task { @MainActor in
-                self.handleKeyboardEvent(packet.payload)
             }
         case .disconnect:
             Task { @MainActor in
@@ -240,8 +245,6 @@ final class HostManager: ObservableObject {
             handleTouchEvent(packet.payload)
         case .scrollEvent:
             handleScrollEvent(packet.payload)
-        case .keyboardEvent:
-            handleKeyboardEvent(packet.payload)
         case .audioPCM:
             break
         case .disconnect:
@@ -275,7 +278,12 @@ final class HostManager: ObservableObject {
 
         self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
         self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
-        self.configureTargetDisplay(extended: handshakeRequest?.extendedDisplay == true)
+        
+        // Handle display configuration (mirror vs extend)
+        let displayConfig = handshakeRequest?.displayConfig
+        self.currentDisplayConfig = displayConfig
+        self.configureTargetDisplay(config: displayConfig, clientWidth: handshakeRequest?.screenWidth, clientHeight: handshakeRequest?.screenHeight)
+        
         let wantsVideo = handshakeRequest?.requestVideo ?? true
 
         postStatusChange()
@@ -300,7 +308,10 @@ final class HostManager: ObservableObject {
                 hostName: Host.current().localizedName ?? "Mac",
                 networkMode: networkMode,
                 qualityPreset: currentQuality,
-                bitrate: currentQuality.bitrate
+                bitrate: currentQuality.bitrate,
+                isVirtualDisplay: self.isExtendedDisplayActive,
+                displayMode: displayConfig?.mode ?? .mirror,
+                displayPosition: displayConfig?.position
             )
 
             if let data = try? JSONEncoder().encode(ack) {
@@ -310,7 +321,9 @@ final class HostManager: ObservableObject {
     }
     
     private nonisolated func handleHandshake(payload: Data, from connection: NWConnection) {
+        #if DEBUG
         NSLog("[AirCatchHost] Handshake received from: \(connection.endpoint)")
+        #endif
         
         Task { @MainActor in
             // Decode the handshake request to extract PIN
@@ -319,13 +332,17 @@ final class HostManager: ObservableObject {
             
             // Verify PIN
             if receivedPIN != currentPIN {
-                NSLog("[AirCatchHost] PIN mismatch: expected \(currentPIN), got \(receivedPIN)")
+                #if DEBUG
+                NSLog("[AirCatchHost] PIN mismatch for: \(connection.endpoint)")
+                #endif
                 // Send pairing failed response
                 networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
                 return
             }
             
+            #if DEBUG
             NSLog("[AirCatchHost] PIN verified successfully for: \(connection.endpoint)")
+            #endif
             connectedClients += 1
             
             // Apply client's preferred quality if specified
@@ -338,7 +355,11 @@ final class HostManager: ObservableObject {
             // Client transport preference
             self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
             self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
-            self.configureTargetDisplay(extended: handshakeRequest?.extendedDisplay == true)
+            
+            // Handle display configuration (mirror vs extend)
+            let displayConfig = handshakeRequest?.displayConfig
+            self.currentDisplayConfig = displayConfig
+            self.configureTargetDisplay(config: displayConfig, clientWidth: handshakeRequest?.screenWidth, clientHeight: handshakeRequest?.screenHeight)
 
             // Session features
             let wantsVideo = handshakeRequest?.requestVideo ?? true
@@ -373,7 +394,10 @@ final class HostManager: ObservableObject {
                 hostName: Host.current().localizedName ?? "Mac",
                 networkMode: networkMode,
                 qualityPreset: currentQuality,
-                bitrate: currentQuality.bitrate
+                bitrate: currentQuality.bitrate,
+                isVirtualDisplay: self.isExtendedDisplayActive,
+                displayMode: displayConfig?.mode ?? .mirror,
+                displayPosition: displayConfig?.position
             )
             
             if let data = try? JSONEncoder().encode(ack) {
@@ -384,67 +408,69 @@ final class HostManager: ObservableObject {
     
     private func handleTouchEvent(_ payload: Data) {
         guard let touch = try? JSONDecoder().decode(TouchEvent.self, from: payload) else {
+            #if DEBUG
             NSLog("[AirCatchHost] Failed to decode touch event")
+            #endif
             return
         }
         
-        NSLog("[AirCatchHost] Received touch: type=\(touch.eventType) isTrackpad=\(touch.isTrackpad ?? false) deltaX=\(touch.deltaX ?? 0) deltaY=\(touch.deltaY ?? 0)")
+        #if DEBUG
+        NSLog("[AirCatchHost] Received touch: type=\(touch.eventType)")
+        #endif
         
         Task { @MainActor in
-            // Handle trackpad events with delta-based movement (like a real Mac trackpad)
-            if touch.isTrackpad == true {
-                // Handle drag with delta movement
-                if let deltaX = touch.deltaX, let deltaY = touch.deltaY, touch.eventType == .dragMoved {
-                    NSLog("[AirCatchHost] Trackpad drag move: (\(deltaX), \(deltaY))")
-                    InputInjector.shared.dragMouseRelative(deltaX: deltaX, deltaY: deltaY)
-                    return
+            // Absolute positioning touch input (Magic Keyboard/Trackpad mode removed)
+            let screenFrame = self.targetDisplayFrame()
+
+            // Adjust for letterboxing/pillarboxing in the stream
+            // The stream is exactly client dimensions (e.g. 2778x1940)
+            // But Mac content is fit inside it.
+            // We must un-map the black bars to get correct screen coordinates.
+            var finalNormX = touch.normalizedX
+            var finalNormY = touch.normalizedY
+
+            if let (clientW, clientH) = self.currentClientDimensions, clientW > 0, clientH > 0 {
+                let hostW = screenFrame.width
+                let hostH = screenFrame.height
+
+                if hostW > 0 && hostH > 0 {
+                    let hostAspect = hostW / hostH
+                    let clientAspect = Double(clientW) / Double(clientH)
+
+                    if hostAspect > clientAspect {
+                        let coverageH = clientAspect / hostAspect
+                        let barH = (1.0 - coverageH) / 2.0
+                        finalNormY = (touch.normalizedY - barH) / coverageH
+                    } else {
+                        let coverageW = hostAspect / clientAspect
+                        let barW = (1.0 - coverageW) / 2.0
+                        finalNormX = (touch.normalizedX - barW) / coverageW
+                    }
                 }
-                
-                // Delta-based relative movement (pointer move, no button)
-                if let deltaX = touch.deltaX, let deltaY = touch.deltaY, touch.eventType == .moved {
-                    InputInjector.shared.moveMouseRelative(deltaX: deltaX, deltaY: deltaY)
-                    return
-                }
-                
-                NSLog("[AirCatchHost] Trackpad event: \(touch.eventType)")
-                
-                // Trackpad clicks use current mouse position
-                switch touch.eventType {
-                case .began:
-                    // Mouse down at current position
-                    InputInjector.shared.injectClickAtCurrentPosition(eventType: .began)
-                case .ended:
-                    // Mouse up at current position
-                    InputInjector.shared.injectClickAtCurrentPosition(eventType: .ended)
-                case .rightClick:
-                    InputInjector.shared.injectClickAtCurrentPosition(eventType: .rightClick)
-                case .doubleClick:
-                    InputInjector.shared.injectClickAtCurrentPosition(eventType: .doubleClick)
-                case .dragBegan:
-                    // Start drag (mouse down, hold)
-                    InputInjector.shared.injectClickAtCurrentPosition(eventType: .dragBegan)
-                case .dragEnded:
-                    // End drag (mouse up)
-                    InputInjector.shared.injectClickAtCurrentPosition(eventType: .dragEnded)
-                case .moved:
-                    // Legacy absolute positioning fallback - always use current screen frame
-                    let screenFrame = self.mainScreenFrame()
-                    InputInjector.shared.moveMouse(xPercent: touch.normalizedX, yPercent: touch.normalizedY, in: screenFrame)
-                default:
-                    break
-                }
-            } else {
-                // Non-trackpad (direct touch) uses absolute positioning - ALWAYS query current screen frame
-                // This ensures resolution changes are picked up immediately
-                let screenFrame = self.mainScreenFrame()
-                InputInjector.shared.injectClick(
-                    xPercent: touch.normalizedX,
-                    yPercent: touch.normalizedY,
-                    eventType: touch.eventType,
-                    in: screenFrame
-                )
             }
+
+            finalNormX = max(0, min(1, finalNormX))
+            finalNormY = max(0, min(1, finalNormY))
+
+            InputInjector.shared.injectClick(
+                xPercent: finalNormX,
+                yPercent: finalNormY,
+                eventType: touch.eventType,
+                in: screenFrame
+            )
         }
+    }
+    
+    /// Returns the frame of the currently active target display (main or virtual)
+    private func targetDisplayFrame() -> CGRect {
+        if isExtendedDisplayActive, let frame = virtualDisplayManager.getVirtualDisplayFrame() {
+            return frame
+        }
+        // Use CoreGraphics for source-of-truth frame (Y-down, instant update)
+        if let targetFrame = targetScreenFrame {
+            return targetFrame
+        }
+        return CGDisplayBounds(CGMainDisplayID())
     }
     
     private func mainScreenFrame() -> CGRect {
@@ -453,11 +479,15 @@ final class HostManager: ObservableObject {
     
     private func handleScrollEvent(_ payload: Data) {
         guard let scroll = try? JSONDecoder().decode(ScrollEvent.self, from: payload) else {
+            #if DEBUG
             NSLog("[AirCatchHost] Failed to decode scroll event")
+            #endif
             return
         }
         
+        #if DEBUG
         NSLog("[AirCatchHost] Received scroll event: deltaX=\(scroll.deltaX), deltaY=\(scroll.deltaY)")
+        #endif
         
         Task { @MainActor in
             // Get current mouse position for scroll location
@@ -474,31 +504,6 @@ final class HostManager: ObservableObject {
         }
     }
 
-    private func handleKeyboardEvent(_ payload: Data) {
-        guard let evt = try? JSONDecoder().decode(KeyboardEvent.self, from: payload) else {
-            NSLog("[AirCatchHost] Failed to decode keyboard event")
-            return
-        }
-
-        if let text = evt.characters, !text.isEmpty {
-            // Only type on keyDown to avoid doubling.
-            if evt.isKeyDown {
-                InputInjector.shared.typeText(text)
-            }
-            return
-        }
-
-        // Note: keyCode 0 is the 'A' key in macOS, so we must NOT filter it out!
-        guard evt.isKeyDown else { return }
-        InputInjector.shared.pressKey(
-            virtualKey: CGKeyCode(evt.keyCode),
-            shift: evt.modifiers.shift,
-            control: evt.modifiers.control,
-            option: evt.modifiers.option,
-            command: evt.modifiers.command
-        )
-    }
-    
     private nonisolated func handleClientDisconnect(_ connection: NWConnection) {
         NSLog("[AirCatchHost] Client disconnected: \(connection.endpoint)")
         
@@ -518,24 +523,22 @@ final class HostManager: ObservableObject {
     private func startStreaming(clientMaxWidth: Int? = nil, clientMaxHeight: Int? = nil) async {
         guard screenStreamer == nil else { return }
         
+        if let w = clientMaxWidth, let h = clientMaxHeight {
+            self.currentClientDimensions = (w, h)
+        } else {
+            self.currentClientDimensions = nil
+        }
+        
         NSLog("[AirCatchHost] Starting stream with preset: \(currentQuality.displayName)")
         screenStreamer = ScreenStreamer(
             preset: currentQuality,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
-            targetDisplayID: targetDisplayID
-        ) { [weak self] compressedFrame in
-            self?.broadcastVideoFrame(compressedFrame)
-        } onAudio: { audioData in
-            // Audio rides on TCP for reliability and ordering.
-            NetworkManager.shared.broadcastTCP(type: .audioPCM, payload: audioData)
-
-            // If a client is connected via MPC, send audio there too.
-            // (Video is still primarily Network.framework; this just enables audio for input-only MPC sessions.)
-            Task { @MainActor in
-                self.mpcHost.broadcast(type: .audioPCM, payload: audioData, mode: .unreliable)
+            onFrame: { [weak self] compressedFrame in
+                self?.broadcastVideoFrame(compressedFrame)
             }
-        }
+        )
+
         
         do {
             try await screenStreamer?.start()
@@ -572,45 +575,93 @@ final class HostManager: ObservableObject {
         screenStreamer?.stop()
         screenStreamer = nil
         isStreaming = false
+        
+        // Destroy virtual display if active
+        destroyVirtualDisplayIfNeeded()
+        
         postStatusChange()
         NSLog("[AirCatchHost] Screen streaming stopped")
     }
 
+    // MARK: - Virtual Display Management
+    
+    private func destroyVirtualDisplayIfNeeded() {
+        guard isExtendedDisplayActive else { return }
+        virtualDisplayManager.destroyVirtualDisplay()
+        isExtendedDisplayActive = false
+        currentDisplayConfig = nil
+        NSLog("[AirCatchHost] Virtual display destroyed")
+    }
+    
     // MARK: - Display Selection
 
     private func configureTargetDisplay(extended: Bool) {
-        let mainID = CGMainDisplayID()
-
-        let screenIDs: [CGDirectDisplayID] = NSScreen.screens.compactMap { screen in
-            let key = NSDeviceDescriptionKey("NSScreenNumber")
-            guard let num = screen.deviceDescription[key] as? NSNumber else { return nil }
-            return CGDirectDisplayID(num.uint32Value)
-        }
-
-        let chosenID: CGDirectDisplayID?
         if extended {
-            chosenID = screenIDs.first(where: { $0 != mainID }) ?? mainID
+            // Create virtual display with default settings
+            let config = ExtendedDisplayConfig(mode: .extend, position: .right)
+            configureTargetDisplay(config: config, clientWidth: nil, clientHeight: nil)
         } else {
-            chosenID = mainID
+            // Use main display (mirror mode)
+            destroyVirtualDisplayIfNeeded()
+            let mainID = CGMainDisplayID()
+            self.targetDisplayID = mainID
+            self.targetScreenFrame = NSScreen.main?.frame
+            NSLog("[AirCatchHost] Using main display: \(mainID)")
         }
-
-        self.targetDisplayID = chosenID
-
-        if let chosenID,
-           let chosenScreen = NSScreen.screens.first(where: {
-               let key = NSDeviceDescriptionKey("NSScreenNumber")
-               guard let num = $0.deviceDescription[key] as? NSNumber else { return false }
-               return CGDirectDisplayID(num.uint32Value) == chosenID
-           }) {
-            self.targetScreenFrame = chosenScreen.frame
-        } else {
+    }
+    
+    private func configureTargetDisplay(config: ExtendedDisplayConfig?, clientWidth: Int?, clientHeight: Int?) {
+        guard let config = config, config.mode == .extend else {
+            // Mirror mode - use main display
+            destroyVirtualDisplayIfNeeded()
+            let mainID = CGMainDisplayID()
+            self.targetDisplayID = mainID
+            // IMPORTANT: Set to nil so targetDisplayFrame() uses dynamic CGDisplayBounds(mainID)
+            // This ensures we always get the *current* resolution if it changes mid-stream
             self.targetScreenFrame = nil
+            self.isExtendedDisplayActive = false
+            NSLog("[AirCatchHost] Using main display (mirror mode): \(mainID)")
+            return
         }
-
-        if extended {
-            NSLog("[AirCatchHost] Extended display requested. Using displayID=\(String(describing: chosenID)) frame=\(String(describing: targetScreenFrame))")
+        
+        // Extend mode - create virtual display
+        guard virtualDisplayManager.isSupported else {
+            NSLog("[AirCatchHost] Virtual display not supported: \(virtualDisplayManager.unavailableReason ?? "Unknown")")
+            // Fall back to main display
+            let mainID = CGMainDisplayID()
+            self.targetDisplayID = mainID
+            self.targetScreenFrame = NSScreen.main?.frame
+            self.isExtendedDisplayActive = false
+            return
+        }
+        
+        // Calculate optimal resolution based on client screen
+        let width: Int
+        let height: Int
+        if let clientWidth = clientWidth, let clientHeight = clientHeight {
+            // Use client's native resolution for best quality
+            // For HiDPI, we use half the pixel dimensions as logical resolution
+            let optimal = VirtualDisplayManager.optimalResolution(for: clientWidth, iPadHeight: clientHeight)
+            width = optimal.width
+            height = optimal.height
         } else {
-            NSLog("[AirCatchHost] Using main display. displayID=\(String(describing: chosenID))")
+            // Default to a reasonable resolution
+            width = 1920
+            height = 1080
+        }
+        
+        // Create the virtual display
+        if let displayID = virtualDisplayManager.createVirtualDisplay(config: config, width: width, height: height) {
+            self.targetDisplayID = displayID
+            self.targetScreenFrame = virtualDisplayManager.getVirtualDisplayFrame()
+            self.isExtendedDisplayActive = true
+            NSLog("[AirCatchHost] Created virtual display: \(displayID), size: \(width)x\(height), position: \(config.position.rawValue)")
+        } else {
+            NSLog("[AirCatchHost] Failed to create virtual display, falling back to main display")
+            let mainID = CGMainDisplayID()
+            self.targetDisplayID = mainID
+            self.targetScreenFrame = NSScreen.main?.frame
+            self.isExtendedDisplayActive = false
         }
     }
     
@@ -618,7 +669,8 @@ final class HostManager: ObservableObject {
     private let broadcastQueue = DispatchQueue(label: "com.aircatch.broadcast", qos: .userInteractive)
 
     private func pruneCachedFramesIfNeeded(now: TimeInterval = Date().timeIntervalSinceReferenceDate) {
-        guard losslessVideoEnabled, !cachedFrames.isEmpty else { return }
+        // Always prune old frames to prevent memory leaks, regardless of lossless mode
+        guard !cachedFrames.isEmpty else { return }
 
         let oldKeys = cachedFrames
             .filter { now - $0.value.createdAt > 1.0 }
@@ -686,10 +738,10 @@ final class HostManager: ObservableObject {
                 var fId = frameId.bigEndian
                 var idx = UInt16(i).bigEndian
                 var total = UInt16(totalChunks).bigEndian
-                
-                packet.append(contentsOf: withUnsafeBytes(of: &fId) { Array($0) })
-                packet.append(contentsOf: withUnsafeBytes(of: &idx) { Array($0) })
-                packet.append(contentsOf: withUnsafeBytes(of: &total) { Array($0) })
+
+                withUnsafeBytes(of: &fId) { packet.append(contentsOf: $0) }
+                withUnsafeBytes(of: &idx) { packet.append(contentsOf: $0) }
+                withUnsafeBytes(of: &total) { packet.append(contentsOf: $0) }
                 packet.append(chunkData)
                 
                 // Send chunk via UDP

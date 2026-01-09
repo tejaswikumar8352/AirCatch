@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E12BC38D2F10F3B5002739A2 /* DriverKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E12BC34D2F10F2AF002739A2 /* DriverKit.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		B7FFBE732EEF586300E3750E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -44,6 +48,8 @@
 		B7FFBE9C2EEF58A700E3750E /* AirCatchClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AirCatchClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7FFBEAA2EEF58A700E3750E /* AirCatchClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirCatchClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7FFBEB42EEF58A700E3750E /* AirCatchClientUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirCatchClientUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E12BC34D2F10F2AF002739A2 /* DriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DriverKit.framework; path = System/Library/Frameworks/DriverKit.framework; sourceTree = SDKROOT; };
+		E12BC38C2F10F3B5002739A2 /* com.aircatch.driver.virtualdisplay.dext */ = {isa = PBXFileReference; explicitFileType = "wrapper.driver-extension"; includeInIndex = 0; path = com.aircatch.driver.virtualdisplay.dext; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -53,6 +59,13 @@
 				Info.plist,
 			);
 			target = B7FFBE9B2EEF58A700E3750E /* AirCatchClient */;
+		};
+		E12BC3972F10F3B5002739A2 /* Exceptions for "AirCatchDisplayDriver" folder in "AirCatchDisplayDriver" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E12BC38B2F10F3B5002739A2 /* AirCatchDisplayDriver */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -68,6 +81,24 @@
 				B7D2950F2EEF852F0042027F /* Exceptions for "AirCatchClient" folder in "AirCatchClient" target */,
 			);
 			path = AirCatchClient;
+			sourceTree = "<group>";
+		};
+		E12BC34F2F10F2AF002739A2 /* AirCatchDisplayDriver */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AirCatchDisplayDriver;
+			sourceTree = "<group>";
+		};
+		E12BC36F2F10F34B002739A2 /* AirCatchDisplayDriver */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AirCatchDisplayDriver;
+			sourceTree = "<group>";
+		};
+		E12BC38E2F10F3B5002739A2 /* AirCatchDisplayDriver */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E12BC3972F10F3B5002739A2 /* Exceptions for "AirCatchDisplayDriver" folder in "AirCatchDisplayDriver" target */,
+			);
+			path = AirCatchDisplayDriver;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -115,6 +146,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E12BC3892F10F3B5002739A2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E12BC38D2F10F3B5002739A2 /* DriverKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -123,6 +162,10 @@
 			children = (
 				B7FFBE652EEF586300E3750E /* AirCatchHost */,
 				B7FFBE9D2EEF58A700E3750E /* AirCatchClient */,
+				E12BC34F2F10F2AF002739A2 /* AirCatchDisplayDriver */,
+				E12BC36F2F10F34B002739A2 /* AirCatchDisplayDriver */,
+				E12BC38E2F10F3B5002739A2 /* AirCatchDisplayDriver */,
+				E12BC34C2F10F2AF002739A2 /* Frameworks */,
 				B7FFBE332EEF50A000E3750E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -136,11 +179,30 @@
 				B7FFBE9C2EEF58A700E3750E /* AirCatchClient.app */,
 				B7FFBEAA2EEF58A700E3750E /* AirCatchClientTests.xctest */,
 				B7FFBEB42EEF58A700E3750E /* AirCatchClientUITests.xctest */,
+				E12BC38C2F10F3B5002739A2 /* com.aircatch.driver.virtualdisplay.dext */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
+		E12BC34C2F10F2AF002739A2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				E12BC34D2F10F2AF002739A2 /* DriverKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		E12BC3872F10F3B5002739A2 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
 		B7FFBE632EEF586300E3750E /* AirCatchHost */ = {
@@ -267,6 +329,29 @@
 			productReference = B7FFBEB42EEF58A700E3750E /* AirCatchClientUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		E12BC38B2F10F3B5002739A2 /* AirCatchDisplayDriver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E12BC3982F10F3B5002739A2 /* Build configuration list for PBXNativeTarget "AirCatchDisplayDriver" */;
+			buildPhases = (
+				E12BC3872F10F3B5002739A2 /* Headers */,
+				E12BC3882F10F3B5002739A2 /* Sources */,
+				E12BC3892F10F3B5002739A2 /* Frameworks */,
+				E12BC38A2F10F3B5002739A2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E12BC38E2F10F3B5002739A2 /* AirCatchDisplayDriver */,
+			);
+			name = AirCatchDisplayDriver;
+			packageProductDependencies = (
+			);
+			productName = AirCatchDisplayDriver;
+			productReference = E12BC38C2F10F3B5002739A2 /* com.aircatch.driver.virtualdisplay.dext */;
+			productType = "com.apple.product-type.driver-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -299,6 +384,9 @@
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = B7FFBE9B2EEF58A700E3750E;
 					};
+					E12BC38B2F10F3B5002739A2 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 				};
 			};
 			buildConfigurationList = B7FFBE2D2EEF50A000E3750E /* Build configuration list for PBXProject "AirCatch" */;
@@ -321,6 +409,7 @@
 				B7FFBE9B2EEF58A700E3750E /* AirCatchClient */,
 				B7FFBEA92EEF58A700E3750E /* AirCatchClientTests */,
 				B7FFBEB32EEF58A700E3750E /* AirCatchClientUITests */,
+				E12BC38B2F10F3B5002739A2 /* AirCatchDisplayDriver */,
 			);
 		};
 /* End PBXProject section */
@@ -368,6 +457,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E12BC38A2F10F3B5002739A2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -407,6 +503,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B7FFBEB02EEF58A700E3750E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E12BC3882F10F3B5002739A2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -562,6 +665,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = AirCatchHost/AirCatchHost.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -580,6 +684,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHost;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -598,6 +703,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = AirCatchHost/AirCatchHost.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -616,6 +722,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.teja.AirCatchHost;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -719,6 +826,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = AirCatchClient/AirCatchClient.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VLQA7VVBTU;
@@ -764,6 +872,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = AirCatchClient/AirCatchClient.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VLQA7VVBTU;
@@ -896,6 +1005,52 @@
 			};
 			name = Release;
 		};
+		E12BC3992F10F3B5002739A2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AirCatchDisplayDriver/AirCatchDisplayDriver.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				DRIVERKIT_DEPLOYMENT_TARGET = 25.2;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AirCatchDisplayDriver/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aircatch.driver.virtualdisplay;
+				PRODUCT_NAME = "$(inherited)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RUN_CLANG_STATIC_ANALYZER = YES;
+				SDKROOT = driverkit;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		E12BC39A2F10F3B5002739A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AirCatchDisplayDriver/AirCatchDisplayDriver.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				DRIVERKIT_DEPLOYMENT_TARGET = 25.2;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AirCatchDisplayDriver/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aircatch.driver.virtualdisplay;
+				PRODUCT_NAME = "$(inherited)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RUN_CLANG_STATIC_ANALYZER = YES;
+				SDKROOT = driverkit;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -958,6 +1113,15 @@
 			buildConfigurations = (
 				B7FFBEC32EEF58A700E3750E /* Debug */,
 				B7FFBEC42EEF58A700E3750E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E12BC3982F10F3B5002739A2 /* Build configuration list for PBXNativeTarget "AirCatchDisplayDriver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E12BC3992F10F3B5002739A2 /* Debug */,
+				E12BC39A2F10F3B5002739A2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -2,7 +2,8 @@
 //  VideoStreamOverlay.swift
 //  AirCatchClient
 //
-//  Displays the decoded video stream with proper aspect ratio (letterboxed).
+//  Displays the decoded video stream with aspect-fit (letterboxing/pillarboxing).
+//  Touch coordinates are correctly mapped to the video content area.
 //
 
 import SwiftUI
@@ -17,28 +18,36 @@ struct VideoStreamOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Solid black background for proper letterboxing/pillarboxing
+                // Solid black background for letterbox/pillarbox areas
                 Color.black
                 
                 if let pixelBuffer = viewModel.pixelBuffer {
+                    // Get video dimensions
+                    let videoWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+                    let videoHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+                    let videoSize = CGSize(width: videoWidth, height: videoHeight)
+                    
+                    // Calculate aspect-fit frame
+                    let contentFrame = calculateAspectFitFrame(
+                        videoSize: videoSize,
+                        containerSize: geometry.size
+                    )
+                    
                     ZStack {
+                        // Video layer - displays at aspect-fit size
                         MetalVideoView(
                             pixelBuffer: Binding(
                                 get: { viewModel.pixelBuffer },
                                 set: { _ in }
                             )
                         )
-                        .contentShape(Rectangle()) // Essential for layout
                         
-                        // Unified Input Overlay (Touch + Mouse)
-                        // Placed on top to capture all input
+                        // Touch layer - same size as video content
+                        // Touch coordinates will be normalized to this size
                         MouseInputView()
                     }
-                    .frame(
-                        width: videoRect(in: geometry.size, pixelBuffer: pixelBuffer).width,
-                        height: videoRect(in: geometry.size, pixelBuffer: pixelBuffer).height
-                    )
-                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    .frame(width: contentFrame.width, height: contentFrame.height)
+                    .position(x: contentFrame.midX, y: contentFrame.midY)
                     
                 } else {
                     ProgressView()
@@ -61,45 +70,43 @@ struct VideoStreamOverlay: View {
         .ignoresSafeArea()
     }
     
-    // MARK: - Video Rect Calculation
-    
-    private func aspectRatio(pixelBuffer: CVPixelBuffer?) -> CGFloat {
-        if let pixelBuffer {
-            let width = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
-            let height = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-            if width > 0 && height > 0 {
-                return width / height
-            }
+    /// Calculate aspect-fit frame (letterboxed/pillarboxed) for video content
+    private func calculateAspectFitFrame(videoSize: CGSize, containerSize: CGSize) -> CGRect {
+        guard videoSize.width > 0, videoSize.height > 0,
+              containerSize.width > 0, containerSize.height > 0 else {
+            return CGRect(origin: .zero, size: containerSize)
         }
-        if let info = clientManager.screenInfo {
-            return CGFloat(info.width) / CGFloat(info.height)
-        }
-        return 16.0 / 9.0
-    }
-    
-    /// Calculates the letterboxed video rect within the container.
-    private func videoRect(in containerSize: CGSize, pixelBuffer: CVPixelBuffer) -> CGSize {
-        let videoAspect = aspectRatio(pixelBuffer: pixelBuffer)
+        
+        let videoAspect = videoSize.width / videoSize.height
         let containerAspect = containerSize.width / containerSize.height
         
+        let fitWidth: CGFloat
+        let fitHeight: CGFloat
+        
         if videoAspect > containerAspect {
-            let width = containerSize.width
-            let height = width / videoAspect
-            return CGSize(width: width, height: height)
+            // Video is wider than container - fit to width, letterbox top/bottom
+            fitWidth = containerSize.width
+            fitHeight = containerSize.width / videoAspect
         } else {
-            let height = containerSize.height
-            let width = height * videoAspect
-            return CGSize(width: width, height: height)
+            // Video is taller than container - fit to height, pillarbox left/right
+            fitHeight = containerSize.height
+            fitWidth = containerSize.height * videoAspect
         }
+        
+        let x = (containerSize.width - fitWidth) / 2
+        let y = (containerSize.height - fitHeight) / 2
+        
+        return CGRect(x: x, y: y, width: fitWidth, height: fitHeight)
     }
 }
 
-// MARK: - View Model
+
+// MARK: - View Model (Immediate Frame Display)
 
 final class VideoStreamViewModel: NSObject, ObservableObject {
     @Published var pixelBuffer: CVPixelBuffer?
     var lastTouchLocation: CGPoint?
-    private let decoder = H264Decoder()
+    private let decoder = VideoDecoder()
     
     override init() {
         super.init()
@@ -118,17 +125,27 @@ final class VideoStreamViewModel: NSObject, ObservableObject {
     }
 }
 
-extension VideoStreamViewModel: H264DecoderDelegate {
-    func decoder(_ decoder: H264Decoder, didOutputPixelBuffer pixelBuffer: CVPixelBuffer, presentationTime: CMTime) {
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        NSLog("[VideoStreamViewModel] Received pixelBuffer: \(width)x\(height)")
-        Task { @MainActor in
+
+extension VideoStreamViewModel: VideoDecoderDelegate {
+    private static var frameLogCount = 0
+    
+    func decoder(_ decoder: VideoDecoder, didOutputPixelBuffer pixelBuffer: CVPixelBuffer, presentationTime: CMTime) {
+        // Only log first frame to reduce noise
+        VideoStreamViewModel.frameLogCount += 1
+        if VideoStreamViewModel.frameLogCount == 1 {
+            let width = CVPixelBufferGetWidth(pixelBuffer)
+            let height = CVPixelBufferGetHeight(pixelBuffer)
+            NSLog("[VideoStreamViewModel] Streaming started: %dx%d", width, height)
+        }
+        
+        // Display frame immediately for lowest latency
+        DispatchQueue.main.async {
             self.pixelBuffer = pixelBuffer
         }
     }
+
     
-    func decoder(_ decoder: H264Decoder, didEncounterError error: Error) {
+    func decoder(_ decoder: VideoDecoder, didEncounterError error: Error) {
         NSLog("[VideoStreamViewModel] Decode error: \(error)")
         Task { @MainActor in
             self.pixelBuffer = nil
