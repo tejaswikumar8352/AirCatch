@@ -75,32 +75,31 @@ enum NetworkMode: String, Codable {
 // 3 presets: one for each use case
 
 enum QualityPreset: String, Codable, CaseIterable {
-    case performance  // Lowest latency, great for interaction-heavy use
-    case balanced     // Default - best balance of quality and responsiveness
-    case quality      // Maximum quality - best for static content/reading
+    case performance  // 25 Mbps: Smooth even on weaker WiFi
+    case balanced     // 45 Mbps: The sweet spot for most users
+    case quality      // 80 Mbps: Maximum fidelity (Wired/6E recommended)
     
     var bitrate: Int {
         switch self {
-        case .performance: return 14_000_000  // 14 Mbps - minimal network load
-        case .balanced: return 20_000_000     // 20 Mbps - sweet spot
-        case .quality: return 30_000_000      // 30 Mbps - maximum quality
+        case .performance: return 25_000_000  // 25 Mbps
+        case .balanced: return 45_000_000     // 45 Mbps
+        case .quality: return 80_000_000      // 80 Mbps
         }
     }
     
     var frameRate: Int {
-        return 60  // Always 60 FPS
+        return 60
     }
     
-    /// Always use HEVC for best quality-per-bit
     var useHEVC: Bool {
         return true
     }
     
     var displayName: String {
         switch self {
-        case .performance: return "Performance"
-        case .balanced: return "Balanced"
-        case .quality: return "Quality"
+        case .performance: return "Performance (25 Mbps)"
+        case .balanced: return "Balanced (45 Mbps)"
+        case .quality: return "Quality (80 Mbps)"
         }
     }
     
@@ -126,6 +125,7 @@ enum PacketType: UInt8 {
     case handshakeAck = 0x04
     case disconnect = 0x05
     case scrollEvent = 0x06
+    case keyEvent = 0x07       // Keyboard input
     case qualityReport = 0x08  // Client reports quality metrics
     case ping = 0x09
     case pong = 0x0A
@@ -134,6 +134,7 @@ enum PacketType: UInt8 {
     case pairingFailed = 0x0D  // PIN mismatch
     case videoFrameChunkNack = 0x0E // Client requests resend of missing chunks (lossless mode)
     case audioPCM = 0x0F
+    case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
 }
 
 struct Packet {
@@ -284,6 +285,49 @@ struct ScrollEvent: Codable {
     init(deltaX: Double, deltaY: Double, timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.deltaX = deltaX
         self.deltaY = deltaY
+        self.timestamp = timestamp
+    }
+}
+
+// MARK: - Key Event
+
+/// Keyboard modifier flags (matches macOS CGEventFlags)
+struct KeyModifiers: OptionSet, Codable {
+    let rawValue: UInt32
+    
+    static let shift     = KeyModifiers(rawValue: 1 << 0)
+    static let control   = KeyModifiers(rawValue: 1 << 1)
+    static let option    = KeyModifiers(rawValue: 1 << 2)
+    static let command   = KeyModifiers(rawValue: 1 << 3)
+    static let capsLock  = KeyModifiers(rawValue: 1 << 4)
+}
+
+/// Keyboard event sent from client to host
+struct KeyEvent: Codable {
+    let keyCode: UInt16       // macOS virtual key code
+    let character: String?    // The character typed (for text input)
+    let modifiers: KeyModifiers
+    let isKeyDown: Bool       // true = key press, false = key release
+    let timestamp: TimeInterval
+    
+    init(keyCode: UInt16, character: String? = nil, modifiers: KeyModifiers = [], isKeyDown: Bool, timestamp: TimeInterval = Date().timeIntervalSince1970) {
+        self.keyCode = keyCode
+        self.character = character
+        self.modifiers = modifiers
+        self.isKeyDown = isKeyDown
+        self.timestamp = timestamp
+    }
+}
+
+/// Media key event for system controls (volume, brightness, play/pause, etc.)
+struct MediaKeyEvent: Codable {
+    let mediaKey: Int32       // NX key type (e.g., NX_KEYTYPE_SOUND_UP = 0)
+    let keyCode: UInt16       // Fallback key code
+    let timestamp: TimeInterval
+    
+    init(mediaKey: Int32, keyCode: UInt16, timestamp: TimeInterval = Date().timeIntervalSince1970) {
+        self.mediaKey = mediaKey
+        self.keyCode = keyCode
         self.timestamp = timestamp
     }
 }

@@ -130,6 +130,7 @@ enum PacketType: UInt8 {
     case handshakeAck = 0x04
     case disconnect = 0x05
     case scrollEvent = 0x06
+    case keyEvent = 0x07       // Keyboard input
     case qualityReport = 0x08  // Client reports quality metrics
     case ping = 0x09
     case pong = 0x0A
@@ -137,6 +138,7 @@ enum PacketType: UInt8 {
     case pairingFailed = 0x0D  // PIN mismatch
     case videoFrameChunkNack = 0x0E // Client requests resend of missing chunks (lossless mode)
     case audioPCM = 0x0F
+    case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
 }
 
 struct Packet {
@@ -280,6 +282,49 @@ struct ScrollEvent: Codable {
     init(deltaX: Double, deltaY: Double, timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.deltaX = deltaX
         self.deltaY = deltaY
+        self.timestamp = timestamp
+    }
+}
+
+// MARK: - Key Event
+
+/// Keyboard modifier flags (matches macOS CGEventFlags)
+struct KeyModifiers: OptionSet, Codable {
+    let rawValue: UInt32
+    
+    static let shift     = KeyModifiers(rawValue: 1 << 0)
+    static let control   = KeyModifiers(rawValue: 1 << 1)
+    static let option    = KeyModifiers(rawValue: 1 << 2)
+    static let command   = KeyModifiers(rawValue: 1 << 3)
+    static let capsLock  = KeyModifiers(rawValue: 1 << 4)
+}
+
+/// Keyboard event sent from client to host
+struct KeyEvent: Codable {
+    let keyCode: UInt16       // macOS virtual key code
+    let character: String?    // The character typed (for text input)
+    let modifiers: KeyModifiers
+    let isKeyDown: Bool       // true = key press, false = key release
+    let timestamp: TimeInterval
+    
+    init(keyCode: UInt16, character: String? = nil, modifiers: KeyModifiers = [], isKeyDown: Bool, timestamp: TimeInterval = Date().timeIntervalSince1970) {
+        self.keyCode = keyCode
+        self.character = character
+        self.modifiers = modifiers
+        self.isKeyDown = isKeyDown
+        self.timestamp = timestamp
+    }
+}
+
+/// Media key event for system controls (volume, brightness, play/pause, etc.)
+struct MediaKeyEvent: Codable {
+    let mediaKey: Int32       // NX key type (e.g., NX_KEYTYPE_SOUND_UP = 0)
+    let keyCode: UInt16       // Fallback key code
+    let timestamp: TimeInterval
+    
+    init(mediaKey: Int32, keyCode: UInt16, timestamp: TimeInterval = Date().timeIntervalSince1970) {
+        self.mediaKey = mediaKey
+        self.keyCode = keyCode
         self.timestamp = timestamp
     }
 }

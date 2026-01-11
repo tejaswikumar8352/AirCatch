@@ -210,6 +210,14 @@ final class HostManager: ObservableObject {
             Task { @MainActor in
                 self.handleScrollEvent(packet.payload)
             }
+        case .keyEvent:
+            Task { @MainActor in
+                self.handleKeyEvent(packet.payload)
+            }
+        case .mediaKeyEvent:
+            Task { @MainActor in
+                self.handleMediaKeyEvent(packet.payload)
+            }
         case .disconnect:
             Task { @MainActor in
                 self.handleClientDisconnect(connection)
@@ -245,6 +253,10 @@ final class HostManager: ObservableObject {
             handleTouchEvent(packet.payload)
         case .scrollEvent:
             handleScrollEvent(packet.payload)
+        case .keyEvent:
+            handleKeyEvent(packet.payload)
+        case .mediaKeyEvent:
+            handleMediaKeyEvent(packet.payload)
         case .audioPCM:
             break
         case .disconnect:
@@ -350,6 +362,12 @@ final class HostManager: ObservableObject {
             if let preferredQuality = handshakeRequest?.preferredQuality {
                 currentQuality = preferredQuality
                 NSLog("[AirCatchHost] Using client's preferred quality: \(preferredQuality.displayName)")
+                
+                // Adaptive: Apply new bitrate/FPS immediately if streaming
+                if let streamer = self.screenStreamer {
+                    streamer.setBitrate(currentQuality.bitrate)
+                    streamer.setFrameRate(currentQuality.frameRate)
+                }
             }
 
             // Client transport preference
@@ -502,6 +520,40 @@ final class HostManager: ObservableObject {
                 )
             }
         }
+    }
+    
+    private func handleKeyEvent(_ payload: Data) {
+        guard let keyEvent = try? JSONDecoder().decode(KeyEvent.self, from: payload) else {
+            #if DEBUG
+            NSLog("[AirCatchHost] Failed to decode key event")
+            #endif
+            return
+        }
+        
+        #if DEBUG
+        NSLog("[AirCatchHost] Received key event: keyCode=\(keyEvent.keyCode) char=\(keyEvent.character ?? "") down=\(keyEvent.isKeyDown)")
+        #endif
+        
+        InputInjector.shared.injectKeyEvent(
+            keyCode: keyEvent.keyCode,
+            modifiers: keyEvent.modifiers,
+            isKeyDown: keyEvent.isKeyDown
+        )
+    }
+    
+    private func handleMediaKeyEvent(_ payload: Data) {
+        guard let mediaEvent = try? JSONDecoder().decode(MediaKeyEvent.self, from: payload) else {
+            #if DEBUG
+            NSLog("[AirCatchHost] Failed to decode media key event")
+            #endif
+            return
+        }
+        
+        #if DEBUG
+        NSLog("[AirCatchHost] Received media key event: mediaKey=\(mediaEvent.mediaKey)")
+        #endif
+        
+        InputInjector.shared.injectMediaKeyEvent(mediaKey: mediaEvent.mediaKey)
     }
 
     private nonisolated func handleClientDisconnect(_ connection: NWConnection) {

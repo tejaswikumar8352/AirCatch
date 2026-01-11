@@ -52,7 +52,7 @@ struct MenuBarView: View {
                 Label("Streaming Active", systemImage: "antenna.radiowaves.left.and.right")
                     .foregroundColor(.green)
             } else {
-                Label("Waiting for connection...", systemImage: "hourglass")
+                Label("Waiting for ...", systemImage: "hourglass")
                     .foregroundColor(.secondary)
             }
             

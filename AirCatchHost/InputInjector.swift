@@ -319,5 +319,80 @@ final class InputInjector {
         return CGPoint(x: cgX, y: cgY)
     }
 
+    // MARK: - Keyboard Input
+    
+    /// Injects a keyboard event into the system.
+    /// - Parameters:
+    ///   - keyCode: macOS virtual key code
+    ///   - modifiers: Modifier keys (shift, control, option, command)
+    ///   - isKeyDown: true for key press, false for key release
+    func injectKeyEvent(keyCode: UInt16, modifiers: KeyModifiers, isKeyDown: Bool) {
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(keyCode), keyDown: isKeyDown) else {
+            #if DEBUG
+            NSLog("[InputInjector] Failed to create keyboard event for keyCode: \(keyCode)")
+            #endif
+            return
+        }
+        
+        // Set modifier flags
+        var flags: CGEventFlags = []
+        if modifiers.contains(.shift) {
+            flags.insert(.maskShift)
+        }
+        if modifiers.contains(.control) {
+            flags.insert(.maskControl)
+        }
+        if modifiers.contains(.option) {
+            flags.insert(.maskAlternate)
+        }
+        if modifiers.contains(.command) {
+            flags.insert(.maskCommand)
+        }
+        if modifiers.contains(.capsLock) {
+            flags.insert(.maskAlphaShift)
+        }
+        
+        event.flags = flags
+        event.post(tap: .cghidEventTap)
+        
+        #if DEBUG
+        NSLog("[InputInjector] Injected key event: keyCode=\(keyCode) down=\(isKeyDown)")
+        #endif
+    }
+    
+    /// Injects a media key event (volume, brightness, play/pause, etc.) using HID system events.
+    /// - Parameter mediaKey: The NX key type constant (e.g., NX_KEYTYPE_SOUND_UP = 0)
+    nonisolated func injectMediaKeyEvent(mediaKey: Int32) {
+        // Run on background thread to avoid blocking main thread
+        DispatchQueue.global(qos: .userInteractive).async {
+            // Use IOKit HID post for media keys - the proper macOS way
+            func doKey(down: Bool) {
+                let flags = NSEvent.ModifierFlags(rawValue: (down ? 0xa00 : 0xb00))
+                let data1 = Int((Int(mediaKey) << 16) | ((down ? 0xa : 0xb) << 8))
+                
+                let event = NSEvent.otherEvent(
+                    with: .systemDefined,
+                    location: NSPoint.zero,
+                    modifierFlags: flags,
+                    timestamp: 0,
+                    windowNumber: 0,
+                    context: nil,
+                    subtype: 8,
+                    data1: data1,
+                    data2: -1
+                )
+                event?.cgEvent?.post(tap: .cgSessionEventTap)
+            }
+            
+            doKey(down: true)
+            Thread.sleep(forTimeInterval: 0.05)
+            doKey(down: false)
+            
+            #if DEBUG
+            NSLog("[InputInjector] Injected media key event: mediaKey=\(mediaKey)")
+            #endif
+        }
+    }
+
 }
 

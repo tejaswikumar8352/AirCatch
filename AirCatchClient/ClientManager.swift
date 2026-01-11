@@ -599,7 +599,8 @@ final class ClientManager: ObservableObject {
             deviceModel: UIDevice.current.model,
             screenWidth: maxW,
             screenHeight: maxH,
-            preferredQuality: selectedPreset,
+            // REMOTE OPTIMIZATION: Force Performance preset (25 Mbps) for direct IP/WAN connections
+            preferredQuality: (connectedHost?.isDirectIP == true) ? .performance : selectedPreset,
             displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
             preferLowLatency: true,
@@ -623,8 +624,9 @@ final class ClientManager: ObservableObject {
         let w = max(1, width)
         let h = max(1, height)
 
-        // ~iPad Pro 11" default render size is ~3.98MP. Keep near that budget for clarity.
-        let maxPixels = 4_000_000.0
+        // UNLOCKED: Allow full Retina resolution (approx 5.6MP for iPad Pro 12.9)
+        // M-series chips can easily handle 8MP decoding.
+        let maxPixels = 8_000_000.0 
         let pixels = Double(w) * Double(h)
         guard pixels > maxPixels else { return (w, h) }
 
@@ -811,6 +813,39 @@ final class ClientManager: ObservableObject {
                 mpcClient.send(type: .scrollEvent, payload: data, mode: .reliable)
             case .network:
                 networkManager.sendTCP(type: .scrollEvent, payload: data)
+            }
+        }
+    }
+
+    /// Sends a keyboard event to the Mac host.
+    func sendKeyEvent(keyCode: UInt16, character: String?, modifiers: KeyModifiers, isKeyDown: Bool) {
+        guard state == .connected || state == .streaming else { return }
+        let event = KeyEvent(
+            keyCode: keyCode,
+            character: character,
+            modifiers: modifiers,
+            isKeyDown: isKeyDown
+        )
+        if let data = try? JSONEncoder().encode(event) {
+            switch activeLink {
+            case .aircatch:
+                mpcClient.send(type: .keyEvent, payload: data, mode: .reliable)
+            case .network:
+                networkManager.sendTCP(type: .keyEvent, payload: data)
+            }
+        }
+    }
+    
+    /// Sends a media key event (volume, brightness, play/pause, etc.) to the Mac host.
+    func sendMediaKeyEvent(mediaKey: Int32, keyCode: UInt16) {
+        guard state == .connected || state == .streaming else { return }
+        let event = MediaKeyEvent(mediaKey: mediaKey, keyCode: keyCode)
+        if let data = try? JSONEncoder().encode(event) {
+            switch activeLink {
+            case .aircatch:
+                mpcClient.send(type: .mediaKeyEvent, payload: data, mode: .reliable)
+            case .network:
+                networkManager.sendTCP(type: .mediaKeyEvent, payload: data)
             }
         }
     }

@@ -63,6 +63,11 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
         twoFingerPan.delegate = self
         addGestureRecognizer(twoFingerPan)
         self.twoFingerPanGesture = twoFingerPan
+        
+        // 5. Pinch (Zoom)
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
     }
     
     // MARK: - UIGestureRecognizerDelegate
@@ -143,13 +148,30 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
             // Reset translation so we get delta each time
             gesture.setTranslation(.zero, in: self)
             
-            // Scale for natural scrolling feel - invert Y for natural scrolling direction
+            // Natural scrolling: swipe up = scroll down, swipe down = scroll up
             let scrollScale: CGFloat = 1.0
             let deltaX = translation.x * scrollScale
-            let deltaY = -translation.y * scrollScale  // Invert for natural scrolling
+            let deltaY = translation.y * scrollScale  // Natural scrolling direction
             
             if abs(deltaX) > 0.5 || abs(deltaY) > 0.5 {
                 clientManager?.sendScrollEvent(deltaX: Double(deltaX), deltaY: Double(deltaY))
+            }
+        default:
+            break
+        }
+    }
+    
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began, .changed:
+            let scale = gesture.scale
+            let velocity = gesture.velocity
+            
+            // Send pinch event if there's meaningful change
+            if abs(scale - 1.0) > 0.01 {
+                clientManager?.sendPinchEvent(scale: Double(scale), velocity: Double(velocity))
+                // Reset scale to get delta each time
+                gesture.scale = 1.0
             }
         default:
             break

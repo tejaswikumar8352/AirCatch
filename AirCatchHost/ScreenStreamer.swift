@@ -165,7 +165,6 @@ final class ScreenStreamer: NSObject {
         
         // Choose codec based on quality preset
         let codecType = currentPreset.useHEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
-        let codecName = currentPreset.useHEVC ? "HEVC" : "H.264"
         
         // Force hardware encoding for best quality and performance
         let encoderSpec: [String: Any] = [
@@ -202,17 +201,30 @@ final class ScreenStreamer: NSObject {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         
-        // THE SONY/APPLE SECRET: Perceptual quality optimization
-        // Quality 0.85 uses psychovisual modeling to allocate bits where eyes notice most
-        // This is better than Quality 1.0 which just tries to preserve everything
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.75 as CFNumber)
         
         // Ultra-low latency: process frames immediately
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         
         if currentPreset.useHEVC {
-            // HEVC Main profile (Main10 is overkill for streaming)
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
+            // ----------------------------------------------------------------------
+            // HEVC Main 4:2:2 10-bit - High Chroma Quality
+            // Re-enabled as per user request to use 4:4:2 (4:2:2) with lower bitrate
+            // ----------------------------------------------------------------------
+            
+            let status422 = VTSessionSetProperty(session, 
+                                                 key: kVTCompressionPropertyKey_ProfileLevel, 
+                                                 value: kVTProfileLevel_HEVC_Main42210_AutoLevel)
+            
+            if status422 == noErr {
+                NSLog("[ScreenStreamer] 🚀 SUCCESS: Encoder configured for HEVC Main 4:2:2 10-bit")
+            } else {
+                // Fallback to Main 10-bit if 4:2:2 fails
+                NSLog("[ScreenStreamer] ⚠️ 4:2:2 10-bit unavailable (Error: \(status422)). Falling back to Main 10-bit.")
+                VTSessionSetProperty(session, 
+                                     key: kVTCompressionPropertyKey_ProfileLevel, 
+                                     value: kVTProfileLevel_HEVC_Main10_AutoLevel)
+            }
+            
         } else {
             // H.264 High Profile with CABAC for better compression
             VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
@@ -227,23 +239,34 @@ final class ScreenStreamer: NSObject {
         // Frame rate configuration
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: currentPreset.frameRate as CFNumber)
         
-        // CRITICAL: Variable bitrate with quality target (like PS Remote Play)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: currentPreset.bitrate as CFNumber)
+        // DYNAMIC BITRATE: Respect the selected high-bandwidth QualityPreset
+        // Performance (25Mbps) | Balanced (45Mbps) | Quality (80Mbps)
+        let targetBitrate = currentPreset.bitrate
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: targetBitrate as CFNumber)
         
-        // More generous burst allowance for complex scenes (50% headroom)
-        let bytesPerSecondCap = Int(Double(currentPreset.bitrate) / 8.0 * 1.5)
+        // Adaptive Bitrate Cap: 2.5x target (UNLEASHED)
+        // High burst allowance eliminates scrolling stutter by allowing VBR spikes
+        let bytesPerSecondCap = Int(Double(targetBitrate) / 8.0 * 2.5)
         let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
         
-        // Color accuracy
+        // === COLOR SPACE: P3-D65 for Mac/iPad display matching ===
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ColorPrimaries, value: kCVImageBufferColorPrimaries_P3_D65)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_TransferFunction, value: kCVImageBufferTransferFunction_ITU_R_709_2)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_YCbCrMatrix, value: kCVImageBufferYCbCrMatrix_ITU_R_709_2)
+        
+        // Preserve any HDR metadata if present
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PreserveDynamicHDRMetadata, value: kCFBooleanTrue)
+        
+        // Quality setting: 0.75 (Balanced)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.75 as CFNumber)
         
         let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(session)
         if prepareStatus != noErr {
             NSLog("[ScreenStreamer] ⚠️ Warning: PrepareToEncodeFrames returned status \(prepareStatus)")
         }
         
-        NSLog("[ScreenStreamer] ✅ \(codecName) compression session created: \(currentPreset.bitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - \(currentPreset.displayName)")
+        NSLog("[ScreenStreamer] ✅ HEVC 4:2:2 10-bit compression session created: \(targetBitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - P3-D65 color space")
         self.compressionSession = session
     }
 
@@ -284,7 +307,24 @@ final class ScreenStreamer: NSObject {
     func setBitrate(_ bps: Int) {
         guard let session = compressionSession else { return }
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bps as CFNumber)
+        
+        // Also update data rate limits to match the new target (2.5x cap)
+        let bytesPerSecondCap = Int(Double(bps) / 8.0 * 2.5)
+        let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
+        
         NSLog("[ScreenStreamer] Bitrate updated to \(bps / 1_000_000) Mbps")
+    }
+
+    /// Dynamically updates the frame rate property of the encoder.
+    /// Note: This doesn't change the screen capture rate (controlled by SCStreamConfiguration),
+    /// but helps the encoder allocate bits more effectively.
+    func setFrameRate(_ fps: Int) {
+        guard let session = compressionSession else { return }
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
+        // Also update keyframe interval to match 1 second
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
+        NSLog("[ScreenStreamer] Encoder FPS updated to \(fps)")
     }
     
     private var compressCount = 0
