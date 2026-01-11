@@ -99,4 +99,6 @@ This repo also includes an optional DriverKit virtual display component. If you 
 License
 -------
 
-Private & Proprietary. Copyright © 2026 Teja Chowdary.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright © 2026 Teja Chowdary.
