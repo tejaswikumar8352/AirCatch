@@ -172,6 +172,8 @@ struct HandshakeRequest: Codable {
     let displayConfig: ExtendedDisplayConfig?
     /// Requested session features. If nil, host may assume defaults.
     let requestVideo: Bool?
+    /// When true, client requests audio streaming from host.
+    let requestAudio: Bool?
     /// Prefer low-latency transport when host must fall back from AirCatch.
     let preferLowLatency: Bool?
     /// When true, client requests lossless-ish video delivery (UDP + retransmit over TCP).
@@ -185,6 +187,7 @@ struct HandshakeRequest: Codable {
          requestedMode: NetworkMode? = nil,
          displayConfig: ExtendedDisplayConfig? = nil,
          requestVideo: Bool? = nil,
+         requestAudio: Bool? = nil,
          preferLowLatency: Bool? = nil,
          losslessVideo: Bool? = nil,
          deviceId: String? = nil,
@@ -198,6 +201,7 @@ struct HandshakeRequest: Codable {
         self.requestedMode = requestedMode
         self.displayConfig = displayConfig
         self.requestVideo = requestVideo
+        self.requestAudio = requestAudio
         self.preferLowLatency = preferLowLatency
         self.losslessVideo = losslessVideo
         self.deviceId = deviceId

@@ -22,11 +22,23 @@ Discovery uses Bonjour with the service type `_aircatch._udp`. Video frames are 
 
 Connections over the internet or VPN (like Tailscale) are supported via Remote Connect. You enter the host IP manually, and the client automatically switches to the Performance preset (25 Mbps) to accommodate upload constraints.
 
+Audio Streaming
+---------------
+
+AirCatch streams system audio from the Mac to the iPad in high-quality stereo (48kHz). This is perfect for watching videos or gaming. 
+- **Client Control**: You can toggle audio streaming on/off directly from the iPad client using the "Stream Audio" switch in the connection overlay. 
+- **Low Latency**: Audio is captured via ScreenCaptureKit and streamed via UDP to minimize desync.
+
 
 Input and on-screen keyboard
 ----------------------------
 
 AirCatch maps iPad touch gestures into macOS input events on the host. For typing, the client includes a Mac-style on-screen keyboard overlay that can be moved and resized. The keyboard UI is translucent so the desktop remains visible underneath, and the keycaps are styled dark with white legends.
+
+**Voice Typing**: The keyboard features a **Voice Typing** button (replacing the standard Eject key). 
+- **Native Dictation**: Tap the Mic icon to start dictating. It uses iOS's native `SFSpeechRecognizer`, automatically supporting your device's current language (English, Spanish, etc.).
+- **Visual Feedback**: The button turns **Red** when listening.
+- **Direct Injection**: Recognized text is injected directly into the Mac as Unicode text, ensuring compatibility with all apps.
 
 The function row follows Apple’s Mac keyboard layout for F1 through F12. For media/system keys (brightness, volume, playback), the host injects AUX control button events using `NSEvent.otherEvent(with: .systemDefined, subtype: 8, ...)`.
 
@@ -49,6 +61,10 @@ The client discovers a host, connects, and sends a handshake describing its scre
 Build
 -----
 
+**Requirements**:
+- Client: iOS/iPadOS 17.0 or later
+- Host: macOS 14.0 or later (Apple Silicon recommended)
+
 Host (macOS):
 
 ```bash
@@ -64,7 +80,11 @@ xcodebuild -scheme AirCatchClient -destination 'generic/platform=iOS'
 Permissions
 -----------
 
-On macOS, AirCatchHost needs Accessibility permission to inject input events (System Settings → Privacy & Security → Accessibility). On iPadOS, AirCatchClient needs Local Network permission for discovery and connections.
+On macOS, AirCatchHost needs **Accessibility** permission to inject input events (System Settings → Privacy & Security → Accessibility) and **Screen Recording** permission to capture the display.
+
+On iPadOS, AirCatchClient needs:
+- **Local Network** permission for discovery and connections.
+- **Microphone** and **Speech Recognition** permissions for the Voice Typing feature.
 
 Picture in Picture (PiP)
 ------------------------

@@ -65,7 +65,7 @@ final class MPCAirCatchClient: NSObject {
             try session.send(datagram, toPeers: session.connectedPeers, with: mode)
         } catch {
             // Best-effort: transport will fall back via ClientManager timeout/reconnect logic.
-            NSLog("[MPCAirCatchClient] send failed: \(error)")
+            AirCatchLog.error(" send failed: \(error)")
         }
     }
 
@@ -99,7 +99,7 @@ extension MPCAirCatchClient: MCNearbyServiceBrowserDelegate {
     }
 
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-        NSLog("[MPCAirCatchClient] browse failed: \(error)")
+        AirCatchLog.error(" browse failed: \(error)")
     }
 }
 

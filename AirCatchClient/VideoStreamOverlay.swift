@@ -186,7 +186,7 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
         if VideoStreamViewModel.frameLogCount == 1 {
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)
-            NSLog("[VideoStreamViewModel] Streaming started: %dx%d", width, height)
+            AirCatchLog.info("Streaming started: \(width)x\(height)", category: .video)
         }
         
         // Display frame immediately for lowest latency
@@ -197,7 +197,7 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
 
     
     func decoder(_ decoder: VideoDecoder, didEncounterError error: Error) {
-        NSLog("[VideoStreamViewModel] Decode error: \(error)")
+        AirCatchLog.info(" Decode error: \(error)")
         Task { @MainActor in
             self.pixelBuffer = nil
         }

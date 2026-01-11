@@ -12,6 +12,7 @@ import SwiftUI
 
 struct MacKeyboardView: View {
     @EnvironmentObject var clientManager: ClientManager
+    @ObservedObject var speechManager = SpeechManager.shared
     @Binding var isVisible: Bool
     @Binding var position: CGPoint
     @Binding var size: CGSize
@@ -110,7 +111,35 @@ struct MacKeyboardView: View {
             functionKeyButton("F10", icon: "speaker.slash", keyCode: 109, mediaKey: 7, width: 1.0)  // Mute
             functionKeyButton("F11", icon: "speaker.wave.1", keyCode: 103, mediaKey: 1, width: 1.0) // Volume Down
             functionKeyButton("F12", icon: "speaker.wave.3", keyCode: 111, mediaKey: 0, width: 1.0) // Volume Up
-            keyButton("⏏", keyCode: 51, width: 1.0)
+            
+            // Voice Typing Button (Replaces Eject)
+            Button(action: {
+                toggleSpeech()
+            }) {
+                Image(systemName: speechManager.isListening ? "mic.fill" : "mic.slash")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white)
+                    .frame(width: (size.width - 40) / 15 * 1.0, height: (size.height - 60) / 6)
+                    .background(speechManager.isListening ? Color.red : Color.black.opacity(0.8))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(KeyButtonStyle())
+        }
+    }
+    
+    private func toggleSpeech() {
+        if speechManager.isListening {
+            speechManager.stopRecording()
+        } else {
+            do {
+                try speechManager.startRecording { text in
+                    // Send recognized text to host
+                    // keyCode 0 + character string signals Text Injection on Host
+                    clientManager.sendKeyEvent(keyCode: 0, character: text, modifiers: [], isKeyDown: true)
+                }
+            } catch {
+                AirCatchLog.error("Speech start failed: \(error)", category: .input)
+            }
         }
     }
     

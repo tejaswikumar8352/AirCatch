@@ -68,6 +68,7 @@ struct ContentView: View {
                     hostName: pinTargetHost?.name ?? "Mac",
                     pin: $clientManager.enteredPIN,
                     selectedPreset: $clientManager.selectedPreset,
+                    audioEnabled: $clientManager.audioEnabled,
                     connectionOption: $clientManager.connectionOption,
                     showsQualityOptions: true,
                     onConnect: {
@@ -300,6 +301,7 @@ private struct PINEntryOverlay: View {
     let hostName: String
     @Binding var pin: String
     @Binding var selectedPreset: QualityPreset
+    @Binding var audioEnabled: Bool
     @Binding var connectionOption: ClientManager.ConnectionOption
     let showsQualityOptions: Bool
     let onConnect: () -> Void
@@ -343,6 +345,9 @@ private struct PINEntryOverlay: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        
+                        Toggle("Stream Audio", isOn: $audioEnabled)
+                            .toggleStyle(.switch)
                     }
                     .frame(maxWidth: 240, alignment: .leading)
                 }

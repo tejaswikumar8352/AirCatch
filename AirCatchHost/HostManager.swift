@@ -26,6 +26,7 @@ final class HostManager: ObservableObject {
     @Published private(set) var connectedClients = 0
     @Published private(set) var currentPIN: String = "0000"
     @Published var currentQuality: QualityPreset = .balanced
+    @Published var audioStreamingEnabled: Bool = false
     @Published private(set) var availableDisplays: [String] = []
     
     // Network mode detection (for UI only - always local P2P)
@@ -46,7 +47,7 @@ final class HostManager: ObservableObject {
     /// Generates a new random 4-digit PIN
     func regeneratePIN() {
         currentPIN = String(format: "%04d", Int.random(in: 0...9999))
-        NSLog("[AirCatchHost] New PIN generated")
+        AirCatchLog.info("New PIN generated")
     }
     
     // MARK: - Network Components
@@ -134,7 +135,7 @@ final class HostManager: ObservableObject {
                 let tcpPort = networkManager.actualTCPPort
                 
                 guard udpPort > 0 else {
-                    NSLog("[AirCatchHost] Failed to bind UDP listener")
+                    AirCatchLog.error("Failed to bind UDP listener", category: .network)
                     return
                 }
                 
@@ -153,10 +154,10 @@ final class HostManager: ObservableObject {
                 isRunning = true
                 postStatusChange()
                 
-                NSLog("[AirCatchHost] Started - Listening on UDP:\(udpPort) TCP:\(tcpPort)")
+                AirCatchLog.info("Started - Listening on UDP:\(udpPort) TCP:\(tcpPort)", category: .network)
                 
             } catch {
-                NSLog("[AirCatchHost] Failed to start: \(error)")
+                AirCatchLog.error("Failed to start: \(error)", category: .network)
             }
         }
     }
@@ -174,14 +175,14 @@ final class HostManager: ObservableObject {
         connectedClients = 0
         postStatusChange()
         
-        NSLog("[AirCatchHost] Stopped")
+        AirCatchLog.info("Stopped", category: .network)
     }
     
     // MARK: - Packet Handling
     
     private nonisolated func handleIncomingPacket(_ packet: Packet, from endpoint: NWEndpoint?) {
         #if DEBUG
-        NSLog("[AirCatchHost] Received UDP packet type: \(packet.type)")
+        AirCatchLog.debug("Received UDP packet type: \(packet.type)", category: .network)
         #endif
         
         // Register the client endpoint so we can broadcast video frames to it
@@ -334,18 +335,25 @@ final class HostManager: ObservableObject {
     
     private nonisolated func handleHandshake(payload: Data, from connection: NWConnection) {
         #if DEBUG
-        NSLog("[AirCatchHost] Handshake received from: \(connection.endpoint)")
+        AirCatchLog.debug("Handshake received from: \(connection.endpoint)", category: .network)
         #endif
         
         Task { @MainActor in
             // Decode the handshake request to extract PIN
-            let handshakeRequest = try? JSONDecoder().decode(HandshakeRequest.self, from: payload)
+            let handshakeRequest: HandshakeRequest?
+            do {
+                handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
+            } catch {
+                AirCatchLog.error("Failed to decode handshake request: \(error)", category: .network)
+                networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
+                return
+            }
             let receivedPIN = handshakeRequest?.pin ?? ""
             
             // Verify PIN
             if receivedPIN != currentPIN {
                 #if DEBUG
-                NSLog("[AirCatchHost] PIN mismatch for: \(connection.endpoint)")
+                AirCatchLog.debug("PIN mismatch for: \(connection.endpoint)", category: .network)
                 #endif
                 // Send pairing failed response
                 networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
@@ -353,7 +361,7 @@ final class HostManager: ObservableObject {
             }
             
             #if DEBUG
-            NSLog("[AirCatchHost] PIN verified successfully for: \(connection.endpoint)")
+            AirCatchLog.debug("PIN verified successfully for: \(connection.endpoint)", category: .network)
             #endif
             connectedClients += 1
             
@@ -361,7 +369,7 @@ final class HostManager: ObservableObject {
             let previousQuality = currentQuality
             if let preferredQuality = handshakeRequest?.preferredQuality {
                 currentQuality = preferredQuality
-                NSLog("[AirCatchHost] Using client's preferred quality: \(preferredQuality.displayName)")
+                AirCatchLog.info("Using client's preferred quality: \(preferredQuality.displayName)", category: .video)
                 
                 // Adaptive: Apply new bitrate/FPS immediately if streaming
                 if let streamer = self.screenStreamer {
@@ -381,6 +389,7 @@ final class HostManager: ObservableObject {
 
             // Session features
             let wantsVideo = handshakeRequest?.requestVideo ?? true
+            let wantsAudio = handshakeRequest?.requestAudio ?? false
             
             postStatusChange()
             
@@ -389,14 +398,16 @@ final class HostManager: ObservableObject {
                 if !isStreaming {
                     await startStreaming(
                         clientMaxWidth: handshakeRequest?.screenWidth,
-                        clientMaxHeight: handshakeRequest?.screenHeight
+                        clientMaxHeight: handshakeRequest?.screenHeight,
+                        audioEnabled: wantsAudio
                     )
-                } else if previousQuality != currentQuality {
-                    // Apply quality change for an already-running stream
+                } else if previousQuality != currentQuality || self.audioStreamingEnabled != wantsAudio {
+                    // Apply quality/audio change for an already-running stream
                     stopStreaming()
                     await startStreaming(
                         clientMaxWidth: handshakeRequest?.screenWidth,
-                        clientMaxHeight: handshakeRequest?.screenHeight
+                        clientMaxHeight: handshakeRequest?.screenHeight,
+                        audioEnabled: wantsAudio
                     )
                 }
             }
@@ -427,13 +438,13 @@ final class HostManager: ObservableObject {
     private func handleTouchEvent(_ payload: Data) {
         guard let touch = try? JSONDecoder().decode(TouchEvent.self, from: payload) else {
             #if DEBUG
-            NSLog("[AirCatchHost] Failed to decode touch event")
+            AirCatchLog.error("Failed to decode touch event", category: .input)
             #endif
             return
         }
         
         #if DEBUG
-        NSLog("[AirCatchHost] Received touch: type=\(touch.eventType)")
+        AirCatchLog.debug("Received touch: type=\(touch.eventType)", category: .input)
         #endif
         
         Task { @MainActor in
@@ -498,13 +509,13 @@ final class HostManager: ObservableObject {
     private func handleScrollEvent(_ payload: Data) {
         guard let scroll = try? JSONDecoder().decode(ScrollEvent.self, from: payload) else {
             #if DEBUG
-            NSLog("[AirCatchHost] Failed to decode scroll event")
+            AirCatchLog.error("Failed to decode scroll event", category: .input)
             #endif
             return
         }
         
         #if DEBUG
-        NSLog("[AirCatchHost] Received scroll event: deltaX=\(scroll.deltaX), deltaY=\(scroll.deltaY)")
+        AirCatchLog.debug("Received scroll event: deltaX=\(scroll.deltaX), deltaY=\(scroll.deltaY)", category: .input)
         #endif
         
         Task { @MainActor in
@@ -525,14 +536,23 @@ final class HostManager: ObservableObject {
     private func handleKeyEvent(_ payload: Data) {
         guard let keyEvent = try? JSONDecoder().decode(KeyEvent.self, from: payload) else {
             #if DEBUG
-            NSLog("[AirCatchHost] Failed to decode key event")
+            AirCatchLog.error("Failed to decode key event", category: .input)
             #endif
             return
         }
         
         #if DEBUG
-        NSLog("[AirCatchHost] Received key event: keyCode=\(keyEvent.keyCode) char=\(keyEvent.character ?? "") down=\(keyEvent.isKeyDown)")
+        AirCatchLog.debug("Received key event: keyCode=\(keyEvent.keyCode) char=\(keyEvent.character ?? "") down=\(keyEvent.isKeyDown)", category: .input)
         #endif
+        
+        // Check if this is a text injection event (Voice Typing)
+        if let character = keyEvent.character, !character.isEmpty, keyEvent.keyCode == 0 {
+            // KeyCode 0 with a character string is our signal for "Injection"
+            Task { @MainActor in
+                InputInjector.shared.injectText(character)
+            }
+            return
+        }
         
         InputInjector.shared.injectKeyEvent(
             keyCode: keyEvent.keyCode,
@@ -544,20 +564,20 @@ final class HostManager: ObservableObject {
     private func handleMediaKeyEvent(_ payload: Data) {
         guard let mediaEvent = try? JSONDecoder().decode(MediaKeyEvent.self, from: payload) else {
             #if DEBUG
-            NSLog("[AirCatchHost] Failed to decode media key event")
+            AirCatchLog.error("Failed to decode media key event", category: .input)
             #endif
             return
         }
         
         #if DEBUG
-        NSLog("[AirCatchHost] Received media key event: mediaKey=\(mediaEvent.mediaKey)")
+        AirCatchLog.debug("Received media key event: mediaKey=\(mediaEvent.mediaKey)", category: .input)
         #endif
         
         InputInjector.shared.injectMediaKeyEvent(mediaKey: mediaEvent.mediaKey)
     }
 
     private nonisolated func handleClientDisconnect(_ connection: NWConnection) {
-        NSLog("[AirCatchHost] Client disconnected: \(connection.endpoint)")
+        AirCatchLog.info("Client disconnected: \(connection.endpoint)", category: .network)
         
         Task { @MainActor in
             connectedClients = max(0, connectedClients - 1)
@@ -572,7 +592,7 @@ final class HostManager: ObservableObject {
     
     // MARK: - Screen Streaming
     
-    private func startStreaming(clientMaxWidth: Int? = nil, clientMaxHeight: Int? = nil) async {
+    private func startStreaming(clientMaxWidth: Int? = nil, clientMaxHeight: Int? = nil, audioEnabled: Bool = false) async {
         guard screenStreamer == nil else { return }
         
         if let w = clientMaxWidth, let h = clientMaxHeight {
@@ -581,14 +601,21 @@ final class HostManager: ObservableObject {
             self.currentClientDimensions = nil
         }
         
-        NSLog("[AirCatchHost] Starting stream with preset: \(currentQuality.displayName)")
+        // Store audio preference for restart logic
+        self.audioStreamingEnabled = audioEnabled
+        
+        AirCatchLog.info("Starting stream with preset: \(currentQuality.displayName), audio: \(audioEnabled)", category: .video)
         screenStreamer = ScreenStreamer(
             preset: currentQuality,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
+            audioEnabled: audioEnabled,
             onFrame: { [weak self] compressedFrame in
                 self?.broadcastVideoFrame(compressedFrame)
-            }
+            },
+            onAudio: audioEnabled ? { [weak self] audioData in
+                self?.broadcastAudioFrame(audioData)
+            } : nil
         )
 
         
@@ -596,9 +623,9 @@ final class HostManager: ObservableObject {
             try await screenStreamer?.start()
             isStreaming = true
             postStatusChange()
-            NSLog("[AirCatchHost] Screen streaming started")
+            AirCatchLog.info("Screen streaming started", category: .video)
         } catch {
-            NSLog("[AirCatchHost] Failed to start streaming: \(error)")
+            AirCatchLog.error("Failed to start streaming: \(error)", category: .video)
             screenStreamer = nil
             
             // Check for Screen Capture permission error (SCStreamErrorDomain Code=-3801)
@@ -632,7 +659,7 @@ final class HostManager: ObservableObject {
         destroyVirtualDisplayIfNeeded()
         
         postStatusChange()
-        NSLog("[AirCatchHost] Screen streaming stopped")
+        AirCatchLog.info("Screen streaming stopped", category: .video)
     }
 
     // MARK: - Virtual Display Management
@@ -642,7 +669,7 @@ final class HostManager: ObservableObject {
         virtualDisplayManager.destroyVirtualDisplay()
         isExtendedDisplayActive = false
         currentDisplayConfig = nil
-        NSLog("[AirCatchHost] Virtual display destroyed")
+        AirCatchLog.info("Virtual display destroyed", category: .video)
     }
     
     // MARK: - Display Selection
@@ -658,7 +685,7 @@ final class HostManager: ObservableObject {
             let mainID = CGMainDisplayID()
             self.targetDisplayID = mainID
             self.targetScreenFrame = NSScreen.main?.frame
-            NSLog("[AirCatchHost] Using main display: \(mainID)")
+            AirCatchLog.info("Using main display: \(mainID)", category: .video)
         }
     }
     
@@ -672,13 +699,13 @@ final class HostManager: ObservableObject {
             // This ensures we always get the *current* resolution if it changes mid-stream
             self.targetScreenFrame = nil
             self.isExtendedDisplayActive = false
-            NSLog("[AirCatchHost] Using main display (mirror mode): \(mainID)")
+            AirCatchLog.info("Using main display (mirror mode): \(mainID)", category: .video)
             return
         }
         
         // Extend mode - create virtual display
         guard virtualDisplayManager.isSupported else {
-            NSLog("[AirCatchHost] Virtual display not supported: \(virtualDisplayManager.unavailableReason ?? "Unknown")")
+            AirCatchLog.error("Virtual display not supported: \(virtualDisplayManager.unavailableReason ?? "Unknown")", category: .video)
             // Fall back to main display
             let mainID = CGMainDisplayID()
             self.targetDisplayID = mainID
@@ -707,9 +734,9 @@ final class HostManager: ObservableObject {
             self.targetDisplayID = displayID
             self.targetScreenFrame = virtualDisplayManager.getVirtualDisplayFrame()
             self.isExtendedDisplayActive = true
-            NSLog("[AirCatchHost] Created virtual display: \(displayID), size: \(width)x\(height), position: \(config.position.rawValue)")
+            AirCatchLog.info("Created virtual display: \(displayID), size: \(width)x\(height), position: \(config.position.rawValue)", category: .video)
         } else {
-            NSLog("[AirCatchHost] Failed to create virtual display, falling back to main display")
+            AirCatchLog.error("Failed to create virtual display, falling back to main display", category: .video)
             let mainID = CGMainDisplayID()
             self.targetDisplayID = mainID
             self.targetScreenFrame = NSScreen.main?.frame
@@ -765,12 +792,12 @@ final class HostManager: ObservableObject {
             
             // Safety check to avoid overflowing 2-byte index
             guard totalChunks <= UInt16.max else {
-                NSLog("[AirCatchHost] Frame too large: \(totalLen) bytes")
+                AirCatchLog.error("Frame too large: \(totalLen) bytes", category: .video)
                 return
             }
             
             if frameId <= 3 || frameId % 60 == 0 {
-                NSLog("[AirCatchHost] Broadcasting Frame \(frameId): \(totalLen) bytes, \(totalChunks) chunks")
+                AirCatchLog.debug("Broadcasting Frame \(frameId): \(totalLen) bytes, \(totalChunks) chunks", category: .video)
             }
             
             // Fragment and send
@@ -811,6 +838,13 @@ final class HostManager: ObservableObject {
                 }
             }
         }
+    }
+    
+    /// Broadcasts audio data to all connected clients via UDP
+    private func broadcastAudioFrame(_ data: Data) {
+        // Audio packets are small enough to send in one UDP datagram (typically ~4KB for 48kHz stereo)
+        // The data already contains 8-byte timestamp header from ScreenStreamer
+        NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: data)
     }
 
     private func handleVideoChunkNack(_ payload: Data, from connection: NWConnection) {

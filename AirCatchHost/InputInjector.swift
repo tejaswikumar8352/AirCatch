@@ -86,7 +86,7 @@ final class InputInjector {
             mouseButton: .left
         ) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create mouse down event")
+            AirCatchLog.debug(" Failed to create mouse down event")
             #endif
             return
         }
@@ -102,7 +102,7 @@ final class InputInjector {
             mouseButton: .left
         ) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create mouse up event")
+            AirCatchLog.debug(" Failed to create mouse up event")
             #endif
             return
         }
@@ -118,7 +118,7 @@ final class InputInjector {
             mouseButton: .left
         ) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create mouse drag event")
+            AirCatchLog.debug(" Failed to create mouse drag event")
             #endif
             return
         }
@@ -134,7 +134,7 @@ final class InputInjector {
             mouseButton: .left
         ) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create mouse move event")
+            AirCatchLog.debug(" Failed to create mouse move event")
             #endif
             return
         }
@@ -194,7 +194,7 @@ final class InputInjector {
             mouseButton: .right
         ) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create right click events")
+            AirCatchLog.debug(" Failed to create right click events")
             #endif
             return
         }
@@ -246,7 +246,7 @@ final class InputInjector {
         moveMouse(to: point)
         
         #if DEBUG
-        NSLog("[InputInjector] Scroll at (\(point.x), \(point.y)) deltaX=\(deltaX) deltaY=\(deltaY)")
+        AirCatchLog.debug(" Scroll at (\(point.x), \(point.y)) deltaX=\(deltaX) deltaY=\(deltaY)")
         #endif
         
         guard let event = CGEvent(
@@ -258,7 +258,7 @@ final class InputInjector {
             wheel3: 0
         ) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create scroll event")
+            AirCatchLog.debug(" Failed to create scroll event")
             #endif
             return
         }
@@ -275,7 +275,7 @@ final class InputInjector {
     private func currentMainScreenFrame() -> CGRect? {
         guard let screen = NSScreen.main else {
             #if DEBUG
-            NSLog("[InputInjector] No main screen available")
+            AirCatchLog.debug(" No main screen available")
             #endif
             return nil
         }
@@ -329,7 +329,7 @@ final class InputInjector {
     func injectKeyEvent(keyCode: UInt16, modifiers: KeyModifiers, isKeyDown: Bool) {
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(keyCode), keyDown: isKeyDown) else {
             #if DEBUG
-            NSLog("[InputInjector] Failed to create keyboard event for keyCode: \(keyCode)")
+            AirCatchLog.debug(" Failed to create keyboard event for keyCode: \(keyCode)")
             #endif
             return
         }
@@ -356,7 +356,7 @@ final class InputInjector {
         event.post(tap: .cghidEventTap)
         
         #if DEBUG
-        NSLog("[InputInjector] Injected key event: keyCode=\(keyCode) down=\(isKeyDown)")
+        AirCatchLog.debug(" Injected key event: keyCode=\(keyCode) down=\(isKeyDown)")
         #endif
     }
     
@@ -389,10 +389,45 @@ final class InputInjector {
             doKey(down: false)
             
             #if DEBUG
-            NSLog("[InputInjector] Injected media key event: mediaKey=\(mediaKey)")
+            AirCatchLog.debug(" Injected media key event: mediaKey=\(mediaKey)")
             #endif
         }
     }
 
+    /// Injects a text string directly as keyboard input.
+    /// This is useful for paste operations or speech-to-text where constructing individual key events is inefficient.
+    /// - Parameter text: The string to inject.
+    func injectText(_ text: String) {
+        // Limited to 20 characters per event by CGEventKeyboardSetUnicodeString limit,
+        // but safe to iterate.
+        let maxChunkSize = 20
+        var startIndex = text.startIndex
+        
+        while startIndex < text.endIndex {
+            let endIndex = text.index(startIndex, offsetBy: maxChunkSize, limitedBy: text.endIndex) ?? text.endIndex
+            let chunk = String(text[startIndex..<endIndex])
+            
+            // Create a dummy key event (space, connection doesn't matter much here as we override string)
+            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else { return }
+            
+            // Convert string to UTF-16 for the API
+            let utf16Chars = Array(chunk.utf16)
+            event.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
+            event.post(tap: .cghidEventTap)
+            
+            // Need corresponding keyUp for some apps, but for Unicode string injection, KeyDown usually suffices to paste text.
+            // However, posting KeyUp is safer for state consistency.
+            if let upEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                upEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
+                upEvent.post(tap: .cghidEventTap)
+            }
+            
+            startIndex = endIndex
+        }
+        
+        #if DEBUG
+        AirCatchLog.debug(" Injected text length: \(text.count)")
+        #endif
+    }
 }
 

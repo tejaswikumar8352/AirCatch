@@ -36,9 +36,14 @@ final class ScreenStreamer: NSObject {
     
     private var compressionSession: VTCompressionSession?
     private var frameCallback: ((Data) -> Void)?
+    private var audioCallback: ((Data) -> Void)?
     private var cachedVPS: Data?  // HEVC only
     private var cachedSPS: Data?
     private var cachedPPS: Data?
+    
+    // MARK: - Audio
+    
+    private(set) var audioEnabled: Bool = false
     
     // MARK: - State
     
@@ -48,12 +53,16 @@ final class ScreenStreamer: NSObject {
          maxClientWidth: Int? = nil,
          maxClientHeight: Int? = nil,
          targetDisplayID: CGDirectDisplayID? = nil,
-         onFrame: @escaping (Data) -> Void) {
+         audioEnabled: Bool = false,
+         onFrame: @escaping (Data) -> Void,
+         onAudio: ((Data) -> Void)? = nil) {
         self.currentPreset = preset
         self.clientWidth = maxClientWidth
         self.clientHeight = maxClientHeight
         self.targetDisplayID = targetDisplayID
+        self.audioEnabled = audioEnabled
         self.frameCallback = onFrame
+        self.audioCallback = onAudio
         super.init()
     }
 
@@ -108,6 +117,14 @@ final class ScreenStreamer: NSObject {
         // VideoToolbox will handle color space conversion internally
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
+        
+        // Audio capture configuration
+        if audioEnabled {
+            config.capturesAudio = true
+            config.excludesCurrentProcessAudio = true  // Don't capture AirCatch's own sounds
+            config.sampleRate = 48000
+            config.channelCount = 2
+        }
 
 
         
@@ -120,12 +137,23 @@ final class ScreenStreamer: NSObject {
         let queue = DispatchQueue(label: "com.aircatch.videocapture", qos: .userInteractive)
         self.videoQueue = queue  // Keep reference to prevent deallocation
         
-        streamOutput = StreamOutput { [weak self] sampleBuffer in
-            // Call compressFrame directly - queue is already background
-            self?.compressFrame(sampleBuffer)
-        }
+        streamOutput = StreamOutput(
+            onVideo: { [weak self] sampleBuffer in
+                // Call compressFrame directly - queue is already background
+                self?.compressFrame(sampleBuffer)
+            },
+            onAudio: audioEnabled ? { [weak self] sampleBuffer in
+                self?.processAudioSample(sampleBuffer)
+            } : nil
+        )
 
         try stream.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: queue)
+        
+        // Add audio output if enabled
+        if audioEnabled {
+            let audioQueue = DispatchQueue(label: "com.aircatch.audiocapture", qos: .userInteractive)
+            try stream.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
+        }
 
 
         
@@ -134,7 +162,7 @@ final class ScreenStreamer: NSObject {
         self.stream = stream
         isRunning = true
         
-        NSLog("[ScreenStreamer] Started capturing at \(currentPreset.frameRate)fps (\(width)x\(height)) - Preset: \(currentPreset.displayName)")
+        AirCatchLog.info(" Started capturing at \(currentPreset.frameRate)fps (\(width)x\(height)) - Preset: \(currentPreset.displayName)")
     }
     
     func stop() {
@@ -153,7 +181,7 @@ final class ScreenStreamer: NSObject {
         }
         
         isRunning = false
-        NSLog("[ScreenStreamer] Stopped")
+        AirCatchLog.info(" Stopped")
     }
 
 
@@ -216,10 +244,10 @@ final class ScreenStreamer: NSObject {
                                                  value: kVTProfileLevel_HEVC_Main42210_AutoLevel)
             
             if status422 == noErr {
-                NSLog("[ScreenStreamer] 🚀 SUCCESS: Encoder configured for HEVC Main 4:2:2 10-bit")
+                AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main 4:2:2 10-bit")
             } else {
                 // Fallback to Main 10-bit if 4:2:2 fails
-                NSLog("[ScreenStreamer] ⚠️ 4:2:2 10-bit unavailable (Error: \(status422)). Falling back to Main 10-bit.")
+                AirCatchLog.info(" ⚠️ 4:2:2 10-bit unavailable (Error: \(status422)). Falling back to Main 10-bit.")
                 VTSessionSetProperty(session, 
                                      key: kVTCompressionPropertyKey_ProfileLevel, 
                                      value: kVTProfileLevel_HEVC_Main10_AutoLevel)
@@ -250,10 +278,18 @@ final class ScreenStreamer: NSObject {
         let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
         
-        // === COLOR SPACE: P3-D65 for Mac/iPad display matching ===
+        // === COLOR SPACE + VIDEO RANGE ===
+        // Use Display P3 primaries (Mac screens are P3) with Rec.709 transfer/matrix.
+        // CRITICAL: Force FULL RANGE output to avoid washed-out colors on iPad.
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ColorPrimaries, value: kCVImageBufferColorPrimaries_P3_D65)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_TransferFunction, value: kCVImageBufferTransferFunction_ITU_R_709_2)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_YCbCrMatrix, value: kCVImageBufferYCbCrMatrix_ITU_R_709_2)
+        
+        // Force full-range (0-255) instead of limited/video range (16-235)
+        // This is critical for screen content to avoid crushed blacks and washed colors
+        if #available(macOS 14.0, *) {
+            VTSessionSetProperty(session, key: "FullRangeVideo" as CFString, value: kCFBooleanTrue)
+        }
         
         // Preserve any HDR metadata if present
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PreserveDynamicHDRMetadata, value: kCFBooleanTrue)
@@ -263,10 +299,10 @@ final class ScreenStreamer: NSObject {
         
         let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(session)
         if prepareStatus != noErr {
-            NSLog("[ScreenStreamer] ⚠️ Warning: PrepareToEncodeFrames returned status \(prepareStatus)")
+            AirCatchLog.info(" ⚠️ Warning: PrepareToEncodeFrames returned status \(prepareStatus)")
         }
         
-        NSLog("[ScreenStreamer] ✅ HEVC 4:2:2 10-bit compression session created: \(targetBitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - P3-D65 color space")
+        AirCatchLog.info(" ✅ HEVC 4:2:2 10-bit compression session created: \(targetBitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - Rec.709 color space")
         self.compressionSession = session
     }
 
@@ -283,7 +319,7 @@ final class ScreenStreamer: NSObject {
         // If no client dimensions provided, use source
         guard let clientWidth = clientWidth, let clientHeight = clientHeight,
               clientWidth > 0, clientHeight > 0 else {
-            NSLog("[ScreenStreamer] No client dimensions, using source: \(sourceWidth)x\(sourceHeight)")
+            AirCatchLog.info(" No client dimensions, using source: \(sourceWidth)x\(sourceHeight)")
             return (sourceWidth, sourceHeight)
         }
         
@@ -294,7 +330,7 @@ final class ScreenStreamer: NSObject {
         
         let sourceAspect = Double(sourceWidth) / Double(sourceHeight)
         
-        NSLog("[ScreenStreamer] Resolution: source=\(sourceWidth)x\(sourceHeight), client=\(clientWidth)x\(clientHeight), output=\(targetWidth)x\(targetHeight), sourceAspect=\(String(format: "%.3f", sourceAspect))")
+        AirCatchLog.info(" Resolution: source=\(sourceWidth)x\(sourceHeight), client=\(clientWidth)x\(clientHeight), output=\(targetWidth)x\(targetHeight), sourceAspect=\(String(format: "%.3f", sourceAspect))")
         
         return (targetWidth, targetHeight)
     }
@@ -313,7 +349,7 @@ final class ScreenStreamer: NSObject {
         let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
         
-        NSLog("[ScreenStreamer] Bitrate updated to \(bps / 1_000_000) Mbps")
+        AirCatchLog.info(" Bitrate updated to \(bps / 1_000_000) Mbps")
     }
 
     /// Dynamically updates the frame rate property of the encoder.
@@ -324,7 +360,7 @@ final class ScreenStreamer: NSObject {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
         // Also update keyframe interval to match 1 second
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
-        NSLog("[ScreenStreamer] Encoder FPS updated to \(fps)")
+        AirCatchLog.info(" Encoder FPS updated to \(fps)")
     }
     
     private var compressCount = 0
@@ -336,7 +372,7 @@ final class ScreenStreamer: NSObject {
         guard let session = compressionSession else {
             #if DEBUG
             if compressCount <= 3 {
-                NSLog("[ScreenStreamer] compressFrame: No compressionSession!")
+                AirCatchLog.info(" compressFrame: No compressionSession!")
             }
             #endif
             return
@@ -351,8 +387,7 @@ final class ScreenStreamer: NSObject {
             if skippedFrames <= 2 {
                 let dataReady = CMSampleBufferDataIsReady(sampleBuffer)
                 let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-                NSLog("[ScreenStreamer] Skipped frame %d (no imageBuffer, dataReady=%d, samples=%d)", 
-                      skippedFrames, dataReady ? 1 : 0, numSamples)
+                AirCatchLog.debug("Skipped frame \(skippedFrames) (no imageBuffer, dataReady=\(dataReady ? 1 : 0), samples=\(numSamples))", category: .video)
             }
             #endif
             return
@@ -363,7 +398,7 @@ final class ScreenStreamer: NSObject {
         if compressCount - skippedFrames == 1 {
             let pbWidth = CVPixelBufferGetWidth(imageBuffer)
             let pbHeight = CVPixelBufferGetHeight(imageBuffer)
-            NSLog("[ScreenStreamer] First imageBuffer: %dx%d", pbWidth, pbHeight)
+            AirCatchLog.debug("First imageBuffer: \(pbWidth)x\(pbHeight)", category: .video)
         }
         #endif
         
@@ -383,7 +418,7 @@ final class ScreenStreamer: NSObject {
             guard let strongSelf = self else { return }
             if status != noErr {
                 #if DEBUG
-                NSLog("[ScreenStreamer] Encode callback error: \(status)")
+                AirCatchLog.info(" Encode callback error: \(status)")
                 #endif
                 // Error recovery: invalidate session on persistent errors
                 // The next frame will trigger session recreation
@@ -396,7 +431,7 @@ final class ScreenStreamer: NSObject {
             }
             guard let sampleBuffer = sampleBuffer else {
                 #if DEBUG
-                NSLog("[ScreenStreamer] Encode callback: nil sampleBuffer")
+                AirCatchLog.info(" Encode callback: nil sampleBuffer")
                 #endif
                 return
             }
@@ -405,7 +440,7 @@ final class ScreenStreamer: NSObject {
         
         if status != noErr {
             #if DEBUG
-            NSLog("[ScreenStreamer] Compression failed: \(status)")
+            AirCatchLog.info(" Compression failed: \(status)")
             #endif
         }
     }
@@ -421,7 +456,7 @@ final class ScreenStreamer: NSObject {
         cachedVPS = nil
         // Session will be recreated on next start
         #if DEBUG
-        NSLog("[ScreenStreamer] Compression session reset due to error")
+        AirCatchLog.info(" Compression session reset due to error")
         #endif
     }
     
@@ -433,7 +468,7 @@ final class ScreenStreamer: NSObject {
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
             #if DEBUG
             if handleCount <= 3 {
-                NSLog("[ScreenStreamer] handleCompressedFrame: No dataBuffer")
+                AirCatchLog.info(" handleCompressedFrame: No dataBuffer")
             }
             #endif
             return
@@ -459,7 +494,7 @@ final class ScreenStreamer: NSObject {
         
         #if DEBUG
         if Int.random(in: 0...60) == 0 {
-            NSLog("[ScreenStreamer] Compressed frame: \(frameData.count) bytes")
+            AirCatchLog.info(" Compressed frame: \(frameData.count) bytes")
         }
         #endif
         
@@ -538,7 +573,7 @@ final class ScreenStreamer: NSObject {
             }
             
             if cachedVPS != nil && cachedSPS != nil && cachedPPS != nil {
-                NSLog("[ScreenStreamer] HEVC parameter sets cached (VPS: \(cachedVPS?.count ?? 0)B, SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
+                AirCatchLog.info(" HEVC parameter sets cached (VPS: \(cachedVPS?.count ?? 0)B, SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
             }
         } else {
             // H.264: Extract SPS, PPS (2 parameter sets)
@@ -575,7 +610,7 @@ final class ScreenStreamer: NSObject {
             }
             
             if cachedSPS != nil && cachedPPS != nil {
-                NSLog("[ScreenStreamer] H.264 parameter sets cached (SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
+                AirCatchLog.info(" H.264 parameter sets cached (SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
             }
         }
     }
@@ -637,13 +672,95 @@ final class ScreenStreamer: NSObject {
 
         return stream
     }
+    
+    // MARK: - Audio Processing
+    
+    /// Process audio sample buffer and send raw PCM data to callback
+    private func processAudioSample(_ sampleBuffer: CMSampleBuffer) {
+        guard let audioCallback = audioCallback else { return }
+        
+        // Allocate space for 2 buffers (Safe limit for stereo from ScreenCaptureKit).
+        // Standard AudioBufferList struct only has space for 1 buffer.
+        // Size = Header + (Start of buffers) ... No, it implies 1 buffer.
+        // Correct calculation:
+        let listSize = MemoryLayout<AudioBufferList>.size + MemoryLayout<AudioBuffer>.size
+        let bufferListPointer = UnsafeMutablePointer<UInt8>.allocate(capacity: listSize)
+        defer { bufferListPointer.deallocate() }
+        
+        // Initialize with zeros just in case
+        bufferListPointer.initialize(repeating: 0, count: listSize)
+        
+        // Rebound to AudioBufferList for API call
+        let audioBufferListPtr = bufferListPointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { $0 }
+        
+        var blockBuffer: CMBlockBuffer?
+        
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: audioBufferListPtr,
+            bufferListSize: listSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        
+        guard status == noErr else {
+            #if DEBUG
+            AirCatchLog.error("Failed to get audio buffer: \(status)", category: .general)
+            #endif
+            return
+        }
+        
+        let list = UnsafeMutableAudioBufferListPointer(audioBufferListPtr)
+        guard list.count > 0, let buf0 = list[0].mData else { return }
+        let size0 = Int(list[0].mDataByteSize)
+        
+        // Prepare Audio Packet
+        var audioData = Data()
+        
+        // 1. Append Timestamp (8 bytes)
+        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        var timestampValue = timestamp.value
+        audioData.append(Data(bytes: &timestampValue, count: 8))
+        
+        // 2. Append PCM Data (Interleaved)
+        // Check for Planar Stereo (2 buffers) and Interleave if necessary
+        if list.count == 2, let buf1 = list[1].mData {
+            // Planar Stereo: Interleave L and R (L0 R0 L1 R1...)
+            // Both buffers should be same size and format (Float32)
+            let sampleCount = size0 / 4
+            let interleavedData = Data(count: size0 * 2)
+            
+            // "Unsafe" copy is clean here as we own the data
+            // Copy into new Data buffer
+            var interleaved = interleavedData // Mutable copy
+            interleaved.withUnsafeMutableBytes { dst in
+                guard let dstPtr = dst.bindMemory(to: Float.self).baseAddress else { return }
+                let src0 = buf0.assumingMemoryBound(to: Float.self)
+                let src1 = buf1.assumingMemoryBound(to: Float.self)
+                
+                for i in 0..<sampleCount {
+                    dstPtr[i*2] = src0[i]
+                    dstPtr[i*2+1] = src1[i]
+                }
+            }
+            audioData.append(interleaved)
+        } else {
+            // Already Interleaved or Mono: Copy directly
+            audioData.append(Data(bytes: buf0, count: size0))
+        }
+        
+        audioCallback(audioData)
+    }
 }
 
 // MARK: - SCStreamDelegate
 
 extension ScreenStreamer: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        NSLog("[ScreenStreamer] Stream stopped with error: \(error)")
+        AirCatchLog.info(" Stream stopped with error: \(error)")
         isRunning = false
     }
 }
@@ -651,23 +768,40 @@ extension ScreenStreamer: SCStreamDelegate {
 // MARK: - Stream Output Handler
 
 private final class StreamOutput: NSObject, SCStreamOutput {
-    private let handler: (CMSampleBuffer) -> Void
-    private var frameCount = 0
+    private let videoHandler: (CMSampleBuffer) -> Void
+    private let audioHandler: ((CMSampleBuffer) -> Void)?
+    private var videoFrameCount = 0
+    private var audioSampleCount = 0
     
-    init(handler: @escaping (CMSampleBuffer) -> Void) {
-        self.handler = handler
+    init(onVideo: @escaping (CMSampleBuffer) -> Void, onAudio: ((CMSampleBuffer) -> Void)? = nil) {
+        self.videoHandler = onVideo
+        self.audioHandler = onAudio
     }
     
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        frameCount += 1
-        guard type == .screen else { return }
-        #if DEBUG
-        // Only log occasionally to reduce noise - streaming is working
-        if frameCount == 1 || frameCount % 300 == 0 {
-            NSLog("[ScreenStreamer] Frame %d captured", frameCount)
+        switch type {
+        case .screen:
+            videoFrameCount += 1
+            #if DEBUG
+            // Only log occasionally to reduce noise - streaming is working
+            if videoFrameCount == 1 || videoFrameCount % 300 == 0 {
+                AirCatchLog.debug("Frame \(videoFrameCount) captured", category: .video)
+            }
+            #endif
+            videoHandler(sampleBuffer)
+            
+        case .audio:
+            audioSampleCount += 1
+            #if DEBUG
+            if audioSampleCount == 1 {
+                AirCatchLog.debug("Audio streaming started", category: .general)
+            }
+            #endif
+            audioHandler?(sampleBuffer)
+            
+        default:
+            break
         }
-        #endif
-        handler(sampleBuffer)
     }
 }
 

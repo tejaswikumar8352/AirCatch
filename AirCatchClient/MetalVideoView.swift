@@ -19,7 +19,14 @@ struct MetalVideoView: UIViewRepresentable {
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.delegate = context.coordinator
         mtkView.framebufferOnly = false
-        mtkView.colorPixelFormat = .bgra8Unorm
+        // Use sRGB render target so gamma is handled correctly.
+        // Without this, video often looks “washed out” / less vibrant on iPad.
+        mtkView.colorPixelFormat = .bgra8Unorm_srgb
+        // Use Display P3 colorspace on iPad (wide gamut) to match Mac's P3 output
+        if let metalLayer = mtkView.layer as? CAMetalLayer {
+            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3)
+            metalLayer.wantsExtendedDynamicRangeContent = true
+        }
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         mtkView.enableSetNeedsDisplay = true
         mtkView.isPaused = true // Event-driven rendering (critical for power saving)
@@ -92,7 +99,7 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         let library = device.makeDefaultLibrary() ?? makeShaderLibrary()
         
         guard let library = library else {
-            NSLog("[MetalVideoRenderer] Failed to create shader library")
+            AirCatchLog.error(" Failed to create shader library")
             return
         }
         
@@ -104,7 +111,7 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         do {
             pipelineState = try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
-            NSLog("[MetalVideoRenderer] Failed to create pipeline: \(error)")
+            AirCatchLog.error(" Failed to create pipeline: \(error)")
         }
     }
     
@@ -127,17 +134,27 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
             return out;
         }
         
+        // Apply saturation boost to compensate for colorspace conversion losses
+        float3 adjustSaturation(float3 color, float saturation) {
+            float3 luminanceWeights = float3(0.2126, 0.7152, 0.0722);
+            float luminance = dot(color, luminanceWeights);
+            return mix(float3(luminance), color, saturation);
+        }
+        
         fragment float4 fragmentShader(VertexOut in [[stage_in]],
                                         texture2d<float> texture [[texture(0)]],
                                         sampler texSampler [[sampler(0)]]) {
-            return texture.sample(texSampler, in.texCoord);
+            float4 color = texture.sample(texSampler, in.texCoord);
+            // Boost saturation by ~8% to compensate for P3->sRGB conversion losses
+            color.rgb = adjustSaturation(color.rgb, 1.08);
+            return color;
         }
         """
         
         do {
             return try device.makeLibrary(source: shaderSource, options: nil)
         } catch {
-            NSLog("[MetalVideoRenderer] Shader compilation failed: \(error)")
+            AirCatchLog.error(" Shader compilation failed: \(error)")
             return nil
         }
     }
@@ -192,25 +209,29 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private func createTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
-        
-        var cvTexture: CVMetalTexture?
-        let status = CVMetalTextureCacheCreateTextureFromImage(
-            nil,
-            textureCache,
-            pixelBuffer,
-            nil,
-            .bgra8Unorm,
-            width,
-            height,
-            0,
-            &cvTexture
-        )
-        
-        guard status == kCVReturnSuccess, let cvTex = cvTexture else {
-            return nil
+
+        func makeTexture(_ pixelFormat: MTLPixelFormat) -> MTLTexture? {
+            var cvTexture: CVMetalTexture?
+            let status = CVMetalTextureCacheCreateTextureFromImage(
+                nil,
+                textureCache,
+                pixelBuffer,
+                nil,
+                pixelFormat,
+                width,
+                height,
+                0,
+                &cvTexture
+            )
+            guard status == kCVReturnSuccess, let cvTex = cvTexture else {
+                return nil
+            }
+            return CVMetalTextureGetTexture(cvTex)
         }
-        
-        return CVMetalTextureGetTexture(cvTex)
+
+        // Prefer sRGB texture so sampling converts to linear correctly.
+        // Fall back to non-sRGB if the pixel buffer doesn't support sRGB views.
+        return makeTexture(.bgra8Unorm_srgb) ?? makeTexture(.bgra8Unorm)
     }
     
     /// Returns fullscreen vertices - fills entire viewport

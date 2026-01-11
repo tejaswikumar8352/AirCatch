@@ -64,7 +64,7 @@ final class VideoDecoder {
         guard frameData.count > 8 else {
             #if DEBUG
             if frameCount <= 3 {
-                NSLog("[VideoDecoder] Frame too small: \(frameData.count) bytes")
+                AirCatchLog.debug(" Frame too small: \(frameData.count) bytes")
             }
             #endif
             return
@@ -77,7 +77,7 @@ final class VideoDecoder {
         // Only log first frame
         #if DEBUG
         if frameCount == 1 {
-            NSLog("[VideoDecoder] Frame 1: \(nalUnits.count) NAL units from \(nalData.count) bytes")
+            AirCatchLog.debug(" Frame 1: \(nalUnits.count) NAL units from \(nalData.count) bytes")
         }
         #endif
         
@@ -143,8 +143,7 @@ final class VideoDecoder {
         // Only log first 5 NAL units for debugging
         if nalProcessCount <= 5 {
             let nalType = isHEVC ? Int(potentialHEVCType) : Int(firstByte & 0x1F)
-            NSLog("[VideoDecoder] NAL #%d: type=%d, isHEVC=%d, size=%d", 
-                  nalProcessCount, nalType, isHEVC ? 1 : 0, nalUnit.count)
+            AirCatchLog.debug("NAL #\(nalProcessCount): type=\(nalType), isHEVC=\(isHEVC ? 1 : 0), size=\(nalUnit.count)", category: .video)
         }
         #endif
         
@@ -180,7 +179,7 @@ final class VideoDecoder {
             default:
                 #if DEBUG
                 if nalProcessCount <= 10 {
-                    NSLog("[VideoDecoder] HEVC unknown NAL type \(nalType), skipping")
+                    AirCatchLog.debug(" HEVC unknown NAL type \(nalType), skipping")
                 }
                 #endif
                 break
@@ -251,7 +250,7 @@ final class VideoDecoder {
                     }
                 }
             }
-            NSLog("[VideoDecoder] Creating HEVC format description")
+            AirCatchLog.debug(" Creating HEVC format description")
         } else {
             // H.264 format description from SPS/PPS
             status = sps.withUnsafeBytes { spsBytes in
@@ -278,7 +277,7 @@ final class VideoDecoder {
                     }
                 }
             }
-            NSLog("[VideoDecoder] Creating H.264 format description")
+            AirCatchLog.debug(" Creating H.264 format description")
         }
         
         if status == noErr, let desc = newFormatDescription {
@@ -286,11 +285,11 @@ final class VideoDecoder {
             createDecompressionSession()
             #if DEBUG
             let codecName = detectedCodec == kCMVideoCodecType_HEVC ? "HEVC" : "H.264"
-            NSLog("[VideoDecoder] \(codecName) format description created successfully")
+            AirCatchLog.debug(" \(codecName) format description created successfully")
             #endif
         } else {
             #if DEBUG
-            NSLog("[VideoDecoder] Failed to create format description: \(status)")
+            AirCatchLog.debug(" Failed to create format description: \(status)")
             #endif
         }
     }
@@ -321,7 +320,7 @@ final class VideoDecoder {
                     decoder.callbackErrorCount += 1
                     #if DEBUG
                     if decoder.callbackErrorCount <= 5 {
-                        NSLog("[VideoDecoder] Decompression callback error: \(status), flags: \(infoFlags.rawValue)")
+                        AirCatchLog.debug(" Decompression callback error: \(status), flags: \(infoFlags.rawValue)")
                     }
                     #endif
                     return
@@ -331,7 +330,7 @@ final class VideoDecoder {
                     decoder.callbackNullCount += 1
                     #if DEBUG
                     if decoder.callbackNullCount <= 5 {
-                        NSLog("[VideoDecoder] Decompression callback: null imageBuffer, flags: \(infoFlags.rawValue)")
+                        AirCatchLog.debug(" Decompression callback: null imageBuffer, flags: \(infoFlags.rawValue)")
                     }
                     #endif
                     return
@@ -358,14 +357,23 @@ final class VideoDecoder {
             // Sidecar-level optimization: real-time + minimal latency
             VTSessionSetProperty(session, key: kVTDecompressionPropertyKey_RealTime, value: kCFBooleanTrue)
             VTSessionSetProperty(session, key: kVTDecompressionPropertyKey_ThreadCount, value: 0 as CFNumber) // Auto thread count
+
+            // Ensure YUV -> RGB conversion uses P3 color space to match encoder output.
+            // This reduces "washed out" / saturation differences across devices.
+            let props: CFDictionary = [
+                kVTPixelTransferPropertyKey_DestinationColorPrimaries: kCVImageBufferColorPrimaries_P3_D65,
+                kVTPixelTransferPropertyKey_DestinationTransferFunction: kCVImageBufferTransferFunction_ITU_R_709_2,
+                kVTPixelTransferPropertyKey_DestinationYCbCrMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2
+            ] as CFDictionary
+            VTSessionSetProperty(session, key: kVTDecompressionPropertyKey_PixelTransferProperties, value: props)
             
             #if DEBUG
             let codecName = detectedCodec == kCMVideoCodecType_HEVC ? "HEVC" : "H.264"
-            NSLog("[VideoDecoder] \(codecName) decompression session created - Sidecar-optimized")
+            AirCatchLog.debug(" \(codecName) decompression session created - Sidecar-optimized")
             #endif
         } else {
             #if DEBUG
-            NSLog("[VideoDecoder] Failed to create decompression session: \(status)")
+            AirCatchLog.debug(" Failed to create decompression session: \(status)")
             #endif
         }
     }
@@ -451,7 +459,7 @@ final class VideoDecoder {
             decodeErrorCount += 1
             #if DEBUG
             if decodeErrorCount <= 5 {
-                NSLog("[VideoDecoder] ❌ Decode error: \(decodeStatus), isIDR: \(isIDR), NAL size: \(nalUnit.count)")
+                AirCatchLog.debug(" ❌ Decode error: \(decodeStatus), isIDR: \(isIDR), NAL size: \(nalUnit.count)")
             }
             #endif
         }
@@ -467,8 +475,7 @@ final class VideoDecoder {
         #if DEBUG
         // Only log first decoded frame
         if decodedCount == 1 {
-            NSLog("[VideoDecoder] First decoded frame: %dx%d", 
-                  CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer))
+            AirCatchLog.debug("First decoded frame: \(CVPixelBufferGetWidth(pixelBuffer))x\(CVPixelBufferGetHeight(pixelBuffer))", category: .video)
         }
         #endif
         DispatchQueue.main.async { [weak self] in

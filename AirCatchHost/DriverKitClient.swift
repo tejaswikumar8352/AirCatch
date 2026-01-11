@@ -81,7 +81,7 @@ final class DriverKitClient: NSObject, ObservableObject {
     
     /// Request to install/activate the DriverKit system extension
     func installDriver() {
-        NSLog("[DriverKitClient] Requesting driver installation")
+        AirCatchLog.info(" Requesting driver installation")
         
         let request = OSSystemExtensionRequest.activationRequest(
             forExtensionWithIdentifier: dextIdentifier,
@@ -95,7 +95,7 @@ final class DriverKitClient: NSObject, ObservableObject {
     
     /// Request to uninstall/deactivate the driver
     func uninstallDriver() {
-        NSLog("[DriverKitClient] Requesting driver uninstallation")
+        AirCatchLog.info(" Requesting driver uninstallation")
         
         let request = OSSystemExtensionRequest.deactivationRequest(
             forExtensionWithIdentifier: dextIdentifier,
@@ -111,7 +111,7 @@ final class DriverKitClient: NSObject, ObservableObject {
     /// Connect to the installed driver
     func connectToDriver() -> Bool {
         guard !isConnected else {
-            NSLog("[DriverKitClient] Already connected to driver")
+            AirCatchLog.info(" Already connected to driver")
             return true
         }
         
@@ -122,7 +122,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         let result = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator)
         guard result == KERN_SUCCESS else {
             lastError = "Failed to find driver service: \(result)"
-            NSLog("[DriverKitClient] \(lastError ?? "Unknown error")")
+            AirCatchLog.info(" \(lastError ?? "Unknown error")")
             return false
         }
         
@@ -132,7 +132,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         let service = IOIteratorNext(iterator)
         guard service != 0 else {
             lastError = "Driver service not found"
-            NSLog("[DriverKitClient] \(lastError ?? "Unknown error")")
+            AirCatchLog.info(" \(lastError ?? "Unknown error")")
             return false
         }
         
@@ -142,13 +142,13 @@ final class DriverKitClient: NSObject, ObservableObject {
         let openResult = IOServiceOpen(service, mach_task_self_, 0, &connection)
         guard openResult == KERN_SUCCESS else {
             lastError = "Failed to open driver connection: \(openResult)"
-            NSLog("[DriverKitClient] \(lastError ?? "Unknown error")")
+            AirCatchLog.info(" \(lastError ?? "Unknown error")")
             return false
         }
         
         isConnected = true
         driverActive = true
-        NSLog("[DriverKitClient] Connected to driver")
+        AirCatchLog.info(" Connected to driver")
         return true
     }
     
@@ -161,7 +161,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         isConnected = false
         driverActive = false
         
-        NSLog("[DriverKitClient] Disconnected from driver")
+        AirCatchLog.info(" Disconnected from driver")
     }
     
     // MARK: - Virtual Display Control
@@ -173,7 +173,7 @@ final class DriverKitClient: NSObject, ObservableObject {
             return false
         }
         
-        NSLog("[DriverKitClient] Connecting display: \(config.width)x\(config.height) @ \(config.refreshRate)Hz")
+        AirCatchLog.info(" Connecting display: \(config.width)x\(config.height) @ \(config.refreshRate)Hz")
         
         // Prepare input
         var input: [UInt64] = [
@@ -196,7 +196,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         
         guard result == KERN_SUCCESS else {
             lastError = "Failed to connect display: \(result)"
-            NSLog("[DriverKitClient] \(lastError ?? "Unknown error")")
+            AirCatchLog.info(" \(lastError ?? "Unknown error")")
             return false
         }
         
@@ -206,7 +206,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         // Query for the actual display ID (would need to enumerate displays)
         findVirtualDisplayID()
         
-        NSLog("[DriverKitClient] Display connected successfully")
+        AirCatchLog.info(" Display connected successfully")
         return true
     }
     
@@ -214,7 +214,7 @@ final class DriverKitClient: NSObject, ObservableObject {
     func disconnectDisplay() -> Bool {
         guard isConnected else { return false }
         
-        NSLog("[DriverKitClient] Disconnecting display")
+        AirCatchLog.info(" Disconnecting display")
         
         let result = IOConnectCallScalarMethod(
             connection,
@@ -227,7 +227,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         
         guard result == KERN_SUCCESS else {
             lastError = "Failed to disconnect display: \(result)"
-            NSLog("[DriverKitClient] \(lastError ?? "Unknown error")")
+            AirCatchLog.info(" \(lastError ?? "Unknown error")")
             return false
         }
         
@@ -235,7 +235,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         displayID = nil
         displayFrame = .zero
         
-        NSLog("[DriverKitClient] Display disconnected")
+        AirCatchLog.info(" Display disconnected")
         return true
     }
     
@@ -256,7 +256,7 @@ final class DriverKitClient: NSObject, ObservableObject {
         )
         
         guard result == KERN_SUCCESS else {
-            NSLog("[DriverKitClient] Failed to get display info: \(result)")
+            AirCatchLog.info(" Failed to get display info: \(result)")
             return nil
         }
         
@@ -284,7 +284,7 @@ final class DriverKitClient: NSObject, ObservableObject {
             if bounds.size == displayFrame.size {
                 displayID = display
                 displayFrame = bounds
-                NSLog("[DriverKitClient] Found virtual display: \(display) at \(bounds)")
+                AirCatchLog.info(" Found virtual display: \(display) at \(bounds)")
                 break
             }
         }
@@ -295,33 +295,33 @@ final class DriverKitClient: NSObject, ObservableObject {
 
 extension DriverKitClient: OSSystemExtensionRequestDelegate {
     nonisolated func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties, withExtension ext: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction {
-        NSLog("[DriverKitClient] Replacing extension version \(existing.bundleVersion) with \(ext.bundleVersion)")
+        AirCatchLog.info(" Replacing extension version \(existing.bundleVersion) with \(ext.bundleVersion)")
         return .replace
     }
     
     nonisolated func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        NSLog("[DriverKitClient] Extension requires user approval in System Settings > Privacy & Security")
+        AirCatchLog.info(" Extension requires user approval in System Settings > Privacy & Security")
         Task { @MainActor in
             self.lastError = "Please approve the driver in System Settings > Privacy & Security"
         }
     }
     
     nonisolated func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
-        NSLog("[DriverKitClient] Extension request finished with result: \(result.rawValue)")
+        AirCatchLog.info(" Extension request finished with result: \(result.rawValue)")
         
         Task { @MainActor in
             switch result {
             case .completed:
                 self.driverInstalled = true
                 self.lastError = nil
-                NSLog("[DriverKitClient] Driver installed successfully")
+                AirCatchLog.info(" Driver installed successfully")
                 
                 // Try to connect to the driver
                 _ = self.connectToDriver()
                 
             case .willCompleteAfterReboot:
                 self.lastError = "Driver will be available after reboot"
-                NSLog("[DriverKitClient] Reboot required")
+                AirCatchLog.info(" Reboot required")
                 
             @unknown default:
                 self.lastError = "Unknown result: \(result.rawValue)"
@@ -330,7 +330,7 @@ extension DriverKitClient: OSSystemExtensionRequestDelegate {
     }
     
     nonisolated func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        NSLog("[DriverKitClient] Extension request failed: \(error.localizedDescription)")
+        AirCatchLog.info(" Extension request failed: \(error.localizedDescription)")
         
         Task { @MainActor in
             self.driverInstalled = false

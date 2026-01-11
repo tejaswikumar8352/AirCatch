@@ -40,14 +40,14 @@ final class PiPManager: NSObject, ObservableObject {
             try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
-            NSLog("[PiPManager] Failed to setup audio session: \(error)")
+            AirCatchLog.info(" Failed to setup audio session: \(error)")
         }
     }
     
     /// Sets up PiP with a sample buffer display layer for rendering video.
     func setupPiP(containerView: UIView) {
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
-            NSLog("[PiPManager] PiP not supported on this device")
+            AirCatchLog.info(" PiP not supported on this device")
             isPiPPossible = false
             return
         }
@@ -73,7 +73,7 @@ final class PiPManager: NSObject, ObservableObject {
         self.pipController = controller
         
         isPiPPossible = true
-        NSLog("[PiPManager] PiP setup complete")
+        AirCatchLog.info(" PiP setup complete")
     }
     
     /// Updates the display layer frame when container resizes.
@@ -124,7 +124,7 @@ final class PiPManager: NSObject, ObservableObject {
     
     func startPiP() {
         guard let controller = pipController, controller.isPictureInPicturePossible else {
-            NSLog("[PiPManager] Cannot start PiP - not possible")
+            AirCatchLog.info(" Cannot start PiP - not possible")
             return
         }
         controller.startPictureInPicture()
@@ -148,33 +148,33 @@ final class PiPManager: NSObject, ObservableObject {
 extension PiPManager: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
-            NSLog("[PiPManager] PiP will start")
+            AirCatchLog.info(" PiP will start")
         }
     }
     
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
             isPiPActive = true
-            NSLog("[PiPManager] PiP started")
+            AirCatchLog.info(" PiP started")
         }
     }
     
     nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
-            NSLog("[PiPManager] PiP will stop")
+            AirCatchLog.info(" PiP will stop")
         }
     }
     
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
             isPiPActive = false
-            NSLog("[PiPManager] PiP stopped")
+            AirCatchLog.info(" PiP stopped")
         }
     }
     
     nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         Task { @MainActor in
-            NSLog("[PiPManager] PiP failed to start: \(error)")
+            AirCatchLog.info(" PiP failed to start: \(error)")
         }
     }
 }

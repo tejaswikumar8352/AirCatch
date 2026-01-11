@@ -34,7 +34,7 @@ final class NetworkManager {
         udpReceiveHandler = onPacket
 
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
-            NSLog("Invalid UDP port \(port)")
+            AirCatchLog.error("Invalid UDP port \(port)")
             return
         }
 
@@ -49,7 +49,7 @@ final class NetworkManager {
         connection.stateUpdateHandler = { (state: NWConnection.State) in
             switch state {
             case .failed(let error):
-                NSLog("UDP connection failed: \(error)")
+                AirCatchLog.error("UDP connection failed: \(error)")
             case .cancelled:
                 break
             default:
@@ -65,13 +65,13 @@ final class NetworkManager {
     /// Sends a UDP packet on the active client connection.
     func sendUDP(type: PacketType, payload: Data) {
         guard let connection = udpClientConnection else {
-            NSLog("UDP send skipped: no active connection")
+            AirCatchLog.error("UDP send skipped: no active connection")
             return
         }
         let datagram = buildDatagram(type: type, payload: payload)
         connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ error in
             if let error {
-                NSLog("UDP send error: \(error)")
+                AirCatchLog.error("UDP send error: \(error)")
             }
         }))
     }
@@ -90,7 +90,7 @@ final class NetworkManager {
         tcpReceiveHandler = onPacket
         
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
-            NSLog("Invalid TCP port \(port)")
+            AirCatchLog.error("Invalid TCP port \(port)")
             return
         }
         
@@ -109,18 +109,18 @@ final class NetworkManager {
             tcpOption.keepaliveIdle = 2
             tcpOption.noDelay = true // Disable Nagle's algorithm for instant sending
         } else {
-            NSLog("[NetworkManager] ⚠️ TCP options unavailable; using defaults")
+            AirCatchLog.error(" ⚠️ TCP options unavailable; using defaults")
         }
         
         let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: parameters)
         connection.stateUpdateHandler = { [weak self] (state: NWConnection.State) in
             switch state {
             case .ready:
-                NSLog("TCP connected to \(host):\(port)")
+                AirCatchLog.error("TCP connected to \(host):\(port)")
                 self?.tcpClientConnection = connection
                 onConnected?(connection)
             case .failed(let error):
-                NSLog("TCP connection failed: \(error)")
+                AirCatchLog.error("TCP connection failed: \(error)")
             case .cancelled:
                 break
             default:
@@ -135,13 +135,13 @@ final class NetworkManager {
     /// Sends a TCP packet on the active client connection.
     func sendTCP(type: PacketType, payload: Data) {
         guard let connection = tcpClientConnection else {
-            NSLog("TCP send skipped: no active connection")
+            AirCatchLog.error("TCP send skipped: no active connection")
             return
         }
         let packet = buildTCPPacket(type: type, payload: payload)
         connection.send(content: packet, completion: NWConnection.SendCompletion.contentProcessed({ error in
             if let error {
-                NSLog("TCP send error: \(error)")
+                AirCatchLog.error("TCP send error: \(error)")
             }
         }))
     }
@@ -170,7 +170,7 @@ final class NetworkManager {
         connection.stateUpdateHandler = { (state: NWConnection.State) in
             switch state {
             case .failed(let error):
-                NSLog("UDP connection failed: \(error)")
+                AirCatchLog.error("UDP connection failed: \(error)")
             case .cancelled:
                 break
             default:
@@ -184,7 +184,7 @@ final class NetworkManager {
         connection.receiveMessage { [weak self] data, _, _, error in
             guard let self else { return }
             if let error {
-                NSLog("UDP receive error: \(error)")
+                AirCatchLog.error("UDP receive error: \(error)")
             }
 
             if let data, let packet = self.parsePacket(from: data) {
@@ -216,7 +216,7 @@ final class NetworkManager {
             guard let self else { return }
             
             if let error {
-                NSLog("TCP receive error: \(error)")
+                AirCatchLog.error("TCP receive error: \(error)")
                 return
             }
             
@@ -258,7 +258,7 @@ final class NetworkManager {
                 guard let self else { return }
                 
                 if let error {
-                    NSLog("TCP payload receive error: \(error)")
+                    AirCatchLog.error("TCP payload receive error: \(error)")
                 }
                 
                 if let payloadData {

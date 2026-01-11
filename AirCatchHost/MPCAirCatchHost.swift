@@ -56,7 +56,7 @@ final class MPCAirCatchHost: NSObject {
         do {
             try session.send(datagram, toPeers: [peer], with: mode)
         } catch {
-            NSLog("[MPCAirCatchHost] send failed: \(error)")
+            AirCatchLog.error(" send failed: \(error)")
         }
     }
 
@@ -66,7 +66,7 @@ final class MPCAirCatchHost: NSObject {
         do {
             try session.send(datagram, toPeers: session.connectedPeers, with: mode)
         } catch {
-            NSLog("[MPCAirCatchHost] broadcast failed: \(error)")
+            AirCatchLog.error(" broadcast failed: \(error)")
         }
     }
 
@@ -104,7 +104,7 @@ extension MPCAirCatchHost: MCNearbyServiceAdvertiserDelegate {
     }
 
     nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
-        NSLog("[MPCAirCatchHost] advertise failed: \(error)")
+        AirCatchLog.error(" advertise failed: \(error)")
     }
 }
 

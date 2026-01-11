@@ -23,15 +23,15 @@ enum AirCatchLog {
     
     nonisolated private static let subsystem = "com.aircatch.client"
     
-    static func info(_ message: String, category: Category = .general) {
+    nonisolated static func info(_ message: String, category: Category = .general) {
         os_log(.info, log: OSLog(subsystem: subsystem, category: category.rawValue), "%{public}@", message)
     }
     
-    static func error(_ message: String, category: Category = .general) {
+    nonisolated static func error(_ message: String, category: Category = .general) {
         os_log(.error, log: OSLog(subsystem: subsystem, category: category.rawValue), "%{public}@", message)
     }
     
-    static func debug(_ message: String, category: Category = .general) {
+    nonisolated static func debug(_ message: String, category: Category = .general) {
         os_log(.debug, log: OSLog(subsystem: subsystem, category: category.rawValue), "%{public}@", message)
     }
 }
@@ -168,6 +168,8 @@ struct HandshakeRequest: Codable {
     let displayConfig: ExtendedDisplayConfig?
     /// Requested session features. If nil, host may assume defaults.
     let requestVideo: Bool?
+    /// When true, client requests audio streaming from host.
+    let requestAudio: Bool?
     /// Prefer low-latency transport when host must fall back from AirCatch.
     let preferLowLatency: Bool?
     /// When true, client requests lossless-ish video delivery (UDP + retransmit over TCP).
@@ -183,6 +185,7 @@ struct HandshakeRequest: Codable {
          preferredQuality: QualityPreset? = nil,
          displayConfig: ExtendedDisplayConfig? = nil,
          requestVideo: Bool? = nil,
+         requestAudio: Bool? = nil,
          preferLowLatency: Bool? = nil,
          losslessVideo: Bool? = nil,
          deviceId: String? = nil,
@@ -195,6 +198,7 @@ struct HandshakeRequest: Codable {
         self.preferredQuality = preferredQuality
         self.displayConfig = displayConfig
         self.requestVideo = requestVideo
+        self.requestAudio = requestAudio
         self.preferLowLatency = preferLowLatency
         self.losslessVideo = losslessVideo
         self.deviceId = deviceId

@@ -20,7 +20,7 @@ struct AirCatchClientApp: App {
             try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
-            print("[AirCatchClient] Audio session setup failed: \(error)")
+            AirCatchLog.error("Audio session setup failed: \(error)", category: .general)
         }
     }
     

@@ -96,6 +96,9 @@ final class ClientManager: ObservableObject {
     /// Whether the current/next handshake is requesting video streaming.
     @Published private(set) var videoRequested: Bool = false
     
+    /// User preference: Stream audio from host
+    @Published var audioEnabled: Bool = false
+    
     // MARK: - Video Frame Output
     
     /// Latest compressed video frame data for the renderer
@@ -106,6 +109,7 @@ final class ClientManager: ObservableObject {
     private let networkManager = NetworkManager.shared
     private let bonjourBrowser = BonjourBrowser()
     private let mpcClient = MPCAirCatchClient()
+    private let audioPlayer = AudioPlayer()
     private var cancellables = Set<AnyCancellable>()
 
     private enum ActiveLink {
@@ -134,7 +138,7 @@ final class ClientManager: ObservableObject {
         bonjourBrowser.startBrowsing(serviceType: AirCatchConfig.bonjourServiceType)
         mpcClient.startBrowsing()
         #if DEBUG
-        NSLog("[ClientManager] Started Bonjour discovery")
+        AirCatchLog.info(" Started Bonjour discovery")
         #endif
     }
     
@@ -151,6 +155,7 @@ final class ClientManager: ObservableObject {
     func disconnect(shouldRetry: Bool = false) {
         networkManager.stopAll()
         mpcClient.disconnect()
+        audioPlayer.stop()
         screenInfo = nil
         latestFrameData = nil
         activeLink = .network
@@ -163,7 +168,7 @@ final class ClientManager: ObservableObject {
             // Restart discovery
             startDiscovery()
             #if DEBUG
-            NSLog("[ClientManager] Disconnected")
+            AirCatchLog.info(" Disconnected")
             #endif
         }
     }
@@ -190,7 +195,7 @@ final class ClientManager: ObservableObject {
                 ClientManager.shared.discoveredHosts.append(host)
             }
             #if DEBUG
-            NSLog("[ClientManager] Found host: \(host.name)")
+            AirCatchLog.info(" Found host: \(host.name)")
             #endif
         }
 
@@ -214,7 +219,7 @@ final class ClientManager: ObservableObject {
                 }
             }
             #if DEBUG
-            NSLog("[ClientManager] Lost host: \(host.name)")
+            AirCatchLog.info(" Lost host: \(host.name)")
             #endif
         }
     }
@@ -366,14 +371,19 @@ final class ClientManager: ObservableObject {
         name: String = "Remote Mac"
     ) {
         #if DEBUG
-        NSLog("[ClientManager] Connecting by direct IP: \(ipAddress):\(port)")
+        AirCatchLog.info(" Connecting by direct IP: \(ipAddress):\(port)")
         #endif
         
         // Create a discovered host entry for the direct IP
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            AirCatchLog.error("Invalid port: \(port)", category: .network)
+            return
+        }
+        
         let directHost = DiscoveredHost(
             id: "direct-\(ipAddress)-\(port)",
             name: name,
-            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(ipAddress), port: NWEndpoint.Port(rawValue: port)!),
+            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(ipAddress), port: nwPort),
             udpPort: nil,
             tcpPort: port,
             mpcPeerName: nil,
@@ -408,8 +418,7 @@ final class ClientManager: ObservableObject {
         let maxH = min(capped.width, capped.height)
         
         #if DEBUG
-        NSLog("[ClientManager] Screen resolution: bounds=%.0fx%.0f scale=%.1f render=%dx%d", 
-              bounds.width, bounds.height, scale, maxW, maxH)
+        AirCatchLog.info("Screen resolution: bounds=\(bounds.width)x\(bounds.height) scale=\(scale) render=\(maxW)x\(maxH)", category: .video)
         #endif
 
         let request = HandshakeRequest(
@@ -421,6 +430,7 @@ final class ClientManager: ObservableObject {
             preferredQuality: selectedPreset,
             displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
+            requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: true,
             pin: enteredPIN.isEmpty ? nil : enteredPIN
@@ -462,7 +472,7 @@ final class ClientManager: ObservableObject {
         reconnectAttempts += 1
         let delay = pow(2.0, Double(reconnectAttempts)) // 2, 4, 8, 16...
         #if DEBUG
-        NSLog("[ClientManager] Reconnecting in \(delay)s (Attempt \(reconnectAttempts))")
+        AirCatchLog.info(" Reconnecting in \(delay)s (Attempt \(reconnectAttempts))")
         #endif
         state = .connecting // Updates UI to "Connecting..."
         
@@ -478,7 +488,7 @@ final class ClientManager: ObservableObject {
 
         guard let endpoint = host.endpoint else {
             #if DEBUG
-            NSLog("[ClientManager] No Bonjour endpoint for host: \(host.name)")
+            AirCatchLog.info(" No Bonjour endpoint for host: \(host.name)")
             #endif
             disconnect(shouldRetry: true)
             return
@@ -511,7 +521,7 @@ final class ClientManager: ObservableObject {
                     }
                 }
             case .failed(let error):
-                NSLog("[ClientManager] Resolution failed: \(error)")
+                AirCatchLog.info(" Resolution failed: \(error)")
                 connection.stateUpdateHandler = nil
                 connection.cancel()
                 Task { @MainActor in
@@ -528,7 +538,7 @@ final class ClientManager: ObservableObject {
     private func establishConnection(hostIP: String) {
         #if DEBUG
         debugConnectionStatus = "Connecting to \(hostIP)..."
-        NSLog("[ClientManager] Connecting to \(hostIP)")
+        AirCatchLog.info(" Connecting to \(hostIP)")
         #endif
         
         let tcpPort = connectedHost?.tcpPort ?? AirCatchConfig.tcpPort
@@ -565,7 +575,7 @@ final class ClientManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay to ensure socket ready
             NetworkManager.shared.sendUDP(type: .handshake, payload: Data())
             #if DEBUG
-            NSLog("[ClientManager] Sent UDP ping")
+            AirCatchLog.info(" Sent UDP ping")
             #endif
         }
     }
@@ -589,8 +599,7 @@ final class ClientManager: ObservableObject {
         let maxH = min(capped.width, capped.height)
         
         #if DEBUG
-        NSLog("[ClientManager] Screen resolution: bounds=%.0fx%.0f scale=%.1f render=%dx%d", 
-              bounds.width, bounds.height, scale, maxW, maxH)
+        AirCatchLog.info("Screen resolution: bounds=\(bounds.width)x\(bounds.height) scale=\(scale) render=\(maxW)x\(maxH)", category: .video)
         #endif
 
         let request = HandshakeRequest(
@@ -603,6 +612,7 @@ final class ClientManager: ObservableObject {
             preferredQuality: (connectedHost?.isDirectIP == true) ? .performance : selectedPreset,
             displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
+            requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: true,
             pin: enteredPIN.isEmpty ? nil : enteredPIN
@@ -611,7 +621,7 @@ final class ClientManager: ObservableObject {
         if let data = try? JSONEncoder().encode(request) {
             networkManager.sendTCP(type: .handshake, payload: data)
             #if DEBUG
-            NSLog("[ClientManager] Sent handshake: video=\(pendingRequestVideo) preset=\(selectedPreset.displayName)")
+            AirCatchLog.info(" Sent handshake: video=\(pendingRequestVideo) preset=\(selectedPreset.displayName)")
             #endif
         }
     }
@@ -658,7 +668,7 @@ final class ClientManager: ObservableObject {
         case .pairingFailed:
             // Wrong PIN - disconnect and show error
             #if DEBUG
-            NSLog("[ClientManager] Pairing failed - wrong PIN")
+            AirCatchLog.info(" Pairing failed - wrong PIN")
             #endif
             state = .error("Wrong PIN")
             enteredPIN = "" // Clear the PIN
@@ -679,7 +689,7 @@ final class ClientManager: ObservableObject {
         udpPacketCount += 1
         #if DEBUG
         if udpPacketCount <= 5 {
-            NSLog("[ClientManager] Received UDP packet #\(udpPacketCount): type=\(packet.type)")
+            AirCatchLog.info(" Received UDP packet #\(udpPacketCount): type=\(packet.type)")
         }
         #endif
         
@@ -693,6 +703,10 @@ final class ClientManager: ObservableObject {
             // Handle fragmented video frame
             handleVideoChunk(packet.payload)
             
+        case .audioPCM:
+            // Play audio packet
+            audioPlayer.playAudioPacket(packet.payload)
+            
         default:
             break
         }
@@ -704,6 +718,7 @@ final class ClientManager: ObservableObject {
                 state = .streaming
                 reconnectAttempts = 0 // Reset success
                 debugConnectionStatus = "Streaming (UDP)"
+                audioPlayer.start()
             }
         }
     }
@@ -715,7 +730,7 @@ final class ClientManager: ObservableObject {
         let chunkIdx = Int(UInt16(data[4]) << 8 | UInt16(data[5]))
         
         if frameId % 60 == 0 && chunkIdx == 0 {
-             // NSLog("[ClientManager] Rx Chunk: F\(frameId) C\(chunkIdx)") -- Removed for performance
+             // AirCatchLog.info(" Rx Chunk: F\(frameId) C\(chunkIdx)") -- Removed for performance
         }
         
         reassembler.process(
@@ -744,7 +759,7 @@ final class ClientManager: ObservableObject {
     private func handleHandshakeAck(_ payload: Data) {
         guard let ack = try? JSONDecoder().decode(HandshakeAck.self, from: payload) else {
             #if DEBUG
-            NSLog("[ClientManager] Failed to decode handshake ack")
+            AirCatchLog.info(" Failed to decode handshake ack")
             #endif
             return
         }
@@ -753,7 +768,7 @@ final class ClientManager: ObservableObject {
         state = .connected
         
         #if DEBUG
-        NSLog("[ClientManager] Connected! Screen: \(ack.width)x\(ack.height) @ \(ack.frameRate)fps")
+        AirCatchLog.info(" Connected! Screen: \(ack.width)x\(ack.height) @ \(ack.frameRate)fps")
         #endif
     }
     
@@ -886,7 +901,7 @@ private final class VideoReassembler {
         chunkCount += 1
         #if DEBUG
         if chunkCount <= 10 {
-            NSLog("[Reassembler] Chunk \(chunkCount): F\(frameId) C\(chunkIdx)/\(totalChunks) size=\(chunkData.count)")
+            AirCatchLog.debug(" Chunk \(chunkCount): F\(frameId) C\(chunkIdx)/\(totalChunks) size=\(chunkData.count)")
         }
         #endif
         
@@ -932,7 +947,7 @@ private final class VideoReassembler {
                     if let part = assembly.chunks[i] {
                         fullFrame.append(part)
                     } else {
-                        NSLog("[Reassembler] Missing chunk \(i) for frame \(frameId)")
+                        AirCatchLog.debug(" Missing chunk \(i) for frame \(frameId)")
                         return
                     }
                 }
@@ -941,7 +956,7 @@ private final class VideoReassembler {
                 self.frameCount += 1
                 #if DEBUG
                 if self.frameCount <= 5 {
-                    NSLog("[Reassembler] Completed frame \(self.frameCount): \(fullFrame.count) bytes")
+                    AirCatchLog.debug(" Completed frame \(self.frameCount): \(fullFrame.count) bytes")
                 }
                 #endif
                 self.reassemblyBuffer.removeValue(forKey: frameId)

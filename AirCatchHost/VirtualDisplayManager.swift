@@ -46,17 +46,17 @@ final class VirtualDisplayManager: ObservableObject {
     private func checkDriverKitAvailability() {
         guard DRIVERKIT_ENABLED else {
             isDriverKitAvailable = false
-            NSLog("[VirtualDisplayManager] DriverKit is disabled - waiting for Apple entitlement approval")
+            AirCatchLog.info(" DriverKit is disabled - waiting for Apple entitlement approval")
             return
         }
         
         // Try to connect to the driver
         if let client = driverKitClient, client.connectToDriver() {
             isDriverKitAvailable = true
-            NSLog("[VirtualDisplayManager] DriverKit driver is available")
+            AirCatchLog.info(" DriverKit driver is available")
         } else {
             isDriverKitAvailable = false
-            NSLog("[VirtualDisplayManager] DriverKit driver not available - will use fallback methods")
+            AirCatchLog.info(" DriverKit driver not available - will use fallback methods")
         }
     }
     
@@ -64,7 +64,7 @@ final class VirtualDisplayManager: ObservableObject {
     func installDriver() {
         guard DRIVERKIT_ENABLED else {
             lastError = "DriverKit is not available. Waiting for Apple entitlement approval."
-            NSLog("[VirtualDisplayManager] Cannot install driver - DriverKit disabled")
+            AirCatchLog.info(" Cannot install driver - DriverKit disabled")
             return
         }
         driverKitClient?.installDriver()
@@ -95,13 +95,13 @@ final class VirtualDisplayManager: ObservableObject {
         }
         
         // Fallback: Check for existing secondary display
-        NSLog("[VirtualDisplayManager] DriverKit not available, checking for secondary displays")
+        AirCatchLog.info(" DriverKit not available, checking for secondary displays")
         if let secondaryDisplay = findSecondaryDisplay() {
             return useExistingDisplay(secondaryDisplay, config: config)
         }
         
         lastError = "Extend display requires a secondary display connected. DriverKit virtual displays pending Apple approval."
-        NSLog("[VirtualDisplayManager] \(lastError ?? "Unknown error")")
+        AirCatchLog.info(" \(lastError ?? "Unknown error")")
         return nil
     }
     
@@ -124,13 +124,13 @@ final class VirtualDisplayManager: ObservableObject {
                 self.displayFrame = client.displayFrame
                 self.isActive = true
                 
-                NSLog("[VirtualDisplayManager] Created virtual display via DriverKit: \(displayID)")
+                AirCatchLog.info(" Created virtual display via DriverKit: \(displayID)")
                 return displayID
             }
         }
         
         lastError = client.lastError ?? "Failed to create virtual display"
-        NSLog("[VirtualDisplayManager] DriverKit display creation failed: \(lastError ?? "Unknown error")")
+        AirCatchLog.info(" DriverKit display creation failed: \(lastError ?? "Unknown error")")
         return nil
     }
     
@@ -148,7 +148,7 @@ final class VirtualDisplayManager: ObservableObject {
         isActive = false
         currentConfig = nil
         
-        NSLog("[VirtualDisplayManager] Virtual display session ended")
+        AirCatchLog.info(" Virtual display session ended")
     }
     
     /// Get the screen frame for the virtual display (for input coordinate mapping).
@@ -176,7 +176,7 @@ final class VirtualDisplayManager: ObservableObject {
         
         // Find a display that's not the main display
         for display in displays where display != mainDisplay {
-            NSLog("[VirtualDisplayManager] Found secondary display: \(display)")
+            AirCatchLog.info(" Found secondary display: \(display)")
             return display
         }
         
@@ -190,7 +190,7 @@ final class VirtualDisplayManager: ObservableObject {
         self.isActive = true
         self.currentConfig = config
         
-        NSLog("[VirtualDisplayManager] Using existing secondary display: \(displayID), frame: \(displayFrame ?? .zero)")
+        AirCatchLog.info(" Using existing secondary display: \(displayID), frame: \(displayFrame ?? .zero)")
         
         return displayID
     }

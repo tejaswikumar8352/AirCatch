@@ -64,7 +64,7 @@ class KeyboardCaptureView: UIView, UIKeyInput {
     }
     
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        super.init(coder: coder)
     }
     
     // Called when user types a character
