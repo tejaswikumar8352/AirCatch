@@ -61,7 +61,7 @@ final class HostManager: ObservableObject {
     private var screenStreamer: ScreenStreamer?
     private var currentClientDimensions: (width: Int, height: Int)?
     private var currentFrameId: UInt32 = 0
-    private let maxUDPPayloadSize = 1200 // Safe UDP payload size (below MTU)
+    private let maxUDPPayloadSize = AirCatchConfig.maxUDPPayloadSize // Safe UDP payload size (below MTU)
 
     /// When false, prefer sending video over TCP (higher reliability).
     private var preferLowLatency: Bool = true
@@ -76,7 +76,9 @@ final class HostManager: ObservableObject {
     }
 
     // FrameID -> cached chunks for retransmit (lossless mode)
-    private var cachedFrames: [UInt32: CachedFrame] = [:]
+    // SAFETY: Only accessed from cachedFramesQueue
+    nonisolated(unsafe) private var cachedFrames: [UInt32: CachedFrame] = [:]
+    private let cachedFramesQueue = DispatchQueue(label: "com.aircatch.framecache")
 
     // Target display selection (main vs extended)
     private var targetDisplayID: CGDirectDisplayID? = nil
@@ -274,7 +276,15 @@ final class HostManager: ObservableObject {
     }
 
     private func handleMPCHandshake(payload: Data, from peer: MCPeerID) {
-        let handshakeRequest = try? JSONDecoder().decode(HandshakeRequest.self, from: payload)
+        let handshakeRequest: HandshakeRequest?
+        do {
+            handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
+        } catch {
+            #if DEBUG
+            AirCatchLog.error("Failed to decode MPC HandshakeRequest: \(error)", category: .network)
+            #endif
+            handshakeRequest = nil
+        }
         let receivedPIN = handshakeRequest?.pin ?? ""
 
         if receivedPIN != currentPIN {
@@ -371,7 +381,7 @@ final class HostManager: ObservableObject {
                 currentQuality = preferredQuality
                 AirCatchLog.info("Using client's preferred quality: \(preferredQuality.displayName)", category: .video)
                 
-                // Adaptive: Apply new bitrate/FPS immediately if streaming
+                // Apply new bitrate/FPS immediately if streaming
                 if let streamer = self.screenStreamer {
                     streamer.setBitrate(currentQuality.bitrate)
                     streamer.setFrameRate(currentQuality.frameRate)
@@ -623,6 +633,7 @@ final class HostManager: ObservableObject {
             try await screenStreamer?.start()
             isStreaming = true
             postStatusChange()
+            
             AirCatchLog.info("Screen streaming started", category: .video)
         } catch {
             AirCatchLog.error("Failed to start streaming: \(error)", category: .video)
@@ -747,19 +758,23 @@ final class HostManager: ObservableObject {
     // Dedicated queue for video broadcasting to avoid blocking compression
     private let broadcastQueue = DispatchQueue(label: "com.aircatch.broadcast", qos: .userInteractive)
 
-    private func pruneCachedFramesIfNeeded(now: TimeInterval = Date().timeIntervalSinceReferenceDate) {
-        // Always prune old frames to prevent memory leaks, regardless of lossless mode
+    private nonisolated func pruneCachedFramesIfNeeded(now: TimeInterval = Date().timeIntervalSinceReferenceDate) {
+        // Must be called on cachedFramesQueue
         guard !cachedFrames.isEmpty else { return }
 
         let oldKeys = cachedFrames
-            .filter { now - $0.value.createdAt > 1.0 }
+            .filter { now - $0.value.createdAt > AirCatchConfig.frameCacheTTL }
             .map { $0.key }
         for key in oldKeys { cachedFrames.removeValue(forKey: key) }
     }
 
-    private func cacheFrameForRetransmit(frameId: UInt32, totalChunks: Int, chunksByIndex: [Int: Data]) {
-        guard losslessVideoEnabled else { return }
-        pruneCachedFramesIfNeeded()
+    private nonisolated func cacheFrameForRetransmit(frameId: UInt32, totalChunks: Int, chunksByIndex: [Int: Data]) {
+        // Must be called on cachedFramesQueue
+        // Note: losslessVideoEnabled is checked before calling this from broadcastVideoFrame
+        // Prune only every 60 frames (once per second at 60fps) for performance
+        if frameId % UInt32(AirCatchConfig.cachePruneInterval) == 0 {
+            pruneCachedFramesIfNeeded()
+        }
         cachedFrames[frameId] = CachedFrame(
             createdAt: Date().timeIntervalSinceReferenceDate,
             totalChunks: totalChunks,
@@ -833,8 +848,10 @@ final class HostManager: ObservableObject {
 
             if shouldCacheForRetransmit {
                 let chunksSnapshot = chunksForCache
-                Task { @MainActor in
-                    self.cacheFrameForRetransmit(frameId: frameId, totalChunks: totalChunks, chunksByIndex: chunksSnapshot)
+                let frameIdCopy = frameId
+                let totalChunksCopy = totalChunks
+                self.cachedFramesQueue.async {
+                    self.cacheFrameForRetransmit(frameId: frameIdCopy, totalChunks: totalChunksCopy, chunksByIndex: chunksSnapshot)
                 }
             }
         }
@@ -848,9 +865,16 @@ final class HostManager: ObservableObject {
     }
 
     private func handleVideoChunkNack(_ payload: Data, from connection: NWConnection) {
-        guard let request = try? JSONDecoder().decode(VideoChunkNackRequest.self, from: payload) else {
+        let request: VideoChunkNackRequest?
+        do {
+            request = try JSONDecoder().decode(VideoChunkNackRequest.self, from: payload)
+        } catch {
+            #if DEBUG
+            AirCatchLog.error("Failed to decode VideoChunkNackRequest: \(error)", category: .network)
+            #endif
             return
         }
+        guard let request else { return }
 
         guard losslessVideoEnabled else { return }
 
@@ -862,15 +886,19 @@ final class HostManager: ObservableObject {
             return
         }
 
-        guard let cached = cachedFrames[request.frameId] else { return }
+        // Thread-safe access to cached frames
+        cachedFramesQueue.async { [weak self] in
+            guard let self else { return }
+            guard let cached = self.cachedFrames[request.frameId] else { return }
 
-        let payloadsToResend: [Data] = request.missingChunkIndices.compactMap { idx in
-            cached.chunksByIndex[Int(idx)]
-        }
+            let payloadsToResend: [Data] = request.missingChunkIndices.compactMap { idx in
+                cached.chunksByIndex[Int(idx)]
+            }
 
-        broadcastQueue.async {
-            for payload in payloadsToResend {
-                NetworkManager.shared.sendUDP(to: udpEndpoint, type: .videoFrameChunk, payload: payload)
+            self.broadcastQueue.async {
+                for payload in payloadsToResend {
+                    NetworkManager.shared.sendUDP(to: udpEndpoint, type: .videoFrameChunk, payload: payload)
+                }
             }
         }
     }

@@ -31,7 +31,7 @@ final class VideoDecoder {
     // HEVC parameter sets (VPS required for HEVC)
     private var vpsData: Data?
     
-    private let queue = DispatchQueue(label: "com.aircatch.universal_decoder")
+    private let queue = DispatchQueue(label: "com.aircatch.universal_decoder", qos: .userInteractive)
     
     // MARK: - Public API
     

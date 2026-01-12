@@ -45,13 +45,13 @@ The function row follows Apple’s Mac keyboard layout for F1 through F12. For m
 Quality presets
 ---------------
 
-AirCatch ships with a few presets to make it easy to tune for different networks. All presets target 60fps; the main difference is bitrate.
+AirCatch ships with three presets optimized for HEVC on Apple Silicon. All presets run at 60 FPS.
 
-| Preset | Target Bitrate | When to use it |
+| Preset | Bitrate | When to use it |
 | --- | ---: | --- |
-| Performance | 25 Mbps | Congested Wi‑Fi, longer range |
-| Balanced | 45 Mbps | Default for typical 5GHz Wi‑Fi |
-| Quality | 80 Mbps | Strong Wi‑Fi 6/6E or wired |
+| Performance | 10 Mbps | Light streaming, bandwidth-conscious networks |
+| Balanced | 20 Mbps | Default – best balance of quality and responsiveness |
+| Pro | 30 Mbps | Maximum quality for static content and reading |
 
 How it works (at a glance)
 --------------------------

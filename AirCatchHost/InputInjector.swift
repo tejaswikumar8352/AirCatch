@@ -11,28 +11,14 @@ import AppKit
 import IOKit.hidsystem
 
 // MARK: - NX Media Key Constants
-// These are the correct NX key type values from IOKit/hidsystem/ev_keymap.h
+// These are the NX key type values from IOKit/hidsystem/ev_keymap.h
+// Only keeping the ones actually used by injectMediaKeyEvent
 private let NX_KEYTYPE_SOUND_UP: Int32 = 0
 private let NX_KEYTYPE_SOUND_DOWN: Int32 = 1
-private let NX_KEYTYPE_BRIGHTNESS_UP: Int32 = 2
-private let NX_KEYTYPE_BRIGHTNESS_DOWN: Int32 = 3
-private let NX_KEYTYPE_CAPS_LOCK: Int32 = 4
-private let NX_KEYTYPE_HELP: Int32 = 5
-private let NX_POWER_KEY: Int32 = 6
 private let NX_KEYTYPE_MUTE: Int32 = 7
-private let NX_KEYTYPE_NUM_LOCK: Int32 = 10
-private let NX_KEYTYPE_CONTRAST_UP: Int32 = 11
-private let NX_KEYTYPE_CONTRAST_DOWN: Int32 = 12
-private let NX_KEYTYPE_EJECT: Int32 = 14
-private let NX_KEYTYPE_VIDMIRROR: Int32 = 15
 private let NX_KEYTYPE_PLAY: Int32 = 16
 private let NX_KEYTYPE_NEXT: Int32 = 17
 private let NX_KEYTYPE_PREVIOUS: Int32 = 18
-private let NX_KEYTYPE_FAST: Int32 = 19
-private let NX_KEYTYPE_REWIND: Int32 = 20
-private let NX_KEYTYPE_ILLUMINATION_UP: Int32 = 21
-private let NX_KEYTYPE_ILLUMINATION_DOWN: Int32 = 22
-private let NX_KEYTYPE_ILLUMINATION_TOGGLE: Int32 = 23
 
 /// Injects mouse and keyboard events into the system.
 @MainActor
@@ -398,31 +384,67 @@ final class InputInjector {
     /// This is useful for paste operations or speech-to-text where constructing individual key events is inefficient.
     /// - Parameter text: The string to inject.
     func injectText(_ text: String) {
-        // Limited to 20 characters per event by CGEventKeyboardSetUnicodeString limit,
-        // but safe to iterate.
-        let maxChunkSize = 20
-        var startIndex = text.startIndex
-        
-        while startIndex < text.endIndex {
-            let endIndex = text.index(startIndex, offsetBy: maxChunkSize, limitedBy: text.endIndex) ?? text.endIndex
-            let chunk = String(text[startIndex..<endIndex])
-            
-            // Create a dummy key event (space, connection doesn't matter much here as we override string)
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else { return }
-            
-            // Convert string to UTF-16 for the API
-            let utf16Chars = Array(chunk.utf16)
-            event.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
-            event.post(tap: .cghidEventTap)
-            
-            // Need corresponding keyUp for some apps, but for Unicode string injection, KeyDown usually suffices to paste text.
-            // However, posting KeyUp is safer for state consistency.
-            if let upEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
-                upEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
-                upEvent.post(tap: .cghidEventTap)
+        // We support control characters used by incremental speech corrections.
+        // - U+0008 BACKSPACE => deleteBackward (keyCode 51)
+        // - U+007F DELETE    => deleteBackward (common in some streams)
+        // Normal text is still injected via keyboardSetUnicodeString (chunked).
+
+        func injectUnicodeText(_ unicodeText: String) {
+            guard !unicodeText.isEmpty else { return }
+
+            // Limited to ~20 UTF-16 code units per event by CGEventKeyboardSetUnicodeString.
+            // We'll chunk by Character count as a conservative heuristic.
+            let maxChunkSize = 20
+            var startIndex = unicodeText.startIndex
+
+            while startIndex < unicodeText.endIndex {
+                let endIndex = unicodeText.index(startIndex, offsetBy: maxChunkSize, limitedBy: unicodeText.endIndex) ?? unicodeText.endIndex
+                let chunk = String(unicodeText[startIndex..<endIndex])
+
+                guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else { return }
+                let utf16Chars = Array(chunk.utf16)
+                event.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
+                event.post(tap: .cghidEventTap)
+
+                if let upEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                    upEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
+                    upEvent.post(tap: .cghidEventTap)
+                }
+
+                startIndex = endIndex
             }
-            
-            startIndex = endIndex
+        }
+
+        func injectDeleteBackward(times: Int) {
+            guard times > 0 else { return }
+            for _ in 0..<times {
+                injectKeyEvent(keyCode: 51, modifiers: [], isKeyDown: true)
+                injectKeyEvent(keyCode: 51, modifiers: [], isKeyDown: false)
+            }
+        }
+
+        var buffer = ""
+        var pendingDeletes = 0
+
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x08, 0x7F:
+                // Flush any normal text before deleting.
+                injectUnicodeText(buffer)
+                buffer.removeAll(keepingCapacity: true)
+                pendingDeletes += 1
+            default:
+                if pendingDeletes > 0 {
+                    injectDeleteBackward(times: pendingDeletes)
+                    pendingDeletes = 0
+                }
+                buffer.unicodeScalars.append(scalar)
+            }
+        }
+
+        injectUnicodeText(buffer)
+        if pendingDeletes > 0 {
+            injectDeleteBackward(times: pendingDeletes)
         }
         
         #if DEBUG

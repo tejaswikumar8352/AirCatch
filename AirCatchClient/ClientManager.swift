@@ -457,8 +457,25 @@ final class ClientManager: ObservableObject {
                 reconnectAttempts = 0
                 debugConnectionStatus = "Streaming (AirCatch)"
             }
+        case .audioPCM:
+            // Handle audio frame
+            break
+        case .ping:
+            // Respond to ping with pong for RTT measurement
+            handlePingPacket(packet.payload)
         default:
             break
+        }
+    }
+    
+    /// Handle ping from Host and respond with pong
+    private func handlePingPacket(_ payload: Data) {
+        guard let ping = try? JSONDecoder().decode(PingPacket.self, from: payload) else { return }
+        
+        let pong = PongPacket(pingTimestamp: ping.timestamp)
+        if let data = try? JSONEncoder().encode(pong) {
+            // Respond via MPC (handles internally if no peers)
+            mpcClient.send(type: .pong, payload: data, mode: .reliable)
         }
     }
     
@@ -636,7 +653,7 @@ final class ClientManager: ObservableObject {
 
         // UNLOCKED: Allow full Retina resolution (approx 5.6MP for iPad Pro 12.9)
         // M-series chips can easily handle 8MP decoding.
-        let maxPixels = 8_000_000.0 
+        let maxPixels = AirCatchConfig.maxRenderPixels 
         let pixels = Double(w) * Double(h)
         guard pixels > maxPixels else { return (w, h) }
 

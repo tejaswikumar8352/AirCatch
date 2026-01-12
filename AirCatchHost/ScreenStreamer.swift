@@ -49,6 +49,12 @@ final class ScreenStreamer: NSObject {
     
     private var isRunning = false
     
+    // MARK: - Encoder Throughput Tracking
+    
+    /// Total frames encoded since last reset (used for FPS measurement)
+    private(set) var encodedFrameCount: Int = 0
+    private var lastFrameCountReset: Date = Date()
+    
     init(preset: QualityPreset = .balanced,
          maxClientWidth: Int? = nil,
          maxClientHeight: Int? = nil,
@@ -268,11 +274,11 @@ final class ScreenStreamer: NSObject {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: currentPreset.frameRate as CFNumber)
         
         // DYNAMIC BITRATE: Respect the selected high-bandwidth QualityPreset
-        // Performance (25Mbps) | Balanced (45Mbps) | Quality (80Mbps)
+        // Performance (10Mbps) | Balanced (20Mbps) | Pro (30Mbps)
         let targetBitrate = currentPreset.bitrate
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: targetBitrate as CFNumber)
         
-        // Adaptive Bitrate Cap: 2.5x target (UNLEASHED)
+        // Bitrate Cap: 2.5x target (VBR headroom)
         // High burst allowance eliminates scrolling stutter by allowing VBR spikes
         let bytesPerSecondCap = Int(Double(targetBitrate) / 8.0 * 2.5)
         let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
@@ -364,7 +370,7 @@ final class ScreenStreamer: NSObject {
     }
     
     private var compressCount = 0
-    private var skippedFrames = 0
+    private(set) var skippedFrameCount: Int = 0  // Exposed for diagnostics
     
     private func compressFrame(_ sampleBuffer: CMSampleBuffer) {
         compressCount += 1
@@ -381,13 +387,13 @@ final class ScreenStreamer: NSObject {
         // ScreenCaptureKit provides sample buffers with CVPixelBuffers
         // Some callbacks may not have imageBuffer - just skip them silently
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            skippedFrames += 1
+            skippedFrameCount += 1
             #if DEBUG
             // Only log first few skipped frames - this is normal for some ScreenCaptureKit callbacks
-            if skippedFrames <= 2 {
+            if skippedFrameCount <= 2 {
                 let dataReady = CMSampleBufferDataIsReady(sampleBuffer)
                 let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-                AirCatchLog.debug("Skipped frame \(skippedFrames) (no imageBuffer, dataReady=\(dataReady ? 1 : 0), samples=\(numSamples))", category: .video)
+                AirCatchLog.debug("Skipped frame \(skippedFrameCount) (no imageBuffer, dataReady=\(dataReady ? 1 : 0), samples=\(numSamples))", category: .video)
             }
             #endif
             return
@@ -395,7 +401,7 @@ final class ScreenStreamer: NSObject {
         
         #if DEBUG
         // Log pixel buffer details for first successful frame only
-        if compressCount - skippedFrames == 1 {
+        if compressCount - skippedFrameCount == 1 {
             let pbWidth = CVPixelBufferGetWidth(imageBuffer)
             let pbHeight = CVPixelBufferGetHeight(imageBuffer)
             AirCatchLog.debug("First imageBuffer: \(pbWidth)x\(pbHeight)", category: .video)
@@ -499,6 +505,7 @@ final class ScreenStreamer: NSObject {
         #endif
         
         frameCallback?(frameData)
+        encodedFrameCount += 1  // Track encoded frames
     }
 
     /// Returns true when the sample buffer represents a keyframe (sync frame).

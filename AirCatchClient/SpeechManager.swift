@@ -24,6 +24,19 @@ final class SpeechManager: ObservableObject {
     
     private var onTextCallback: ((String) -> Void)?
     
+    // Session ID to safely invalidate stale callbacks
+    private var currentSessionID: UUID?
+
+    // MARK: - Incremental emission state
+
+    /// Text we have already emitted (typed on the Mac) for the current recording session.
+    /// We ONLY append to this - never delete from it during a session.
+    private var emittedText: String = ""
+
+    /// The last full transcription we observed from SFSpeechRecognizer.
+    /// Used to detect when we need to flush remaining text on stop.
+    private var lastObservedFullText: String = ""
+    
     private init() {
         requestAuthorization()
     }
@@ -40,12 +53,17 @@ final class SpeechManager: ObservableObject {
         if isListening {
             stopRecording()
         }
+           
+        // Start new session
+        let sessionID = UUID()
+        self.currentSessionID = sessionID
         
         // Cancel existing task
         recognitionTask?.cancel()
         recognitionTask = nil
         
         self.onTextCallback = onText
+        resetIncrementalState()
         
         // update audio session for recording
         let audioSession = AVAudioSession.sharedInstance()
@@ -65,32 +83,24 @@ final class SpeechManager: ObservableObject {
         // Check input node
         let inputNode = audioEngine.inputNode
         
-        // Prevent audio feedback loop (?) - usually unnecessary for input-only tap but good practice
-        
         recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
             guard let self = self else { return }
             
-            var isFinal = false
-            
-            if let result = result {
-                // We want to send *updates* or *final* text?
-                // For "Live Typing", sending partials is tricky (backspacing?).
-                // Simplest approach: Send ONLY the *new* part? 
-                // OR: Send the Best Transcription.
-                // Replicating "Type what I say":
-                // If I say "Hello", it types "Hello".
-                // If I then say " World", it types " World".
-                // Result.bestTranscription.formattedString is the WHOLE text since start of session.
-                // We need to diff it, or just reset session on pauses?
-                // Diffing is safer.
-                
-                let currentText = result.bestTranscription.formattedString
-                self.processTextUpdate(currentText)
-                
-                isFinal = result.isFinal
+            // Strictly enforce session validity
+            // If the user stopped/restarted, this callback refers to a dead session.
+            guard self.currentSessionID == sessionID else {
+                return
             }
-            
-            if error != nil || isFinal {
+
+            if let result {
+                self.handleRecognitionResult(result)
+                if result.isFinal {
+                    self.stopRecording()
+                    return
+                }
+            }
+
+            if error != nil {
                 self.stopRecording()
             }
         }
@@ -111,9 +121,33 @@ final class SpeechManager: ObservableObject {
     func stopRecording() {
         if !isListening { return }
         
+        // CRITICAL: Capture and then IMMEDIATELY nil the callback
+        // This is the ultimate safeguard - even if zombie callbacks fire,
+        // they cannot send text because onTextCallback is nil
+        let callbackToUse = onTextCallback
+        onTextCallback = nil
+        
+        // Invalidate session ID as secondary protection
+        currentSessionID = nil
+        
+        // Now flush remaining text using the captured callback (not the nil'd instance var)
+        if !lastObservedFullText.isEmpty && lastObservedFullText != emittedText {
+            if lastObservedFullText.hasPrefix(emittedText) {
+                let remainingText = String(lastObservedFullText.dropFirst(emittedText.count))
+                if !remainingText.isEmpty {
+                    callbackToUse?(remainingText)
+                    #if DEBUG
+                    print("🎤 Final flush: '\(remainingText)'")
+                    #endif
+                }
+            }
+        }
+        
+        // Stop audio engine
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         
+        // End recognition
         recognitionRequest?.endAudio()
         recognitionRequest = nil
         
@@ -121,35 +155,83 @@ final class SpeechManager: ObservableObject {
         recognitionTask = nil
         
         isListening = false
-        lastProcessedText = "" // Reset for next session
+        resetIncrementalState()
         
-        // Restore session to playback if needed?
-        // Ideally AudioPlayer handles its own session state or we leave it.
-        // Let's reset to default playback to be nice to system audio
+        // Restore session to playback
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         
         AirCatchLog.info("Speech recognition stopped", category: .input)
     }
-    
-    // MARK: - Diffing Logic
-    
-    private var lastProcessedText = ""
-    
-    private func processTextUpdate(_ fullText: String) {
-        // If fullText starts with lastProcessed, send the suffix.
-        if fullText.hasPrefix(lastProcessedText) {
-            let newText = String(fullText.dropFirst(lastProcessedText.count))
+
+    // MARK: - Recognition handling
+
+    private func handleRecognitionResult(_ result: SFSpeechRecognitionResult) {
+        // IMPORTANT: Skip final results entirely - we handle everything via partials + flush
+        // The final result often duplicates what we already sent from partials
+        if result.isFinal {
+            return
+        }
+        
+        let fullText = result.bestTranscription.formattedString
+        
+        // Store for flush on stop
+        lastObservedFullText = fullText
+        
+        // SIMPLE APPROACH: Only emit text that EXTENDS what we've already typed.
+        // Use exact string prefix matching (case-sensitive) to avoid any ambiguity.
+        
+        if fullText.hasPrefix(emittedText) {
+            // The new text extends what we already typed - emit the suffix
+            let newText = String(fullText.dropFirst(emittedText.count))
+            
             if !newText.isEmpty {
                 onTextCallback?(newText)
-                lastProcessedText = fullText
+                emittedText = fullText
+                
+                #if DEBUG
+                print("🎤 Partial Emit: '\(newText)' | Total Emitted: \(emittedText.count)")
+                #endif
             }
-        } else {
-            // Text changed radically (correction?), maybe send backspaces?
-            // For now, simpliest is to ignore corrections or just send new text.
-            // Complex diffing is out of scope.
-            // Reset logic:
-            lastProcessedText = fullText
         }
+    }
+
+    /// Called when recording stops - emit any text we haven't sent yet.
+    /// This is the ONLY place we might send remaining text, and we're very careful.
+    private func flushRemainingText() {
+        guard !lastObservedFullText.isEmpty else { return }
+        
+        #if DEBUG
+        print("🎤 Flush Check: LastObserved='\(lastObservedFullText)' Emitted='\(emittedText)'")
+        #endif
+        
+        // Safety: If we've already emitted the EXACT text, do nothing.
+        // This catches the case where flush runs but we're already up to date.
+        if lastObservedFullText == emittedText {
+            return
+        }
+
+        // Only emit if the final text extends what we already sent
+        if lastObservedFullText.hasPrefix(emittedText) {
+            let remainingText = String(lastObservedFullText.dropFirst(emittedText.count))
+            
+            if !remainingText.isEmpty {
+                onTextCallback?(remainingText)
+                emittedText = lastObservedFullText
+                #if DEBUG
+                print("🎤 Flush Emit: '\(remainingText)'")
+                #endif
+            }
+        } 
+        
+        // DANGEROUS BRANCH REMOVED:
+        // The "else if emittedText.isEmpty" branch was likely the cause of full duplication.
+        // If we somehow missed all partials (rare), we might miss one phrase here,
+        // but that's better than duplicating the entire paragraph.
+    }
+
+    private func resetIncrementalState() {
+        emittedText = ""
+        lastObservedFullText = ""
     }
 }
 

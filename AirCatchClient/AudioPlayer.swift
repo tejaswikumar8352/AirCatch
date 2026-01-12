@@ -32,6 +32,7 @@ final class AudioPlayer {
     
     private var isRunning = false
     private var packetCount = 0
+    private var hasLoggedResync = false  // Prevents log spam during resyncs
     
     // MARK: - Initialization
     
@@ -131,8 +132,35 @@ final class AudioPlayer {
             }
         }
         
+        // --- Drift Correction ---
+        // If we have too many queued buffers, we are lagging behind video.
+        // ScreenStreamer sends small chunks (approx 10-20ms).
+        // 60 buffers ~= 1200ms latency (acceptable for streaming).
+        // If we exceed this, flush the queue to "jump" to the present.
+        
+        if pendingBuffers > 60 {
+            // Log sparingly to avoid console spam (only once per resync)
+            if !hasLoggedResync {
+                AirCatchLog.debug("Audio drift detected (Queue: \(pendingBuffers)). Resyncing...", category: .general)
+                hasLoggedResync = true
+            }
+            playerNode.stop() // Clears all scheduled buffers instantly
+            playerNode.play()
+            pendingBuffers = 0
+            // Reset log flag after a delay to allow future logging
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                self?.hasLoggedResync = false
+            }
+            // We still play *this* packet so we have something to hear immediately
+        }
+        
         // Schedule buffer for playback
-        playerNode.scheduleBuffer(buffer, completionHandler: nil)
+        pendingBuffers += 1
+        playerNode.scheduleBuffer(buffer) { [weak self] in
+            DispatchQueue.main.async { // Completion might be on background thread
+                self?.pendingBuffers = max(0, (self?.pendingBuffers ?? 1) - 1)
+            }
+        }
         
         #if DEBUG
         if packetCount == 1 {
@@ -140,4 +168,6 @@ final class AudioPlayer {
         }
         #endif
     }
+    
+    private var pendingBuffers = 0
 }

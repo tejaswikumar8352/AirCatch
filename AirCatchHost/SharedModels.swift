@@ -1,11 +1,12 @@
 //
 //  SharedModels.swift
-//  AirCatchHost
+//  AirCatchClient
 //
 //  Shared data models for host/client communication.
 //
 
 import Foundation
+import Network
 import os
 
 // MARK: - Logging
@@ -20,7 +21,7 @@ enum AirCatchLog {
         case general = "General"
     }
     
-    nonisolated private static let subsystem = "com.aircatch.host"
+    nonisolated private static let subsystem = "com.aircatch.client"
     
     nonisolated static func info(_ message: String, category: Category = .general) {
         os_log(.info, log: OSLog(subsystem: subsystem, category: category.rawValue), "%{public}@", message)
@@ -38,19 +39,31 @@ enum AirCatchLog {
 // MARK: - Configuration Constants
 
 enum AirCatchConfig {
-    static let udpPort: UInt16 = 5555
-    static let tcpPort: UInt16 = 5556
-    static let bonjourServiceType = "_aircatch._udp."
-    static let bonjourTCPServiceType = "_aircatch._tcp."
+    nonisolated static let udpPort: UInt16 = 5555
+    nonisolated static let tcpPort: UInt16 = 5556
+    nonisolated static let bonjourServiceType = "_aircatch._udp."
+    nonisolated static let bonjourTCPServiceType = "_aircatch._tcp."
     
     // Port aliases for clarity
-    static let defaultUDPPort: UInt16 = udpPort
-    static let defaultTCPPort: UInt16 = tcpPort
+    nonisolated static let defaultUDPPort: UInt16 = 5555
+    nonisolated static let defaultTCPPort: UInt16 = 5556
+    
+    // Network constants
+    static let maxUDPPayloadSize: Int = 1200  // Safe UDP payload size (below MTU)
     
     // Streaming defaults (optimized for HEVC on Apple Silicon)
     static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot
     static let defaultFrameRate: Int = 60        // Always 60 FPS
     static let maxTouchEventsPerSecond: Int = 60
+    static let reconnectMaxAttempts = 5
+    static let reconnectBaseDelay: TimeInterval = 1.0
+    
+    // Resolution limits
+    static let maxRenderPixels: Double = 8_000_000  // ~8MP cap for render resolution
+    
+    // Frame cache settings
+    nonisolated static let frameCacheTTL: TimeInterval = 1.0  // Seconds before cached frames expire
+    nonisolated static let cachePruneInterval: Int = 60       // Prune every N frames
     
     // Quality presets defaults
     static let defaultPreset: QualityPreset = .balanced
@@ -61,13 +74,6 @@ enum AirCatchConfig {
 enum NetworkMode: String, Codable {
     case local   // Same network, P2P/AWDL - max quality
     case remote  // Internet/NAT - adaptive quality
-    
-    var displayName: String {
-        switch self {
-        case .local: return "Local Network"
-        case .remote: return "Remote Connection"
-        }
-    }
 }
 
 // MARK: - Quality Presets
@@ -75,31 +81,32 @@ enum NetworkMode: String, Codable {
 // 3 presets: one for each use case
 
 enum QualityPreset: String, Codable, CaseIterable {
-    case performance  // 25 Mbps: Smooth even on weaker WiFi
-    case balanced     // 45 Mbps: The sweet spot for most users
-    case quality      // 80 Mbps: Maximum fidelity (Wired/6E recommended)
+    case performance  // Light streaming, bandwidth-conscious
+    case balanced     // Default - best balance of quality and responsiveness
+    case pro          // Maximum quality - best for static content/reading
     
     var bitrate: Int {
         switch self {
-        case .performance: return 25_000_000  // 25 Mbps
-        case .balanced: return 45_000_000     // 45 Mbps
-        case .quality: return 80_000_000      // 80 Mbps
+        case .performance: return 10_000_000  // 10 Mbps - light streaming
+        case .balanced: return 20_000_000     // 20 Mbps - sweet spot
+        case .pro: return 30_000_000          // 30 Mbps - high quality
         }
     }
     
     var frameRate: Int {
-        return 60
+        return 60  // All presets use 60 FPS
     }
     
+    /// Always use HEVC for best quality-per-bit
     var useHEVC: Bool {
         return true
     }
     
     var displayName: String {
         switch self {
-        case .performance: return "Performance (25 Mbps)"
-        case .balanced: return "Balanced (45 Mbps)"
-        case .quality: return "Quality (80 Mbps)"
+        case .performance: return "Performance"
+        case .balanced: return "Balanced"
+        case .pro: return "Pro"
         }
     }
     
@@ -109,9 +116,17 @@ enum QualityPreset: String, Codable, CaseIterable {
     
     var description: String {
         switch self {
-        case .performance: return "Lowest latency"
-        case .balanced: return "Best balance"
-        case .quality: return "Maximum quality"
+        case .performance: return "10 Mbps • 60 FPS"
+        case .balanced: return "20 Mbps • 60 FPS"
+        case .pro: return "30 Mbps • 60 FPS"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .performance: return "hare"
+        case .balanced: return "scale.3d"
+        case .pro: return "sparkles"
         }
     }
 }
@@ -129,7 +144,6 @@ enum PacketType: UInt8 {
     case qualityReport = 0x08  // Client reports quality metrics
     case ping = 0x09
     case pong = 0x0A
-    case qualityAdjust = 0x0B
     case videoFrameChunk = 0x0C
     case pairingFailed = 0x0D  // PIN mismatch
     case videoFrameChunkNack = 0x0E // Client requests resend of missing chunks (lossless mode)
@@ -150,13 +164,6 @@ struct VideoChunkNackRequest: Codable {
     let missingChunkIndices: [UInt16]
 }
 
-// MARK: - Quality Adjustment
-
-struct QualityAdjustment: Codable {
-    let preset: QualityPreset
-    let reason: String
-}
-
 // MARK: - Handshake Models
 
 /// Sent by client to initiate connection.
@@ -167,7 +174,6 @@ struct HandshakeRequest: Codable {
     let screenWidth: Int?           // Client screen width
     let screenHeight: Int?          // Client screen height
     let preferredQuality: QualityPreset?
-    let requestedMode: NetworkMode? // Client can request specific mode
     /// Extended display configuration (for virtual display mode)
     let displayConfig: ExtendedDisplayConfig?
     /// Requested session features. If nil, host may assume defaults.
@@ -181,10 +187,12 @@ struct HandshakeRequest: Codable {
     let deviceId: String?           // Unique device identifier for trusted devices
     let pin: String?                // PIN for pairing verification
     
-    init(clientName: String, clientVersion: String, deviceModel: String? = nil,
-         screenWidth: Int? = nil, screenHeight: Int? = nil,
+    init(clientName: String,
+         clientVersion: String,
+         deviceModel: String? = nil,
+         screenWidth: Int? = nil,
+         screenHeight: Int? = nil,
          preferredQuality: QualityPreset? = nil,
-         requestedMode: NetworkMode? = nil,
          displayConfig: ExtendedDisplayConfig? = nil,
          requestVideo: Bool? = nil,
          requestAudio: Bool? = nil,
@@ -198,7 +206,6 @@ struct HandshakeRequest: Codable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.preferredQuality = preferredQuality
-        self.requestedMode = requestedMode
         self.displayConfig = displayConfig
         self.requestVideo = requestVideo
         self.requestAudio = requestAudio
@@ -344,11 +351,6 @@ struct QualityReport: Codable {
     let jitterMs: Double
     let timestamp: TimeInterval
     
-    // Aliases for compatibility
-    var framesDropped: Int { droppedFrames }
-    var averageLatency: Double { latencyMs }
-    var framesReceived: Int { 0 } // Placeholder as it wasn't in original model
-    
     init(droppedFrames: Int, latencyMs: Double, jitterMs: Double,
          timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.droppedFrames = droppedFrames
@@ -362,37 +364,64 @@ struct QualityReport: Codable {
 
 struct PingPacket: Codable {
     let timestamp: TimeInterval
-    let sequenceNumber: UInt32?
-    let clientTimestamp: TimeInterval?
     
-    init(timestamp: TimeInterval = Date().timeIntervalSince1970, sequenceNumber: UInt32? = nil, clientTimestamp: TimeInterval? = nil) {
+    init(timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.timestamp = timestamp
-        self.sequenceNumber = sequenceNumber
-        self.clientTimestamp = clientTimestamp
     }
 }
 
 struct PongPacket: Codable {
-    let sequenceNumber: UInt32?
-    let clientTimestamp: TimeInterval
-    let hostTimestamp: TimeInterval
+    let pingTimestamp: TimeInterval
+    let pongTimestamp: TimeInterval
     
-    init(sequenceNumber: UInt32? = nil, clientTimestamp: TimeInterval, hostTimestamp: TimeInterval = Date().timeIntervalSince1970) {
-        self.sequenceNumber = sequenceNumber
-        self.clientTimestamp = clientTimestamp
-        self.hostTimestamp = hostTimestamp
+    init(pingTimestamp: TimeInterval, pongTimestamp: TimeInterval = Date().timeIntervalSince1970) {
+        self.pingTimestamp = pingTimestamp
+        self.pongTimestamp = pongTimestamp
     }
 }
 
-// MARK: - Video Frame Header
+// MARK: - Discovered Host
 
-struct VideoFrameHeader {
-    let timestamp: Int64
-    let frameNumber: UInt32
-    let isKeyFrame: Bool
+struct DiscoveredHost: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let endpoint: Network.NWEndpoint?
+    /// Optional ports advertised via Bonjour TXT (or direct-IP entry).
+    let udpPort: UInt16?
+    let tcpPort: UInt16?
+    /// If present, this host is reachable via AirCatch (MultipeerConnectivity).
+    /// Value matches the remote peer's displayName.
+    let mpcPeerName: String?
+    /// Optional stable host identifier (future-proofing for de-duplication).
+    let hostId: String?
+    let isDirectIP: Bool  // True if connected via direct IP (remote mode)
+    
+    init(
+        id: String,
+        name: String,
+        endpoint: Network.NWEndpoint? = nil,
+        udpPort: UInt16? = nil,
+        tcpPort: UInt16? = nil,
+        mpcPeerName: String? = nil,
+        hostId: String? = nil,
+        isDirectIP: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.endpoint = endpoint
+        self.udpPort = udpPort
+        self.tcpPort = tcpPort
+        self.mpcPeerName = mpcPeerName
+        self.hostId = hostId
+        self.isDirectIP = isDirectIP
+    }
+    
+    static func == (lhs: DiscoveredHost, rhs: DiscoveredHost) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
-// MARK: - Extended Display Types
+// MARK: - Virtual Display Mode
 
 /// Display streaming mode - mirror vs extend
 enum StreamDisplayMode: String, Codable, CaseIterable {
@@ -443,22 +472,3 @@ enum ExtendedDisplayResolution: String, Codable, CaseIterable {
     
     var displayName: String { rawValue }
 }
-
-// MARK: - Display Info
-
-struct DisplayInfo: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let width: Int
-    let height: Int
-    let isMain: Bool
-    
-    init(id: String, name: String, width: Int, height: Int, isMain: Bool = false) {
-        self.id = id
-        self.name = name
-        self.width = width
-        self.height = height
-        self.isMain = isMain
-    }
-}
-

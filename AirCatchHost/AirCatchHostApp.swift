@@ -12,66 +12,33 @@ struct AirCatchHostApp: App {
     @NSApplicationDelegateAdaptor(HostAppDelegate.self) var appDelegate
     
     var body: some Scene {
-        // Menu bar extra only - no main window
-        MenuBarExtra("AirCatch", systemImage: "display") {
-            MenuBarView()
+        // Main Window - ensures app is visible on launch (prevents "silent launch" rejection)
+        WindowGroup {
+            HostView()
+                .navigationTitle("AirCatch Host")
         }
-        .menuBarExtraStyle(.window)
-    }
-}
+        .windowResizability(.contentSize)
+        .commands {
+            // Standard commands (Sidebar, etc.) could go here
+            CommandGroup(replacing: .newItem) { } // Disable "New Window" to keep it simple
+        }
 
-struct MenuBarView: View {
-    @ObservedObject private var hostManager = HostManager.shared
-    @State private var isStreaming = false
-    
-    var body: some View {
-        VStack(spacing: 12) {
-            Text("AirCatch Host")
-                .font(.headline)
-            
-            Divider()
-            
-            // PIN Display
-            VStack(spacing: 4) {
-                Text("Connection PIN")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(hostManager.currentPIN)
-                    .font(.system(size: 32, weight: .bold, design: .monospaced))
-                    .foregroundColor(.blue)
+        // Optional Menu Bar interactive status
+        MenuBarExtra("AirCatch", systemImage: "display") {
+            Button("Show AirCatch Host") {
+                NSApp.activate(ignoringOtherApps: true)
+                // Logic to bring window to front would go here
             }
-            
-            Button("New PIN") {
-                hostManager.regeneratePIN()
-            }
-            .buttonStyle(.bordered)
-            
             Divider()
-            
-            if isStreaming {
-                Label("Streaming Active", systemImage: "antenna.radiowaves.left.and.right")
-                    .foregroundColor(.green)
-            } else {
-                Label("Waiting for ...", systemImage: "hourglass")
-                    .foregroundColor(.secondary)
-            }
-            
+            Text("PIN: \(HostManager.shared.currentPIN)")
             Divider()
-            
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
-            .keyboardShortcut("q")
-        }
-        .padding()
-        .frame(width: 200)
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StreamingStatusChanged"))) { notification in
-            if let streaming = notification.object as? Bool {
-                isStreaming = streaming
-            }
         }
     }
 }
+// Removed inline MenuBarView as it is now replaced by HostView.swift
 
 final class HostAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {

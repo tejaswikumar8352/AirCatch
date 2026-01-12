@@ -2,24 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Hardened Runtime -->
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    
-    <!-- Screen Capture -->
-    <key>com.apple.security.screen-capture-access</key>
-    <true/>
-    
-    <!-- Network - Incoming Connections (Server) -->
+    <!-- Network - Server (listening for client connections) -->
     <key>com.apple.security.network.server</key>
     <true/>
     
-    <!-- Network - Outgoing Connections (Client) -->
+    <!-- Network - Client (outbound connections) -->
     <key>com.apple.security.network.client</key>
-    <true/>
-    
-    <!-- Accessibility for Input Injection -->
-    <key>com.apple.security.temporary-exception.apple-events</key>
     <true/>
 </dict>
 </plist>

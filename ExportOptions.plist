@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Distribution method: Developer ID for direct distribution -->
+    <key>method</key>
+    <string>developer-id</string>
+    
+    <!-- Your Development Team ID -->
+    <key>teamID</key>
+    <string>VLQA7VVBTU</string>
+    
+    <!-- Signing certificate type -->
+    <key>signingCertificate</key>
+    <string>Developer ID Application</string>
+    
+    <!-- Signing style -->
+    <key>signingStyle</key>
+    <string>automatic</string>
+    
+    <!-- Destination for export -->
+    <key>destination</key>
+    <string>export</string>
+</dict>
+</plist>

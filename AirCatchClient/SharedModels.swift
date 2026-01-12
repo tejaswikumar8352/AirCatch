@@ -48,12 +48,22 @@ enum AirCatchConfig {
     nonisolated static let defaultUDPPort: UInt16 = 5555
     nonisolated static let defaultTCPPort: UInt16 = 5556
     
+    // Network constants
+    static let maxUDPPayloadSize: Int = 1200  // Safe UDP payload size (below MTU)
+    
     // Streaming defaults (optimized for HEVC on Apple Silicon)
     static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot
     static let defaultFrameRate: Int = 60        // Always 60 FPS
     static let maxTouchEventsPerSecond: Int = 60
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
+    
+    // Resolution limits
+    static let maxRenderPixels: Double = 8_000_000  // ~8MP cap for render resolution
+    
+    // Frame cache settings
+    static let frameCacheTTL: TimeInterval = 1.0  // Seconds before cached frames expire
+    static let cachePruneInterval: Int = 60       // Prune every N frames
     
     // Quality presets defaults
     static let defaultPreset: QualityPreset = .balanced
@@ -71,20 +81,20 @@ enum NetworkMode: String, Codable {
 // 3 presets: one for each use case
 
 enum QualityPreset: String, Codable, CaseIterable {
-    case performance  // Lowest latency, great for interaction-heavy use
+    case performance  // Light streaming, bandwidth-conscious
     case balanced     // Default - best balance of quality and responsiveness
-    case quality      // Maximum quality - best for static content/reading
+    case pro          // Maximum quality - best for static content/reading
     
     var bitrate: Int {
         switch self {
-        case .performance: return 14_000_000  // 14 Mbps - minimal network load
+        case .performance: return 10_000_000  // 10 Mbps - light streaming
         case .balanced: return 20_000_000     // 20 Mbps - sweet spot
-        case .quality: return 30_000_000      // 30 Mbps - maximum quality
+        case .pro: return 30_000_000          // 30 Mbps - high quality
         }
     }
     
     var frameRate: Int {
-        return 60  // Always 60 FPS
+        return 60  // All presets use 60 FPS
     }
     
     /// Always use HEVC for best quality-per-bit
@@ -96,7 +106,7 @@ enum QualityPreset: String, Codable, CaseIterable {
         switch self {
         case .performance: return "Performance"
         case .balanced: return "Balanced"
-        case .quality: return "Quality"
+        case .pro: return "Pro"
         }
     }
     
@@ -106,9 +116,9 @@ enum QualityPreset: String, Codable, CaseIterable {
     
     var description: String {
         switch self {
-        case .performance: return "Lowest latency"
-        case .balanced: return "Best balance"
-        case .quality: return "Maximum quality"
+        case .performance: return "10 Mbps • 60 FPS"
+        case .balanced: return "20 Mbps • 60 FPS"
+        case .pro: return "30 Mbps • 60 FPS"
         }
     }
     
@@ -116,7 +126,7 @@ enum QualityPreset: String, Codable, CaseIterable {
         switch self {
         case .performance: return "hare"
         case .balanced: return "scale.3d"
-        case .quality: return "sparkles"
+        case .pro: return "sparkles"
         }
     }
 }

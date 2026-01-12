@@ -190,31 +190,24 @@ final class NetworkManager {
     func broadcastUDP(type: PacketType, payload: Data) {
         let datagram = buildDatagram(type: type, payload: payload)
         
+        // Thread-safe copy of connections to avoid race conditions
+        let connections = queue.sync { Array(udpConnections) }
+        let registeredClients = queue.sync { Array(registeredUDPClients) }
+        
         // Log occasionally to debug connection tracking
         if type == .videoFrameChunk && Int.random(in: 0...1000) == 0 {
-             let states = udpConnections.map { "\($0.endpoint) \($0.state)" }
-             AirCatchLog.info(" Broadcasting chunk to \(udpConnections.count) clients: \(states)")
+             let states = connections.map { "\($0.endpoint) \($0.state)" }
+             AirCatchLog.info(" Broadcasting chunk to \(connections.count) clients: \(states)")
         }
         
-        var sentCount = 0
-        for connection in udpConnections {
-            if connection.state == .ready {
-                connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ _ in
-                    // Error logging commented out to reduce noise
-                }))
-                sentCount += 1
-            } else {
-                // NSLog("Skipping connection \(connection.endpoint) - State: \(connection.state)")
-            }
+        // Send to UDP listener connections
+        for connection in connections where connection.state == .ready {
+            connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ _ in }))
         }
         
         // Also send to manually registered clients (from incoming UDP packets)
-        for connection in registeredUDPClients where connection.state == .ready {
-            connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ error in
-                if let error {
-                    AirCatchLog.info("UDP broadcast to registered client error: \(error)")
-                }
-            }))
+        for connection in registeredClients where connection.state == .ready {
+            connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ _ in }))
         }
     }
     
@@ -260,15 +253,10 @@ final class NetworkManager {
     func broadcastTCP(type: PacketType, payload: Data) {
         let datagram = buildTCPPacket(type: type, payload: payload)
         
-        queue.async { [weak self] in
-            guard let self else { return }
-            for connection in self.tcpConnections where connection.state == .ready {
-                connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ error in
-                    if let error {
-                        AirCatchLog.info("TCP broadcast error: \(error)")
-                    }
-                }))
-            }
+        // Thread-safe copy then send
+        let connections = queue.sync { Array(tcpConnections) }
+        for connection in connections where connection.state == .ready {
+            connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ _ in }))
         }
     }
     
