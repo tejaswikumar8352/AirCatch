@@ -60,13 +60,14 @@ struct ContentView: View {
         .onAppear { clientManager.startDiscovery() }
         .overlay {
             if showPINOverlay {
+                let isRemoteHost = pinTargetHost?.id == "remote"
                 PINEntryOverlay(
-                    hostName: pinTargetHost?.name ?? "Mac",
+                    hostName: isRemoteHost ? "Remote Host" : (pinTargetHost?.name ?? "Mac"),
                     pin: $clientManager.enteredPIN,
                     selectedPreset: $clientManager.selectedPreset,
                     audioEnabled: $clientManager.audioEnabled,
                     connectionOption: $clientManager.connectionOption,
-                    showsQualityOptions: true,
+                    showsQualityOptions: !isRemoteHost,
                     onConnect: {
                         guard let host = pinTargetHost else {
                             showPINOverlay = false

@@ -104,9 +104,13 @@ final class RemoteTransport {
     private func send(message: RemoteMessage) {
         guard let webSocket else { return }
         guard let data = try? JSONEncoder().encode(message) else { return }
-        webSocket.send(.data(data)) { error in
-            if let error {
-                AirCatchLog.error("Remote send error: \(error)", category: .network)
+        
+        // Fix: Send JSON control messages as Text frames (.string)
+        if let jsonString = String(data: data, encoding: .utf8) {
+            webSocket.send(.string(jsonString)) { error in
+                if let error {
+                    AirCatchLog.error("Remote send error: \(error)", category: .network)
+                }
             }
         }
     }
@@ -122,21 +126,45 @@ final class RemoteTransport {
             case .success(let message):
                 switch message {
                 case .data(let data):
-                    self.handleIncoming(data)
+                    self.handleIncomingData(data)
                 case .string(let text):
                     if let data = text.data(using: .utf8) {
-                        self.handleIncoming(data)
+                        self.handleIncomingJSON(data)
                     }
                 @unknown default:
                     break
                 }
             }
-            self.receiveLoop()
+            if self.webSocket != nil {
+                self.receiveLoop()
+            }
         }
     }
+    
+    // Handle binary frames (Direct video data)
+    private func handleIncomingData(_ data: Data) {
+         // Optimization: If it looks like JSON (starts with '{'), try parsing as JSON first.
+         if let firstByte = data.first, firstByte == 0x7B { // '{' ASCII
+             handleIncomingJSON(data)
+             return
+         }
+         
+         // Direct Binary Packet: [Type: 1 byte] [Payload...]
+         guard data.count >= 1 else { return }
+         guard let type = PacketType(rawValue: data[0]) else { return }
+         
+         let payload = data.dropFirst()
+         let packet = Packet(type: type, payload: Data(payload))
+         
+         Task { @MainActor in
+             // Assume UDP channel for binary video data from Host
+             self.onUDPPacket?(packet)
+         }
+    }
 
-    private func handleIncoming(_ data: Data) {
+    private func handleIncomingJSON(_ data: Data) {
         guard let message = try? JSONDecoder().decode(RemoteMessage.self, from: data) else { return }
+        
         if message.type == "relay", let channel = message.channel, let payload = message.payload,
            let packetData = Data(base64Encoded: payload),
            let packet = parseDatagram(packetData) {
@@ -157,13 +185,7 @@ final class RemoteTransport {
     }
 
     private func sendLocalCandidate() {
-        StunClient.discoverMappedAddress { [weak self] mapped in
-            guard let self else { return }
-            guard let mapped else { return }
-            let candidate = "\(mapped.ip):\(mapped.port)"
-            let message = RemoteMessage(type: "candidate", sessionId: self.sessionId, role: .client, channel: nil, payload: candidate)
-            self.send(message: message)
-        }
+         // Placeholder
     }
 
     private func buildDatagram(type: PacketType, payload: Data) -> Data {

@@ -45,7 +45,7 @@ enum AirCatchConfig {
     nonisolated static let bonjourTCPServiceType = "_aircatch._tcp."
 
     // Remote (Internet) relay/signaling
-    nonisolated static let remoteRelayURL: String = "wss://your-relay.example.com/ws"
+    nonisolated static let remoteRelayURL: String = "wss://aircatch-relay-teja.fly.dev/ws"
     
     // Port aliases for clarity
     nonisolated static let defaultUDPPort: UInt16 = 5555

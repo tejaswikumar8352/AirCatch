@@ -495,7 +495,9 @@ final class ClientManager: ObservableObject {
         guard connectionOption == .remote else { return }
 
         remotePingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.sendRemotePingAndReport()
+            Task { @MainActor in
+                self?.sendRemotePingAndReport()
+            }
         }
     }
 

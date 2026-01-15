@@ -250,28 +250,36 @@ final class ScreenStreamer: NSObject {
         
         if useHEVC {
             // ----------------------------------------------------------------------
-            // HEVC Main 4:2:2 10-bit - High Chroma Quality
-            // Re-enabled as per user request to use 4:4:2 (4:2:2) with lower bitrate
+            // HEVC Main (8-bit) 4:2:0 - Low Latency & Compatibility
+            // Enforced for Remote Mode usage
             // ----------------------------------------------------------------------
             
-            let status422 = VTSessionSetProperty(session, 
+            let statusMain = VTSessionSetProperty(session, 
                                                  key: kVTCompressionPropertyKey_ProfileLevel, 
-                                                 value: kVTProfileLevel_HEVC_Main42210_AutoLevel)
+                                                 value: kVTProfileLevel_HEVC_Main_AutoLevel)
             
-            if status422 == noErr {
-                AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main 4:2:2 10-bit")
+            if statusMain == noErr {
+                AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main (8-bit) 4:2:0")
             } else {
-                // Fallback to Main 10-bit if 4:2:2 fails
-                AirCatchLog.info(" ⚠️ 4:2:2 10-bit unavailable (Error: \(status422)). Falling back to Main 10-bit.")
-                VTSessionSetProperty(session, 
-                                     key: kVTCompressionPropertyKey_ProfileLevel, 
-                                     value: kVTProfileLevel_HEVC_Main10_AutoLevel)
+                AirCatchLog.info(" ⚠️ HEVC Main (8-bit) unavailable (Error: \(statusMain)).")
             }
             
         } else {
-            // H.264 High Profile with CABAC for better compression
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
+            // Local Mode: Use HEVC Main 10 (4:2:0) as requested for high quality
+            // Replaced 4:2:2 logic with standard Main10 4:2:0
+            
+            let statusMain10 = VTSessionSetProperty(session, 
+                                                    key: kVTCompressionPropertyKey_ProfileLevel, 
+                                                    value: kVTProfileLevel_HEVC_Main10_AutoLevel)
+            
+            if statusMain10 == noErr {
+                AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main 10 (4:2:0) 10-bit")
+            } else {
+                AirCatchLog.info(" ⚠️ HEVC Main 10 unavailable (Error: \(statusMain10)). Falling back to Main (8-bit).")
+                VTSessionSetProperty(session, 
+                                     key: kVTCompressionPropertyKey_ProfileLevel, 
+                                     value: kVTProfileLevel_HEVC_Main_AutoLevel)
+            }
         }
         
         // Keyframe interval: 1 second for faster stream recovery after packet loss

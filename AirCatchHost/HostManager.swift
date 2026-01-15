@@ -261,7 +261,9 @@ final class HostManager: ObservableObject {
     private func handleRemoteTCPPacket(_ packet: Packet) {
         switch packet.type {
         case .handshake:
-            handleRemoteHandshake(payload: packet.payload)
+            Task { @MainActor in
+                await handleRemoteHandshake(payload: packet.payload)
+            }
         case .touchEvent:
             handleTouchEvent(packet.payload)
         case .scrollEvent:
@@ -273,7 +275,7 @@ final class HostManager: ObservableObject {
         case .ping:
             handleRemotePingPacket(packet.payload)
         case .qualityReport:
-            handleQualityReport(packet.payload)
+            handleRemoteQualityReport(packet.payload)
         case .disconnect:
             handleRemoteDisconnect()
         default:
@@ -514,7 +516,7 @@ final class HostManager: ObservableObject {
     }
 
     @MainActor
-    private func handleRemoteHandshake(payload: Data) {
+    private func handleRemoteHandshake(payload: Data) async {
         let handshakeRequest: HandshakeRequest?
         do {
             handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
@@ -532,17 +534,11 @@ final class HostManager: ObservableObject {
 
         remoteSessionActive = true
         connectedClients += 1
-        remoteCodecPreference = handshakeRequest?.codecPreference ?? .auto
-
-        let previousQuality = currentQuality
-        if let preferredQuality = handshakeRequest?.preferredQuality {
-            currentQuality = preferredQuality
-            if let streamer = self.screenStreamer {
-                streamer.setBitrate(currentQuality.bitrate)
-                streamer.setFrameRate(currentQuality.frameRate)
-            }
-        }
-
+        
+        // --- REMOTE QUALITY POLICY ENFORCEMENT ---
+        // Force HEVC Main (8-bit) for best compatibility/bandwidth ratio
+        remoteCodecPreference = .hevc
+        
         // Remote mode: prioritize latency, disable retransmit
         self.preferLowLatency = true
         self.losslessVideoEnabled = false
@@ -554,36 +550,65 @@ final class HostManager: ObservableObject {
 
         let wantsVideo = handshakeRequest?.requestVideo ?? true
         let wantsAudio = handshakeRequest?.requestAudio ?? false
+        
+        // Resolution Cap logic
+        var clientW = handshakeRequest?.screenWidth
+        var clientH = handshakeRequest?.screenHeight
+        
+        if let w = clientW, let h = clientH {
+            let longEdge = max(w, h)
+            if longEdge > AirCatchConfig.remoteMaxResolutionLongEdge {
+                let scale = Double(AirCatchConfig.remoteMaxResolutionLongEdge) / Double(longEdge)
+                clientW = Int(Double(w) * scale)
+                clientH = Int(Double(h) * scale)
+                AirCatchLog.info("Remote resolution capped to \(clientW!)x\(clientH!) (scale: \(scale))", category: .video)
+            }
+        }
 
         postStatusChange()
 
         if wantsVideo {
+            // Apply Remote Settings explicitly
+            currentQuality = .balanced // Placeholder, will be overridden by direct calls below
+            
             if !isStreaming {
                 await startStreaming(
-                    clientMaxWidth: handshakeRequest?.screenWidth,
-                    clientMaxHeight: handshakeRequest?.screenHeight,
+                    clientMaxWidth: clientW,
+                    clientMaxHeight: clientH,
                     audioEnabled: wantsAudio
                 )
-            } else if previousQuality != currentQuality || self.audioStreamingEnabled != wantsAudio {
+            } else {
                 stopStreaming()
                 await startStreaming(
-                    clientMaxWidth: handshakeRequest?.screenWidth,
-                    clientMaxHeight: handshakeRequest?.screenHeight,
+                    clientMaxWidth: clientW,
+                    clientMaxHeight: clientH,
                     audioEnabled: wantsAudio
                 )
+            }
+            
+
+            
+            // INITIAL Remote Bitrate & FPS (Target 6-8 Mbps, 30 FPS)
+            if let streamer = self.screenStreamer {
+                // Start conservatively at 6 Mbps
+                streamer.setBitrate(6_000_000)
+                streamer.setFrameRate(30)
+                AirCatchLog.info("Remote mode started: 6Mbps @ 30fps (Adaptive 4-10Mbps)", category: .video)
             }
         }
 
         let fallbackSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
         let ackWidth = screenStreamer?.captureWidth ?? Int(fallbackSize.width)
         let ackHeight = screenStreamer?.captureHeight ?? Int(fallbackSize.height)
+        
+        // Send ACK with the initial values
         let ack = HandshakeAck(
             width: ackWidth,
             height: ackHeight,
-            frameRate: currentQuality.frameRate,
+            frameRate: 30, // Target FPS
             hostName: Host.current().localizedName ?? "Mac",
-            qualityPreset: currentQuality,
-            bitrate: currentQuality.bitrate,
+            qualityPreset: nil, // Indicates custom/enforced quality
+            bitrate: 6_000_000, // Initial bitrate
             isVirtualDisplay: false,
             displayMode: .mirror,
             displayPosition: nil
@@ -601,6 +626,75 @@ final class HostManager: ObservableObject {
         postStatusChange()
         if connectedClients == 0 {
             stopStreaming()
+        }
+    }
+    
+    // MARK: - Adaptive Bitrate Logic
+    
+    private var currentRemoteBitrate: Int = 6_000_000
+    private var currentRemoteFPS: Int = 30
+    private var qualityStableCount = 0
+    
+    @MainActor
+    private func handleRemoteQualityReport(_ payload: Data) {
+        guard remoteSessionActive else { return }
+        guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
+        
+        // Thresholds
+        let latencyThreshold = 150.0 // ms
+        let droppedFrameThreshold = 0
+        
+        var newBitrate = currentRemoteBitrate
+        var newFPS = currentRemoteFPS
+        var changed = false
+        
+        // Congestion Detected?
+        if report.droppedFrames > droppedFrameThreshold || report.latencyMs > latencyThreshold {
+            qualityStableCount = 0
+            
+            // Back off aggressively
+            newBitrate = max(4_000_000, currentRemoteBitrate - 1_000_000)
+            
+            // If already at minimum bitrate, drop FPS
+            if newBitrate == 4_000_000 {
+                newFPS = 20
+            }
+            
+            if newBitrate != currentRemoteBitrate || newFPS != currentRemoteFPS {
+                AirCatchLog.info("⚠️ Network congestion (Drop: \(report.droppedFrames), Latency: \(Int(report.latencyMs))ms). Reducing to \(newBitrate/1_000_000)Mbps @ \(newFPS)fps")
+                changed = true
+            }
+            
+        } else {
+            // Stable - Attempt Recovery
+            qualityStableCount += 1
+            
+            // Only increase after 5 seconds of stability (assuming 1 report/sec)
+            if qualityStableCount > 5 {
+                qualityStableCount = 0 // Reset counter to pace increases
+                
+                // Recover FPS first
+                if currentRemoteFPS < 30 {
+                    newFPS = 30
+                    AirCatchLog.info("✅ Stability recovered. Restoring 30 FPS.")
+                    changed = true
+                } 
+                // Then recover Bitrate
+                else if currentRemoteBitrate < 10_000_000 {
+                    newBitrate = min(10_000_000, currentRemoteBitrate + 500_000)
+                    AirCatchLog.info("✅ Network stable. Increasing to \(newBitrate/1_000_000)Mbps")
+                    changed = true
+                }
+            }
+        }
+        
+        if changed {
+            currentRemoteBitrate = newBitrate
+            currentRemoteFPS = newFPS
+            if let streamer = self.screenStreamer {
+                streamer.setBitrate(newBitrate)
+                streamer.setFrameRate(newFPS)
+            }
         }
     }
 
@@ -625,53 +719,23 @@ final class HostManager: ObservableObject {
     @MainActor
     private func handleQualityReport(_ payload: Data) {
         guard remoteSessionActive else { return }
-        guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
+        guard let _ = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
 
-        let target: QualityPreset
-        if report.latencyMs > 140 || report.droppedFrames > 8 {
-            target = .performance
-        } else if report.latencyMs < 60 && report.droppedFrames == 0 {
-            target = .pro
-        } else {
-            target = .balanced
-        }
-
-        guard target != currentQuality else { return }
-        currentQuality = target
+        // For remote mode, use fixed 5Mbps bitrate and HEVC codec
+        // No adaptive switching - keeps stream stable without restarts
+        let remoteBitrate = 5_000_000  // 5 Mbps fixed for remote
         if let streamer = self.screenStreamer {
-            streamer.setBitrate(currentQuality.bitrate)
-            streamer.setFrameRate(currentQuality.frameRate)
+            streamer.setBitrate(remoteBitrate)
         }
-        AirCatchLog.info("Remote adaptive quality -> \(currentQuality.displayName)", category: .video)
-
-        // Adaptive codec selection for remote sessions
-        let codecTarget: CodecPreference
-        if report.latencyMs > 200 {
-            codecTarget = .h264
-        } else if report.latencyMs < 80 {
-            codecTarget = .hevc
-        } else {
-            codecTarget = remoteCodecPreference ?? .auto
-        }
-
-        updateRemoteCodecIfNeeded(codecTarget)
+        // Always use HEVC for remote - no codec switching to avoid decoder mismatch
     }
 
     @MainActor
     private func updateRemoteCodecIfNeeded(_ target: CodecPreference) {
+        // Disabled for remote mode - codec switching causes decoder mismatch on client
+        // Just update preference for next session, don't restart stream
         guard remoteSessionActive else { return }
-        guard target != remoteCodecPreference else { return }
         remoteCodecPreference = target
-
-        guard isStreaming else { return }
-        stopStreaming()
-        Task { @MainActor in
-            await startStreaming(
-                clientMaxWidth: currentClientDimensions?.width,
-                clientMaxHeight: currentClientDimensions?.height,
-                audioEnabled: audioStreamingEnabled
-            )
-        }
     }
     
     private func handleTouchEvent(_ payload: Data) {
@@ -845,8 +909,8 @@ final class HostManager: ObservableObject {
             preset: currentQuality,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
-            audioEnabled: audioEnabled,
             codecOverride: remoteSessionActive ? remoteCodecPreference : nil,
+            audioEnabled: audioEnabled,
             onFrame: { [weak self] compressedFrame in
                 self?.broadcastVideoFrame(compressedFrame)
             },
@@ -927,11 +991,11 @@ final class HostManager: ObservableObject {
     
     // Changed per instructions:
     private func broadcastVideoFrame(_ data: Data) {
+        // Remote mode: always send complete frames via TCP (WebSocket is already TCP-based)
+        // Chunking over WebSocket creates too many messages and overwhelms the connection
         if remoteSessionActive {
-            if !preferLowLatency {
-                remoteTransport.sendTCP(type: .videoFrame, payload: data)
-                return
-            }
+            remoteTransport.sendTCP(type: .videoFrame, payload: data)
+            return
         }
 
         // If client prefers reliability over latency, send complete frames over TCP.
@@ -947,6 +1011,7 @@ final class HostManager: ObservableObject {
         // Capture main-actor state needed for the background send.
         let maxPayloadSize = maxUDPPayloadSize
         let shouldCacheForRetransmit = losslessVideoEnabled
+        let isRemoteSession = remoteSessionActive
         
         // Dispatch to avoid blocking the compression callback thread
         broadcastQueue.async { [weak self] in
@@ -989,7 +1054,7 @@ final class HostManager: ObservableObject {
                 packet.append(chunkData)
                 
                 // Send chunk via UDP (remote relay or local broadcast)
-                if self.remoteSessionActive {
+                if isRemoteSession {
                     self.remoteTransport.sendUDP(type: .videoFrameChunk, payload: packet)
                 } else {
                     NetworkManager.shared.broadcastUDP(type: .videoFrameChunk, payload: packet)

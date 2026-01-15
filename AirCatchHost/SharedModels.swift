@@ -45,7 +45,7 @@ enum AirCatchConfig {
     nonisolated static let bonjourTCPServiceType = "_aircatch._tcp."
 
     // Remote (Internet) relay/signaling
-    nonisolated static let remoteRelayURL: String = "wss://your-relay.example.com/ws"
+    nonisolated static let remoteRelayURL: String = "wss://aircatch-relay-teja.fly.dev/ws"
     
     // Port aliases for clarity
     nonisolated static let defaultUDPPort: UInt16 = 5555
@@ -56,10 +56,16 @@ enum AirCatchConfig {
     
     // Streaming defaults (optimized for HEVC on Apple Silicon)
     static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot
-    static let defaultFrameRate: Int = 60        // Always 60 FPS
+    static let defaultFrameRate: Int = 60        // General default
     static let maxTouchEventsPerSecond: Int = 60
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
+
+    // Remote Mode Specifics
+    static let remoteFrameRate: Int = 30
+    static let remoteBitrate: Int = 10_000_000   // 10 Mbps
+    static let remoteMaxResolutionLongEdge: Int = 1920 // Cap remote at ~1080p equivalent
+
     
     // Resolution limits
     static let maxRenderPixels: Double = 8_000_000  // ~8MP cap for render resolution
@@ -84,9 +90,9 @@ enum QualityPreset: String, Codable, CaseIterable {
     
     var bitrate: Int {
         switch self {
-        case .performance: return 10_000_000  // 10 Mbps - light streaming
-        case .balanced: return 20_000_000     // 20 Mbps - sweet spot
-        case .pro: return 30_000_000          // 30 Mbps - high quality
+        case .performance: return 12_000_000  // 12 Mbps
+        case .balanced: return 20_000_000     // 20 Mbps
+        case .pro: return 32_000_000          // 32 Mbps
         }
     }
     
@@ -113,9 +119,9 @@ enum QualityPreset: String, Codable, CaseIterable {
     
     var description: String {
         switch self {
-        case .performance: return "10 Mbps • 60 FPS"
+        case .performance: return "12 Mbps • 60 FPS"
         case .balanced: return "20 Mbps • 60 FPS"
-        case .pro: return "30 Mbps • 60 FPS"
+        case .pro: return "32 Mbps • 60 FPS"
         }
     }
     

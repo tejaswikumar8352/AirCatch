@@ -16,7 +16,23 @@ function getSession(sessionId) {
 }
 
 wss.on('connection', (ws) => {
-  ws.on('message', (data) => {
+  ws.on('message', (data, isBinary) => {
+    // 1. Binary Relay (Video Frames) - Forward transparently
+    if (isBinary) {
+      const sessionId = ws.sessionId;
+      if (!sessionId) return; // Ignore if not registered
+
+      const session = sessions.get(sessionId);
+      if (!session) return;
+
+      const target = ws.role === 'host' ? session.client : session.host;
+      if (target && target.readyState === target.OPEN) {
+        target.send(data, { binary: true });
+      }
+      return;
+    }
+
+    // 2. JSON Control Messages
     let message;
     try {
       message = JSON.parse(data.toString());
@@ -33,6 +49,7 @@ wss.on('connection', (ws) => {
       if (role === 'client') session.client = ws;
       ws.sessionId = sessionId;
       ws.role = role;
+      console.log(`Registered ${role} for session ${sessionId}`);
       return;
     }
 
