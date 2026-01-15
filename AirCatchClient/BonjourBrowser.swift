@@ -67,8 +67,7 @@ final class BonjourBrowser {
                             name: name,
                             endpoint: result.endpoint,
                             udpPort: udpPort,
-                            tcpPort: tcpPort,
-                            isDirectIP: false
+                            tcpPort: tcpPort
                         )
                         let handler = self.onHostFound
                         Task { @MainActor in
@@ -81,8 +80,7 @@ final class BonjourBrowser {
                         let host = DiscoveredHost(
                             id: name,
                             name: name,
-                            endpoint: result.endpoint,
-                            isDirectIP: false
+                            endpoint: result.endpoint
                         )
                         let handler = self.onHostLost
                         Task { @MainActor in

@@ -40,6 +40,7 @@ final class ScreenStreamer: NSObject {
     private var cachedVPS: Data?  // HEVC only
     private var cachedSPS: Data?
     private var cachedPPS: Data?
+    private var codecOverride: CodecPreference?
     
     // MARK: - Audio
     
@@ -59,6 +60,7 @@ final class ScreenStreamer: NSObject {
          maxClientWidth: Int? = nil,
          maxClientHeight: Int? = nil,
          targetDisplayID: CGDirectDisplayID? = nil,
+         codecOverride: CodecPreference? = nil,
          audioEnabled: Bool = false,
          onFrame: @escaping (Data) -> Void,
          onAudio: ((Data) -> Void)? = nil) {
@@ -66,6 +68,7 @@ final class ScreenStreamer: NSObject {
         self.clientWidth = maxClientWidth
         self.clientHeight = maxClientHeight
         self.targetDisplayID = targetDisplayID
+        self.codecOverride = codecOverride
         self.audioEnabled = audioEnabled
         self.frameCallback = onFrame
         self.audioCallback = onAudio
@@ -197,8 +200,14 @@ final class ScreenStreamer: NSObject {
     private func setupCompressionSession(width: Int, height: Int) throws {
         var session: VTCompressionSession?
         
-        // Choose codec based on quality preset
-        let codecType = currentPreset.useHEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
+        // Choose codec based on quality preset or override (remote adaptive codec)
+        let useHEVC: Bool
+        if let codecOverride {
+            useHEVC = codecOverride != .h264
+        } else {
+            useHEVC = currentPreset.useHEVC
+        }
+        let codecType = useHEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
         
         // Force hardware encoding for best quality and performance
         let encoderSpec: [String: Any] = [
@@ -239,7 +248,7 @@ final class ScreenStreamer: NSObject {
         // Ultra-low latency: process frames immediately
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         
-        if currentPreset.useHEVC {
+        if useHEVC {
             // ----------------------------------------------------------------------
             // HEVC Main 4:2:2 10-bit - High Chroma Quality
             // Re-enabled as per user request to use 4:4:2 (4:2:2) with lower bitrate

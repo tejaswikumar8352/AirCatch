@@ -44,6 +44,7 @@ final class ClientManager: ObservableObject {
     enum ConnectionOption: String, CaseIterable, Identifiable {
         case udpPeerToPeerAWDL = "udp_p2p_awdl"
         case udpNetworkFramework = "udp_network"
+        case remote = "remote"
 
         var id: String { rawValue }
 
@@ -53,6 +54,8 @@ final class ClientManager: ObservableObject {
                 return "UDP + P2P (AWDL)"
             case .udpNetworkFramework:
                 return "UDP + Network"
+            case .remote:
+                return "Remote (Internet)"
             }
         }
 
@@ -61,6 +64,8 @@ final class ClientManager: ObservableObject {
             case .udpPeerToPeerAWDL:
                 return true
             case .udpNetworkFramework:
+                return false
+            case .remote:
                 return false
             }
         }
@@ -107,6 +112,7 @@ final class ClientManager: ObservableObject {
     // MARK: - Components
     
     private let networkManager = NetworkManager.shared
+    private let remoteTransport = RemoteTransport()
     private let bonjourBrowser = BonjourBrowser()
     private let mpcClient = MPCAirCatchClient()
     private let audioPlayer = AudioPlayer()
@@ -118,9 +124,15 @@ final class ClientManager: ObservableObject {
     }
 
     private var activeLink: ActiveLink = .network
+    private var remoteActive: Bool = false
     
     // Video Reassembly
     private let reassembler = VideoReassembler()
+
+    // Remote telemetry
+    private var remotePingTimer: Timer?
+    private var lastPingTimestamp: TimeInterval?
+    private var lastRttMs: Double = 0
     
     private init() {
         setupBonjourCallbacks()
@@ -154,11 +166,14 @@ final class ClientManager: ObservableObject {
     
     func disconnect(shouldRetry: Bool = false) {
         networkManager.stopAll()
+        remoteTransport.stop()
+        stopRemoteTelemetry()
         mpcClient.disconnect()
         audioPlayer.stop()
         screenInfo = nil
         latestFrameData = nil
         activeLink = .network
+        remoteActive = false
         
         if shouldRetry {
              attemptReconnect()
@@ -188,8 +203,7 @@ final class ClientManager: ObservableObject {
                     udpPort: host.udpPort ?? existing.udpPort,
                     tcpPort: host.tcpPort ?? existing.tcpPort,
                     mpcPeerName: existing.mpcPeerName,
-                    hostId: existing.hostId,
-                    isDirectIP: existing.isDirectIP
+                    hostId: existing.hostId
                 )
             } else {
                 ClientManager.shared.discoveredHosts.append(host)
@@ -211,8 +225,7 @@ final class ClientManager: ObservableObject {
                         udpPort: existing.udpPort,
                         tcpPort: existing.tcpPort,
                         mpcPeerName: existing.mpcPeerName,
-                        hostId: existing.hostId,
-                        isDirectIP: existing.isDirectIP
+                        hostId: existing.hostId
                     )
                 } else {
                     ClientManager.shared.discoveredHosts.remove(at: idx)
@@ -239,8 +252,7 @@ final class ClientManager: ObservableObject {
                     udpPort: existing.udpPort,
                     tcpPort: existing.tcpPort,
                     mpcPeerName: peer.displayName,
-                    hostId: hostId ?? existing.hostId,
-                    isDirectIP: existing.isDirectIP
+                    hostId: hostId ?? existing.hostId
                 )
             } else {
                 ClientManager.shared.discoveredHosts.append(
@@ -251,8 +263,7 @@ final class ClientManager: ObservableObject {
                         udpPort: nil,
                         tcpPort: nil,
                         mpcPeerName: peer.displayName,
-                        hostId: hostId,
-                        isDirectIP: false
+                        hostId: hostId
                     )
                 )
             }
@@ -270,8 +281,7 @@ final class ClientManager: ObservableObject {
                         udpPort: existing.udpPort,
                         tcpPort: existing.tcpPort,
                         mpcPeerName: nil,
-                        hostId: existing.hostId,
-                        isDirectIP: existing.isDirectIP
+                        hostId: existing.hostId
                     )
                 }
             }
@@ -337,68 +347,54 @@ final class ClientManager: ObservableObject {
         // MultipeerConnectivity is kept for discovery, but we always use Network.framework
         // for the actual stream/control connection.
         
-        // For direct IP hosts, connect immediately
-        if host.isDirectIP, let endpoint = host.endpoint,
-           case .hostPort(let nwHost, _) = endpoint {
-            let hostString: String
-            switch nwHost {
-            case .ipv4(let addr):
-                hostString = "\(addr)"
-            case .ipv6(let addr):
-                hostString = "\(addr)"
-            case .name(let name, _):
-                hostString = name
-            @unknown default:
-                hostString = "\(nwHost)"
-            }
-            debugConnectionStatus = "Connecting to \(hostString) (Remote)..."
-            establishConnection(hostIP: hostString)
-            return
-        }
-        
         // Resolve the service endpoint to get IP address
-        resolveAndConnect(host: host)
+        if connectionOption == .remote {
+            connectRemote(host: host)
+        } else {
+            resolveAndConnect(host: host)
+        }
     }
-    
-    /// Connects directly to a Mac via IP address (for remote/internet connections)
-    /// - Parameters:
-    ///   - ipAddress: The public IP or hostname of the Mac
-    ///   - port: The TCP port (default: 5556)
-    ///   - name: Display name for the host
-    func connectByIP(
-        ipAddress: String,
-        port: UInt16 = AirCatchConfig.tcpPort,
-        name: String = "Remote Mac"
-    ) {
+
+    private func connectRemote(host: DiscoveredHost) {
         #if DEBUG
-        AirCatchLog.info(" Connecting by direct IP: \(ipAddress):\(port)")
+        debugConnectionStatus = "Connecting (Remote)..."
+        AirCatchLog.info(" Connecting (Remote) to session \(enteredPIN)")
         #endif
-        
-        // Create a discovered host entry for the direct IP
-        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
-            AirCatchLog.error("Invalid port: \(port)", category: .network)
+
+        guard enteredPIN.count == 4 else {
+            state = .error("Enter a 4-digit PIN for Remote")
             return
         }
-        
-        let directHost = DiscoveredHost(
-            id: "direct-\(ipAddress)-\(port)",
-            name: name,
-            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(ipAddress), port: nwPort),
-            udpPort: nil,
-            tcpPort: port,
-            mpcPeerName: nil,
-            hostId: nil,
-            isDirectIP: true
+
+        remoteActive = true
+        activeLink = .network
+
+        remoteTransport.start(
+            sessionId: enteredPIN,
+            onTCPPacket: { [weak self] packet in
+                self?.handleTCPPacket(packet)
+            },
+            onUDPPacket: { [weak self] packet in
+                self?.handleUDPPacket(packet)
+            },
+            onStateChange: { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .connecting:
+                    self.debugConnectionStatus = "Remote: Connecting..."
+                case .ready:
+                    self.debugConnectionStatus = "Remote: Connected"
+                    self.startRemoteTelemetry()
+                    self.sendHandshake()
+                case .failed(let error):
+                    self.state = .error("Remote failed: \(error)")
+                case .idle:
+                    self.debugConnectionStatus = "Remote: Idle"
+                }
+            }
         )
-        
-        // Add to discovered hosts if not already there
-        if !discoveredHosts.contains(where: { $0.id == directHost.id }) {
-            discoveredHosts.append(directHost)
-        }
-        
-        // Connect to it
-        connect(to: directHost, requestVideo: true)
     }
+
 
     private func sendHandshakeViaAirCatch() {
         let windowScenes = UIApplication.shared.connectedScenes
@@ -428,6 +424,8 @@ final class ClientManager: ObservableObject {
             screenWidth: maxW,
             screenHeight: maxH,
             preferredQuality: selectedPreset,
+            connectionMode: currentConnectionMode(),
+            codecPreference: .auto,
             displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
             requestAudio: audioEnabled,
@@ -474,8 +472,52 @@ final class ClientManager: ObservableObject {
         
         let pong = PongPacket(pingTimestamp: ping.timestamp)
         if let data = try? JSONEncoder().encode(pong) {
-            // Respond via MPC (handles internally if no peers)
-            mpcClient.send(type: .pong, payload: data, mode: .reliable)
+            if activeLink == .aircatch {
+                mpcClient.send(type: .pong, payload: data, mode: .reliable)
+            } else {
+                sendControl(type: .pong, payload: data)
+            }
+        }
+    }
+
+    private func handlePongPacket(_ payload: Data) {
+        guard let pong = try? JSONDecoder().decode(PongPacket.self, from: payload) else { return }
+        let now = Date().timeIntervalSince1970
+        if let lastPing = lastPingTimestamp {
+            lastRttMs = max(0, (now - lastPing) * 1000.0)
+        } else {
+            lastRttMs = max(0, (now - pong.pingTimestamp) * 1000.0)
+        }
+    }
+
+    private func startRemoteTelemetry() {
+        stopRemoteTelemetry()
+        guard connectionOption == .remote else { return }
+
+        remotePingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.sendRemotePingAndReport()
+        }
+    }
+
+    private func stopRemoteTelemetry() {
+        remotePingTimer?.invalidate()
+        remotePingTimer = nil
+        lastPingTimestamp = nil
+        lastRttMs = 0
+    }
+
+    private func sendRemotePingAndReport() {
+        guard connectionOption == .remote else { return }
+        let now = Date().timeIntervalSince1970
+        lastPingTimestamp = now
+        let ping = PingPacket(timestamp: now)
+        if let data = try? JSONEncoder().encode(ping) {
+            sendControl(type: .ping, payload: data)
+        }
+
+        let report = QualityReport(droppedFrames: 0, latencyMs: lastRttMs, jitterMs: 0)
+        if let reportData = try? JSONEncoder().encode(report) {
+            sendControl(type: .qualityReport, payload: reportData)
         }
     }
     
@@ -494,7 +536,11 @@ final class ClientManager: ObservableObject {
         state = .connecting // Updates UI to "Connecting..."
         
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.resolveAndConnect(host: host)
+            if self?.connectionOption == .remote {
+                self?.connectRemote(host: host)
+            } else {
+                self?.resolveAndConnect(host: host)
+            }
         }
     }
     
@@ -611,9 +657,16 @@ final class ClientManager: ObservableObject {
         let scale = screen?.scale ?? 2.0
         let renderW = Int(bounds.size.width * scale)
         let renderH = Int(bounds.size.height * scale)
-        let capped = capRenderResolution(width: renderW, height: renderH)
-        let maxW = max(capped.width, capped.height)
-        let maxH = min(capped.width, capped.height)
+        let (maxW, maxH): (Int, Int)
+        if connectionOption == .remote {
+            // Remote mode: always use full client resolution
+            maxW = max(renderW, renderH)
+            maxH = min(renderW, renderH)
+        } else {
+            let capped = capRenderResolution(width: renderW, height: renderH)
+            maxW = max(capped.width, capped.height)
+            maxH = min(capped.width, capped.height)
+        }
         
         #if DEBUG
         AirCatchLog.info("Screen resolution: bounds=\(bounds.width)x\(bounds.height) scale=\(scale) render=\(maxW)x\(maxH)", category: .video)
@@ -625,21 +678,41 @@ final class ClientManager: ObservableObject {
             deviceModel: UIDevice.current.model,
             screenWidth: maxW,
             screenHeight: maxH,
-            // REMOTE OPTIMIZATION: Force Performance preset (25 Mbps) for direct IP/WAN connections
-            preferredQuality: (connectedHost?.isDirectIP == true) ? .performance : selectedPreset,
+            preferredQuality: selectedPreset,
+            connectionMode: currentConnectionMode(),
+            codecPreference: .auto,
             displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
             requestAudio: audioEnabled,
             preferLowLatency: true,
-            losslessVideo: true,
+            losslessVideo: connectionOption == .remote ? false : true,
             pin: enteredPIN.isEmpty ? nil : enteredPIN
         )
         
         if let data = try? JSONEncoder().encode(request) {
-            networkManager.sendTCP(type: .handshake, payload: data)
+            sendControl(type: .handshake, payload: data)
             #if DEBUG
             AirCatchLog.info(" Sent handshake: video=\(pendingRequestVideo) preset=\(selectedPreset.displayName)")
             #endif
+        }
+    }
+
+    private func currentConnectionMode() -> ConnectionMode {
+        switch connectionOption {
+        case .udpPeerToPeerAWDL:
+            return .localPeerToPeer
+        case .udpNetworkFramework:
+            return .localNetwork
+        case .remote:
+            return .remote
+        }
+    }
+
+    private func sendControl(type: PacketType, payload: Data) {
+        if connectionOption == .remote {
+            remoteTransport.sendTCP(type: type, payload: payload)
+        } else {
+            networkManager.sendTCP(type: type, payload: payload)
         }
     }
 
@@ -690,6 +763,10 @@ final class ClientManager: ObservableObject {
             state = .error("Wrong PIN")
             enteredPIN = "" // Clear the PIN
             // Don't call disconnect() as we're already handling state
+        case .ping:
+            handlePingPacket(packet.payload)
+        case .pong:
+            handlePongPacket(packet.payload)
         case .disconnect:
             // Server requested disconnect? Usually we just want to reconnect.
             // But if it's explicit, maybe we should stop?
@@ -752,14 +829,14 @@ final class ClientManager: ObservableObject {
         
         reassembler.process(
             chunk: data,
-            losslessEnabled: true,
+            losslessEnabled: connectionOption == .remote ? false : true,
             onNack: { [weak self] frameId, missingChunkIndices in
                 guard let self else { return }
                 guard self.activeLink == .network else { return }
                 guard !missingChunkIndices.isEmpty else { return }
                 let request = VideoChunkNackRequest(frameId: frameId, missingChunkIndices: missingChunkIndices)
                 if let payload = try? JSONEncoder().encode(request) {
-                    self.networkManager.sendTCP(type: .videoFrameChunkNack, payload: payload)
+                    self.sendControl(type: .videoFrameChunkNack, payload: payload)
                 }
             },
             onComplete: { [weak self] fullFrame in
@@ -813,7 +890,7 @@ final class ClientManager: ObservableObject {
             case .aircatch:
                 mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
             case .network:
-                networkManager.sendTCP(type: .touchEvent, payload: data)
+                sendControl(type: .touchEvent, payload: data)
             }
         }
     }
@@ -830,7 +907,7 @@ final class ClientManager: ObservableObject {
             case .aircatch:
                 mpcClient.send(type: .scrollEvent, payload: data, mode: .reliable)
             case .network:
-                networkManager.sendTCP(type: .scrollEvent, payload: data)
+                sendControl(type: .scrollEvent, payload: data)
             }
         }
     }
@@ -844,7 +921,7 @@ final class ClientManager: ObservableObject {
             case .aircatch:
                 mpcClient.send(type: .scrollEvent, payload: data, mode: .reliable)
             case .network:
-                networkManager.sendTCP(type: .scrollEvent, payload: data)
+                sendControl(type: .scrollEvent, payload: data)
             }
         }
     }
@@ -863,7 +940,7 @@ final class ClientManager: ObservableObject {
             case .aircatch:
                 mpcClient.send(type: .keyEvent, payload: data, mode: .reliable)
             case .network:
-                networkManager.sendTCP(type: .keyEvent, payload: data)
+                sendControl(type: .keyEvent, payload: data)
             }
         }
     }
@@ -877,7 +954,7 @@ final class ClientManager: ObservableObject {
             case .aircatch:
                 mpcClient.send(type: .mediaKeyEvent, payload: data, mode: .reliable)
             case .network:
-                networkManager.sendTCP(type: .mediaKeyEvent, payload: data)
+                sendControl(type: .mediaKeyEvent, payload: data)
             }
         }
     }

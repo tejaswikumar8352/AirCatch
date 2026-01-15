@@ -20,8 +20,6 @@ Networking
 
 Discovery uses Bonjour with the service type `_aircatch._udp`. Video frames are transported as chunked UDP packets for throughput and low latency, while control traffic (handshake, pairing, input) goes over a reliable channel.
 
-Connections over the internet or VPN (like Tailscale) are supported via Remote Connect. You enter the host IP manually, and the client automatically switches to the Performance preset (25 Mbps) to accommodate upload constraints.
-
 Audio Streaming
 ---------------
 
@@ -40,7 +38,7 @@ AirCatch maps iPad touch gestures into macOS input events on the host. For typin
 - **Visual Feedback**: The button turns **Red** when listening.
 - **Direct Injection**: Recognized text is injected directly into the Mac as Unicode text, ensuring compatibility with all apps.
 
-The function row follows Apple’s Mac keyboard layout for F1 through F12. For media/system keys (brightness, volume, playback), the host injects AUX control button events using `NSEvent.otherEvent(with: .systemDefined, subtype: 8, ...)`.
+The function row follows Apple's Mac keyboard layout for F1 through F12. For media/system keys (brightness, volume, playback), the host injects AUX control button events using `NSEvent.otherEvent(with: .systemDefined, subtype: 8, ...)`.
 
 Quality presets
 ---------------
@@ -85,16 +83,6 @@ On macOS, AirCatchHost needs **Accessibility** permission to inject input events
 On iPadOS, AirCatchClient needs:
 - **Local Network** permission for discovery and connections.
 - **Microphone** and **Speech Recognition** permissions for the Voice Typing feature.
-
-Picture in Picture (PiP)
-------------------------
-
-The client includes PiP support. On iOS 18 and later, it uses `sampleBufferRenderer.enqueue(...)`; earlier iOS versions use the legacy enqueue path.
-
-DriverKit (optional)
---------------------
-
-This repo also includes an optional DriverKit virtual display component. If you want to use that path, see AirCatchDisplayDriver/README.md.
 
 License
 -------

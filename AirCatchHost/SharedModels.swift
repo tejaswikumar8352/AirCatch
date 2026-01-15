@@ -43,6 +43,9 @@ enum AirCatchConfig {
     nonisolated static let tcpPort: UInt16 = 5556
     nonisolated static let bonjourServiceType = "_aircatch._udp."
     nonisolated static let bonjourTCPServiceType = "_aircatch._tcp."
+
+    // Remote (Internet) relay/signaling
+    nonisolated static let remoteRelayURL: String = "wss://your-relay.example.com/ws"
     
     // Port aliases for clarity
     nonisolated static let defaultUDPPort: UInt16 = 5555
@@ -69,12 +72,6 @@ enum AirCatchConfig {
     static let defaultPreset: QualityPreset = .balanced
 }
 
-// MARK: - Network Mode
-
-enum NetworkMode: String, Codable {
-    case local   // Same network, P2P/AWDL - max quality
-    case remote  // Internet/NAT - adaptive quality
-}
 
 // MARK: - Quality Presets
 // Optimized for HEVC on Apple Silicon (M2/M3)
@@ -151,6 +148,20 @@ enum PacketType: UInt8 {
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
 }
 
+// MARK: - Connection/Codec Preferences
+
+enum ConnectionMode: String, Codable {
+    case localPeerToPeer
+    case localNetwork
+    case remote
+}
+
+enum CodecPreference: String, Codable {
+    case auto
+    case hevc
+    case h264
+}
+
 struct Packet {
     let type: PacketType
     let payload: Data
@@ -174,6 +185,8 @@ struct HandshakeRequest: Codable {
     let screenWidth: Int?           // Client screen width
     let screenHeight: Int?          // Client screen height
     let preferredQuality: QualityPreset?
+    let connectionMode: ConnectionMode?
+    let codecPreference: CodecPreference?
     /// Extended display configuration (for virtual display mode)
     let displayConfig: ExtendedDisplayConfig?
     /// Requested session features. If nil, host may assume defaults.
@@ -193,6 +206,8 @@ struct HandshakeRequest: Codable {
          screenWidth: Int? = nil,
          screenHeight: Int? = nil,
          preferredQuality: QualityPreset? = nil,
+         connectionMode: ConnectionMode? = nil,
+         codecPreference: CodecPreference? = nil,
          displayConfig: ExtendedDisplayConfig? = nil,
          requestVideo: Bool? = nil,
          requestAudio: Bool? = nil,
@@ -206,6 +221,8 @@ struct HandshakeRequest: Codable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.preferredQuality = preferredQuality
+        self.connectionMode = connectionMode
+        self.codecPreference = codecPreference
         self.displayConfig = displayConfig
         self.requestVideo = requestVideo
         self.requestAudio = requestAudio
@@ -222,7 +239,6 @@ struct HandshakeAck: Codable {
     let height: Int
     let frameRate: Int
     let hostName: String
-    let networkMode: NetworkMode?   // Detected network mode
     let qualityPreset: QualityPreset?
     let bitrate: Int?
     /// Whether virtual display mode is active
@@ -233,14 +249,13 @@ struct HandshakeAck: Codable {
     let displayPosition: ExtendedDisplayPosition?
     
     init(width: Int, height: Int, frameRate: Int, hostName: String,
-         networkMode: NetworkMode? = nil, qualityPreset: QualityPreset? = nil, bitrate: Int? = nil,
+         qualityPreset: QualityPreset? = nil, bitrate: Int? = nil,
          isVirtualDisplay: Bool? = nil, displayMode: StreamDisplayMode? = nil,
          displayPosition: ExtendedDisplayPosition? = nil) {
         self.width = width
         self.height = height
         self.frameRate = frameRate
         self.hostName = hostName
-        self.networkMode = networkMode
         self.qualityPreset = qualityPreset
         self.bitrate = bitrate
         self.isVirtualDisplay = isVirtualDisplay
@@ -394,7 +409,6 @@ struct DiscoveredHost: Identifiable, Equatable {
     let mpcPeerName: String?
     /// Optional stable host identifier (future-proofing for de-duplication).
     let hostId: String?
-    let isDirectIP: Bool  // True if connected via direct IP (remote mode)
     
     init(
         id: String,
@@ -403,8 +417,7 @@ struct DiscoveredHost: Identifiable, Equatable {
         udpPort: UInt16? = nil,
         tcpPort: UInt16? = nil,
         mpcPeerName: String? = nil,
-        hostId: String? = nil,
-        isDirectIP: Bool = false
+        hostId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -413,7 +426,6 @@ struct DiscoveredHost: Identifiable, Equatable {
         self.tcpPort = tcpPort
         self.mpcPeerName = mpcPeerName
         self.hostId = hostId
-        self.isDirectIP = isDirectIP
     }
     
     static func == (lhs: DiscoveredHost, rhs: DiscoveredHost) -> Bool {

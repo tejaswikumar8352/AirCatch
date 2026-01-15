@@ -29,10 +29,7 @@ final class HostManager: ObservableObject {
     @Published var audioStreamingEnabled: Bool = false
     @Published private(set) var availableDisplays: [String] = []
     
-    // Network mode detection (for UI only - always local P2P)
-    var networkMode: NetworkMode {
-        return .local
-    }
+
     
     var statusDescription: String {
         if !isRunning {
@@ -48,6 +45,7 @@ final class HostManager: ObservableObject {
     func regeneratePIN() {
         currentPIN = String(format: "%04d", Int.random(in: 0...9999))
         AirCatchLog.info("New PIN generated")
+        remoteTransport.updateSessionId(currentPIN)
     }
     
     // MARK: - Network Components
@@ -55,6 +53,7 @@ final class HostManager: ObservableObject {
     private let networkManager = NetworkManager.shared
     private let bonjourAdvertiser = BonjourAdvertiser()
     private let mpcHost = MPCAirCatchHost()
+    private let remoteTransport = RemoteTransportHost()
     
     // MARK: - Screen Capture
     
@@ -69,6 +68,10 @@ final class HostManager: ObservableObject {
     /// When true, keep a short retransmit window for UDP video chunks (wired mode).
     private var losslessVideoEnabled: Bool = true
 
+    /// Whether the active session is a Remote (Internet) session.
+    private var remoteSessionActive: Bool = false
+    private var remoteCodecPreference: CodecPreference? = nil
+
     private struct CachedFrame {
         let createdAt: TimeInterval
         let totalChunks: Int
@@ -80,14 +83,9 @@ final class HostManager: ObservableObject {
     nonisolated(unsafe) private var cachedFrames: [UInt32: CachedFrame] = [:]
     private let cachedFramesQueue = DispatchQueue(label: "com.aircatch.framecache")
 
-    // Target display selection (main vs extended)
+    // Target display selection
     private var targetDisplayID: CGDirectDisplayID? = nil
     private var targetScreenFrame: CGRect? = nil
-    
-    // Extended display state
-    private var virtualDisplayManager = VirtualDisplayManager.shared
-    private var isExtendedDisplayActive = false
-    private var currentDisplayConfig: ExtendedDisplayConfig?
     
     private init() {}
     
@@ -152,6 +150,25 @@ final class HostManager: ObservableObject {
                 // Advertise via AirCatch (MultipeerConnectivity) for close-range P2P.
                 self.setupMPCHostCallbacksIfNeeded()
                 self.mpcHost.start()
+
+                // Remote relay (Internet) listener
+                self.remoteTransport.start(
+                    sessionId: self.currentPIN,
+                    onTCPPacket: { [weak self] packet in
+                        self?.handleRemoteTCPPacket(packet)
+                    },
+                    onUDPPacket: { [weak self] packet in
+                        self?.handleRemoteUDPPacket(packet)
+                    },
+                    onStateChange: { state in
+                        switch state {
+                        case .failed(let error):
+                            AirCatchLog.error("Remote relay failed: \(error)", category: .network)
+                        default:
+                            break
+                        }
+                    }
+                )
                 
                 isRunning = true
                 postStatusChange()
@@ -171,6 +188,8 @@ final class HostManager: ObservableObject {
         networkManager.stopAll()
         bonjourAdvertiser.stopAdvertising()
         mpcHost.stop()
+        remoteTransport.stop()
+        remoteSessionActive = false
         
         isRunning = false
         isStreaming = false
@@ -221,10 +240,53 @@ final class HostManager: ObservableObject {
             Task { @MainActor in
                 self.handleMediaKeyEvent(packet.payload)
             }
+        case .ping:
+            Task { @MainActor in
+                self.handlePingPacket(packet.payload, from: connection)
+            }
+        case .qualityReport:
+            Task { @MainActor in
+                self.handleQualityReport(packet.payload)
+            }
         case .disconnect:
             Task { @MainActor in
                 self.handleClientDisconnect(connection)
             }
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func handleRemoteTCPPacket(_ packet: Packet) {
+        switch packet.type {
+        case .handshake:
+            handleRemoteHandshake(payload: packet.payload)
+        case .touchEvent:
+            handleTouchEvent(packet.payload)
+        case .scrollEvent:
+            handleScrollEvent(packet.payload)
+        case .keyEvent:
+            handleKeyEvent(packet.payload)
+        case .mediaKeyEvent:
+            handleMediaKeyEvent(packet.payload)
+        case .ping:
+            handleRemotePingPacket(packet.payload)
+        case .qualityReport:
+            handleQualityReport(packet.payload)
+        case .disconnect:
+            handleRemoteDisconnect()
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func handleRemoteUDPPacket(_ packet: Packet) {
+        switch packet.type {
+        case .videoFrameChunkNack:
+            // Lossless retransmit disabled in Remote mode
+            break
         default:
             break
         }
@@ -292,6 +354,10 @@ final class HostManager: ObservableObject {
             return
         }
 
+        // Local session (non-remote)
+        remoteSessionActive = false
+        remoteCodecPreference = nil
+
         connectedClients += 1
 
         let previousQuality = currentQuality
@@ -302,10 +368,10 @@ final class HostManager: ObservableObject {
         self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
         self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
         
-        // Handle display configuration (mirror vs extend)
-        let displayConfig = handshakeRequest?.displayConfig
-        self.currentDisplayConfig = displayConfig
-        self.configureTargetDisplay(config: displayConfig, clientWidth: handshakeRequest?.screenWidth, clientHeight: handshakeRequest?.screenHeight)
+        // Always use main display (mirror mode)
+        let mainID = CGMainDisplayID()
+        self.targetDisplayID = mainID
+        self.targetScreenFrame = nil
         
         let wantsVideo = handshakeRequest?.requestVideo ?? true
 
@@ -329,12 +395,11 @@ final class HostManager: ObservableObject {
                 height: ackHeight,
                 frameRate: currentQuality.frameRate,
                 hostName: Host.current().localizedName ?? "Mac",
-                networkMode: networkMode,
                 qualityPreset: currentQuality,
                 bitrate: currentQuality.bitrate,
-                isVirtualDisplay: self.isExtendedDisplayActive,
-                displayMode: displayConfig?.mode ?? .mirror,
-                displayPosition: displayConfig?.position
+                isVirtualDisplay: false,
+                displayMode: .mirror,
+                displayPosition: nil
             )
 
             if let data = try? JSONEncoder().encode(ack) {
@@ -369,6 +434,10 @@ final class HostManager: ObservableObject {
                 networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
                 return
             }
+
+            // Local session (non-remote)
+            self.remoteSessionActive = false
+            self.remoteCodecPreference = nil
             
             #if DEBUG
             AirCatchLog.debug("PIN verified successfully for: \(connection.endpoint)", category: .network)
@@ -392,10 +461,10 @@ final class HostManager: ObservableObject {
             self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
             self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
             
-            // Handle display configuration (mirror vs extend)
-            let displayConfig = handshakeRequest?.displayConfig
-            self.currentDisplayConfig = displayConfig
-            self.configureTargetDisplay(config: displayConfig, clientWidth: handshakeRequest?.screenWidth, clientHeight: handshakeRequest?.screenHeight)
+            // Always use main display (mirror mode)
+            let mainID = CGMainDisplayID()
+            self.targetDisplayID = mainID
+            self.targetScreenFrame = nil
 
             // Session features
             let wantsVideo = handshakeRequest?.requestVideo ?? true
@@ -431,17 +500,177 @@ final class HostManager: ObservableObject {
                 height: ackHeight,
                 frameRate: currentQuality.frameRate,
                 hostName: Host.current().localizedName ?? "Mac",
-                networkMode: networkMode,
                 qualityPreset: currentQuality,
                 bitrate: currentQuality.bitrate,
-                isVirtualDisplay: self.isExtendedDisplayActive,
-                displayMode: displayConfig?.mode ?? .mirror,
-                displayPosition: displayConfig?.position
+                isVirtualDisplay: false,
+                displayMode: .mirror,
+                displayPosition: nil
             )
             
             if let data = try? JSONEncoder().encode(ack) {
                 networkManager.sendTCP(to: connection, type: .handshakeAck, payload: data)
             }
+        }
+    }
+
+    @MainActor
+    private func handleRemoteHandshake(payload: Data) {
+        let handshakeRequest: HandshakeRequest?
+        do {
+            handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
+        } catch {
+            AirCatchLog.error("Failed to decode remote handshake: \(error)", category: .network)
+            remoteTransport.sendTCP(type: .pairingFailed, payload: Data())
+            return
+        }
+
+        let receivedPIN = handshakeRequest?.pin ?? ""
+        guard receivedPIN == currentPIN else {
+            remoteTransport.sendTCP(type: .pairingFailed, payload: Data())
+            return
+        }
+
+        remoteSessionActive = true
+        connectedClients += 1
+        remoteCodecPreference = handshakeRequest?.codecPreference ?? .auto
+
+        let previousQuality = currentQuality
+        if let preferredQuality = handshakeRequest?.preferredQuality {
+            currentQuality = preferredQuality
+            if let streamer = self.screenStreamer {
+                streamer.setBitrate(currentQuality.bitrate)
+                streamer.setFrameRate(currentQuality.frameRate)
+            }
+        }
+
+        // Remote mode: prioritize latency, disable retransmit
+        self.preferLowLatency = true
+        self.losslessVideoEnabled = false
+
+        // Always use main display (mirror mode)
+        let mainID = CGMainDisplayID()
+        self.targetDisplayID = mainID
+        self.targetScreenFrame = nil
+
+        let wantsVideo = handshakeRequest?.requestVideo ?? true
+        let wantsAudio = handshakeRequest?.requestAudio ?? false
+
+        postStatusChange()
+
+        if wantsVideo {
+            if !isStreaming {
+                await startStreaming(
+                    clientMaxWidth: handshakeRequest?.screenWidth,
+                    clientMaxHeight: handshakeRequest?.screenHeight,
+                    audioEnabled: wantsAudio
+                )
+            } else if previousQuality != currentQuality || self.audioStreamingEnabled != wantsAudio {
+                stopStreaming()
+                await startStreaming(
+                    clientMaxWidth: handshakeRequest?.screenWidth,
+                    clientMaxHeight: handshakeRequest?.screenHeight,
+                    audioEnabled: wantsAudio
+                )
+            }
+        }
+
+        let fallbackSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
+        let ackWidth = screenStreamer?.captureWidth ?? Int(fallbackSize.width)
+        let ackHeight = screenStreamer?.captureHeight ?? Int(fallbackSize.height)
+        let ack = HandshakeAck(
+            width: ackWidth,
+            height: ackHeight,
+            frameRate: currentQuality.frameRate,
+            hostName: Host.current().localizedName ?? "Mac",
+            qualityPreset: currentQuality,
+            bitrate: currentQuality.bitrate,
+            isVirtualDisplay: false,
+            displayMode: .mirror,
+            displayPosition: nil
+        )
+
+        if let data = try? JSONEncoder().encode(ack) {
+            remoteTransport.sendTCP(type: .handshakeAck, payload: data)
+        }
+    }
+
+    @MainActor
+    private func handleRemoteDisconnect() {
+        remoteSessionActive = false
+        connectedClients = max(0, connectedClients - 1)
+        postStatusChange()
+        if connectedClients == 0 {
+            stopStreaming()
+        }
+    }
+
+    @MainActor
+    private func handlePingPacket(_ payload: Data, from connection: NWConnection) {
+        guard let ping = try? JSONDecoder().decode(PingPacket.self, from: payload) else { return }
+        let pong = PongPacket(pingTimestamp: ping.timestamp)
+        if let data = try? JSONEncoder().encode(pong) {
+            networkManager.sendTCP(to: connection, type: .pong, payload: data)
+        }
+    }
+
+    @MainActor
+    private func handleRemotePingPacket(_ payload: Data) {
+        guard let ping = try? JSONDecoder().decode(PingPacket.self, from: payload) else { return }
+        let pong = PongPacket(pingTimestamp: ping.timestamp)
+        if let data = try? JSONEncoder().encode(pong) {
+            remoteTransport.sendTCP(type: .pong, payload: data)
+        }
+    }
+
+    @MainActor
+    private func handleQualityReport(_ payload: Data) {
+        guard remoteSessionActive else { return }
+        guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
+
+        let target: QualityPreset
+        if report.latencyMs > 140 || report.droppedFrames > 8 {
+            target = .performance
+        } else if report.latencyMs < 60 && report.droppedFrames == 0 {
+            target = .pro
+        } else {
+            target = .balanced
+        }
+
+        guard target != currentQuality else { return }
+        currentQuality = target
+        if let streamer = self.screenStreamer {
+            streamer.setBitrate(currentQuality.bitrate)
+            streamer.setFrameRate(currentQuality.frameRate)
+        }
+        AirCatchLog.info("Remote adaptive quality -> \(currentQuality.displayName)", category: .video)
+
+        // Adaptive codec selection for remote sessions
+        let codecTarget: CodecPreference
+        if report.latencyMs > 200 {
+            codecTarget = .h264
+        } else if report.latencyMs < 80 {
+            codecTarget = .hevc
+        } else {
+            codecTarget = remoteCodecPreference ?? .auto
+        }
+
+        updateRemoteCodecIfNeeded(codecTarget)
+    }
+
+    @MainActor
+    private func updateRemoteCodecIfNeeded(_ target: CodecPreference) {
+        guard remoteSessionActive else { return }
+        guard target != remoteCodecPreference else { return }
+        remoteCodecPreference = target
+
+        guard isStreaming else { return }
+        stopStreaming()
+        Task { @MainActor in
+            await startStreaming(
+                clientMaxWidth: currentClientDimensions?.width,
+                clientMaxHeight: currentClientDimensions?.height,
+                audioEnabled: audioStreamingEnabled
+            )
         }
     }
     
@@ -500,11 +729,8 @@ final class HostManager: ObservableObject {
         }
     }
     
-    /// Returns the frame of the currently active target display (main or virtual)
+    /// Returns the frame of the target display (main display)
     private func targetDisplayFrame() -> CGRect {
-        if isExtendedDisplayActive, let frame = virtualDisplayManager.getVirtualDisplayFrame() {
-            return frame
-        }
         // Use CoreGraphics for source-of-truth frame (Y-down, instant update)
         if let targetFrame = targetScreenFrame {
             return targetFrame
@@ -620,6 +846,7 @@ final class HostManager: ObservableObject {
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
             audioEnabled: audioEnabled,
+            codecOverride: remoteSessionActive ? remoteCodecPreference : nil,
             onFrame: { [weak self] compressedFrame in
                 self?.broadcastVideoFrame(compressedFrame)
             },
@@ -666,95 +893,11 @@ final class HostManager: ObservableObject {
         screenStreamer = nil
         isStreaming = false
         
-        // Destroy virtual display if active
-        destroyVirtualDisplayIfNeeded()
-        
         postStatusChange()
         AirCatchLog.info("Screen streaming stopped", category: .video)
     }
+    
 
-    // MARK: - Virtual Display Management
-    
-    private func destroyVirtualDisplayIfNeeded() {
-        guard isExtendedDisplayActive else { return }
-        virtualDisplayManager.destroyVirtualDisplay()
-        isExtendedDisplayActive = false
-        currentDisplayConfig = nil
-        AirCatchLog.info("Virtual display destroyed", category: .video)
-    }
-    
-    // MARK: - Display Selection
-
-    private func configureTargetDisplay(extended: Bool) {
-        if extended {
-            // Create virtual display with default settings
-            let config = ExtendedDisplayConfig(mode: .extend, position: .right)
-            configureTargetDisplay(config: config, clientWidth: nil, clientHeight: nil)
-        } else {
-            // Use main display (mirror mode)
-            destroyVirtualDisplayIfNeeded()
-            let mainID = CGMainDisplayID()
-            self.targetDisplayID = mainID
-            self.targetScreenFrame = NSScreen.main?.frame
-            AirCatchLog.info("Using main display: \(mainID)", category: .video)
-        }
-    }
-    
-    private func configureTargetDisplay(config: ExtendedDisplayConfig?, clientWidth: Int?, clientHeight: Int?) {
-        guard let config = config, config.mode == .extend else {
-            // Mirror mode - use main display
-            destroyVirtualDisplayIfNeeded()
-            let mainID = CGMainDisplayID()
-            self.targetDisplayID = mainID
-            // IMPORTANT: Set to nil so targetDisplayFrame() uses dynamic CGDisplayBounds(mainID)
-            // This ensures we always get the *current* resolution if it changes mid-stream
-            self.targetScreenFrame = nil
-            self.isExtendedDisplayActive = false
-            AirCatchLog.info("Using main display (mirror mode): \(mainID)", category: .video)
-            return
-        }
-        
-        // Extend mode - create virtual display
-        guard virtualDisplayManager.isSupported else {
-            AirCatchLog.error("Virtual display not supported: \(virtualDisplayManager.unavailableReason ?? "Unknown")", category: .video)
-            // Fall back to main display
-            let mainID = CGMainDisplayID()
-            self.targetDisplayID = mainID
-            self.targetScreenFrame = NSScreen.main?.frame
-            self.isExtendedDisplayActive = false
-            return
-        }
-        
-        // Calculate optimal resolution based on client screen
-        let width: Int
-        let height: Int
-        if let clientWidth = clientWidth, let clientHeight = clientHeight {
-            // Use client's native resolution for best quality
-            // For HiDPI, we use half the pixel dimensions as logical resolution
-            let optimal = VirtualDisplayManager.optimalResolution(for: clientWidth, iPadHeight: clientHeight)
-            width = optimal.width
-            height = optimal.height
-        } else {
-            // Default to a reasonable resolution
-            width = 1920
-            height = 1080
-        }
-        
-        // Create the virtual display
-        if let displayID = virtualDisplayManager.createVirtualDisplay(config: config, width: width, height: height) {
-            self.targetDisplayID = displayID
-            self.targetScreenFrame = virtualDisplayManager.getVirtualDisplayFrame()
-            self.isExtendedDisplayActive = true
-            AirCatchLog.info("Created virtual display: \(displayID), size: \(width)x\(height), position: \(config.position.rawValue)", category: .video)
-        } else {
-            AirCatchLog.error("Failed to create virtual display, falling back to main display", category: .video)
-            let mainID = CGMainDisplayID()
-            self.targetDisplayID = mainID
-            self.targetScreenFrame = NSScreen.main?.frame
-            self.isExtendedDisplayActive = false
-        }
-    }
-    
     // Dedicated queue for video broadcasting to avoid blocking compression
     private let broadcastQueue = DispatchQueue(label: "com.aircatch.broadcast", qos: .userInteractive)
 
@@ -784,6 +927,13 @@ final class HostManager: ObservableObject {
     
     // Changed per instructions:
     private func broadcastVideoFrame(_ data: Data) {
+        if remoteSessionActive {
+            if !preferLowLatency {
+                remoteTransport.sendTCP(type: .videoFrame, payload: data)
+                return
+            }
+        }
+
         // If client prefers reliability over latency, send complete frames over TCP.
         if !preferLowLatency {
             NetworkManager.shared.broadcastTCP(type: .videoFrame, payload: data)
@@ -838,8 +988,12 @@ final class HostManager: ObservableObject {
                 withUnsafeBytes(of: &total) { packet.append(contentsOf: $0) }
                 packet.append(chunkData)
                 
-                // Send chunk via UDP
-                NetworkManager.shared.broadcastUDP(type: .videoFrameChunk, payload: packet)
+                // Send chunk via UDP (remote relay or local broadcast)
+                if self.remoteSessionActive {
+                    self.remoteTransport.sendUDP(type: .videoFrameChunk, payload: packet)
+                } else {
+                    NetworkManager.shared.broadcastUDP(type: .videoFrameChunk, payload: packet)
+                }
 
                 if shouldCacheForRetransmit {
                     chunksForCache[i] = packet
@@ -861,7 +1015,11 @@ final class HostManager: ObservableObject {
     private func broadcastAudioFrame(_ data: Data) {
         // Audio packets are small enough to send in one UDP datagram (typically ~4KB for 48kHz stereo)
         // The data already contains 8-byte timestamp header from ScreenStreamer
-        NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: data)
+        if remoteSessionActive {
+            remoteTransport.sendUDP(type: .audioPCM, payload: data)
+        } else {
+            NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: data)
+        }
     }
 
     private func handleVideoChunkNack(_ payload: Data, from connection: NWConnection) {

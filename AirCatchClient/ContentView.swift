@@ -17,7 +17,6 @@ struct ContentView: View {
     @State private var showPINOverlay = false
     @State private var pinTargetHost: DiscoveredHost?
 
-    @State private var showRemoteConnectSheet = false
 
     fileprivate enum SidebarItem: Hashable {
         case devices
@@ -43,9 +42,6 @@ struct ContentView: View {
                                 pinTargetHost = host
                                 clientManager.enteredPIN = ""
                                 showPINOverlay = true
-                            },
-                            onRemoteConnectTapped: {
-                                showRemoteConnectSheet = true
                             }
                         )
                     case .about:
@@ -88,19 +84,6 @@ struct ContentView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
         }
-        .sheet(isPresented: $showRemoteConnectSheet) {
-            RemoteConnectSheet(
-                onConnect: { ipAddress, port, pin in
-                    showRemoteConnectSheet = false
-                    clientManager.enteredPIN = pin
-                    clientManager.connectByIP(ipAddress: ipAddress, port: port)
-                },
-                onCancel: {
-                    showRemoteConnectSheet = false
-                }
-            )
-            .environmentObject(clientManager)
-        }
         .animation(.snappy(duration: 0.25), value: showPINOverlay)
     }
 }
@@ -139,7 +122,6 @@ private struct DevicesScreen: View {
     @Binding var selectedHostId: DiscoveredHost.ID?
 
     let onConnectTapped: (DiscoveredHost) -> Void
-    let onRemoteConnectTapped: () -> Void
 
     var body: some View {
         ZStack {
@@ -148,6 +130,13 @@ private struct DevicesScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header
+
+                    RemoteHostCard {
+                        clientManager.connectionOption = .remote
+                        let remoteHost = DiscoveredHost(id: "remote", name: "Remote Host")
+                        selectedHostId = remoteHost.id
+                        onConnectTapped(remoteHost)
+                    }
 
                     if clientManager.discoveredHosts.isEmpty {
                         Text("Searching for AirCatch Hosts…")
@@ -175,20 +164,9 @@ private struct DevicesScreen: View {
     }
 
     private var header: some View {
-        HStack {
-            Text("Devices")
-                .font(.title2.bold())
-                .foregroundStyle(.white)
-
-            Spacer()
-
-            Button(action: onRemoteConnectTapped) {
-                Label("Remote", systemImage: "network")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.white.opacity(0.18))
-        }
+        Text("Devices")
+            .font(.title2.bold())
+            .foregroundStyle(.white)
     }
 }
 
@@ -198,7 +176,6 @@ private struct HostCard: View {
     let onTap: () -> Void
 
     private var subtitle: String {
-        if host.isDirectIP { return "Direct IP" }
         if host.mpcPeerName != nil { return "P2P available" }
         return "Local network"
     }
@@ -241,6 +218,49 @@ private struct HostCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.35) : Color.white.opacity(0.12), lineWidth: 1)
+        }
+    }
+}
+
+private struct RemoteHostCard: View {
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Remote Host")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Text("Connect over the internet")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "globe")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Text("Requires relay server")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .background(
+            Color.white.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
     }
 }
@@ -366,70 +386,6 @@ private struct PINEntryOverlay: View {
             .frame(maxWidth: 380)
         }
         .onAppear { isFocused = true }
-    }
-}
-
-// MARK: - Remote Connect
-
-private struct RemoteConnectSheet: View {
-    @State private var ipAddress: String = ""
-    @State private var portString: String = "5556"
-    @State private var pin: String = ""
-    @FocusState private var focusedField: Field?
-
-    private enum Field: Hashable {
-        case ip, port, pin
-    }
-
-    let onConnect: (String, UInt16, String) -> Void
-    let onCancel: () -> Void
-
-    private var isValid: Bool {
-        !ipAddress.isEmpty && pin.count >= 4 && UInt16(portString) != nil
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Host Address") {
-                    TextField("IP Address or Hostname", text: $ipAddress)
-                        .keyboardType(.decimalPad)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        .focused($focusedField, equals: .ip)
-
-                    TextField("Port", text: $portString)
-                        .keyboardType(.numberPad)
-                        .focused($focusedField, equals: .port)
-                }
-
-                Section("PIN Code") {
-                    TextField("PIN", text: $pin)
-                        .keyboardType(.numberPad)
-                        .focused($focusedField, equals: .pin)
-                }
-
-                Section("Important") {
-                    Text("For internet connections, forward TCP 5556 and UDP 5555 to your Mac (or use a VPN like Tailscale).")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Remote Connect")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Connect") {
-                        let port = UInt16(portString) ?? 5556
-                        onConnect(ipAddress, port, pin)
-                    }
-                    .disabled(!isValid)
-                }
-            }
-        }
     }
 }
 
