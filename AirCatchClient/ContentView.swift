@@ -66,7 +66,6 @@ struct ContentView: View {
                     pin: $clientManager.enteredPIN,
                     selectedPreset: $clientManager.selectedPreset,
                     audioEnabled: $clientManager.audioEnabled,
-                    optimizeForHostDisplay: $clientManager.optimizeForHostDisplay,
                     connectionOption: $clientManager.connectionOption,
                     showsQualityOptions: !isRemoteHost,
                     onConnect: {
@@ -324,7 +323,6 @@ private struct PINEntryOverlay: View {
     @Binding var pin: String
     @Binding var selectedPreset: QualityPreset
     @Binding var audioEnabled: Bool
-    @Binding var optimizeForHostDisplay: Bool
     @Binding var connectionOption: ClientManager.ConnectionOption
     let showsQualityOptions: Bool
     let onConnect: () -> Void
@@ -355,8 +353,8 @@ private struct PINEntryOverlay: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 240)
 
-                if showsQualityOptions {
-                    VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if showsQualityOptions {
                         Picker("Quality", selection: $selectedPreset) {
                             ForEach(QualityPreset.allCases, id: \.self) { preset in
                                 Text(preset.displayName).tag(preset)
@@ -370,19 +368,13 @@ private struct PINEntryOverlay: View {
                             }
                         }
                         .pickerStyle(.menu)
-                        
-                        Toggle("Stream Audio", isOn: $audioEnabled)
-                            .toggleStyle(.switch)
-                        
-                        Toggle("Optimize for Host Display", isOn: $optimizeForHostDisplay)
-                            .toggleStyle(.switch)
-                        
-                        Text(optimizeForHostDisplay ? "Uses host's native resolution" : "Scales to your display")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: 240, alignment: .leading)
+                    
+                    // Audio toggle available for all modes (including remote)
+                    Toggle("Stream Audio", isOn: $audioEnabled)
+                        .toggleStyle(.switch)
                 }
+                .frame(maxWidth: 240, alignment: .leading)
 
                 HStack(spacing: 12) {
                     Button("Cancel", action: onCancel)
