@@ -363,7 +363,7 @@ private struct PINEntryOverlay: View {
                         .pickerStyle(.menu)
 
                         Picker("Connection", selection: $connectionOption) {
-                            ForEach(ClientManager.ConnectionOption.allCases) { option in
+                            ForEach(ClientManager.ConnectionOption.allCases.filter { $0 != .remote }) { option in
                                 Text(option.displayName).tag(option)
                             }
                         }
