@@ -342,11 +342,13 @@ private struct PINEntryOverlay: View {
                     .foregroundStyle(.primary)
 
                 TextField("PIN", text: $pin)
-                    .keyboardType(.numberPad)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled(true)
                     .textContentType(.oneTimeCode)
                     .focused($isFocused)
                     .onChange(of: pin) { _, newValue in
-                        pin = String(newValue.filter { $0.isNumber }.prefix(4))
+                        // Allow uppercase letters and digits, max 6 chars
+                        pin = String(newValue.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
                     }
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 240)
@@ -379,7 +381,7 @@ private struct PINEntryOverlay: View {
 
                     Button("Connect", action: onConnect)
                         .buttonStyle(.borderedProminent)
-                        .disabled(pin.count != 4)
+                        .disabled(pin.count != 6)
                 }
             }
             .padding(20)

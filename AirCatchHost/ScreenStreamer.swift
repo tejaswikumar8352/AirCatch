@@ -282,10 +282,14 @@ final class ScreenStreamer: NSObject {
             }
         }
         
-        // Keyframe interval: 1 second for faster stream recovery after packet loss
-        let keyframeInterval = currentPreset.frameRate
+        // GOP Configuration
+        // Remote Mode: Short GOP (0.5s) for faster recovery after packet loss
+        // Local Mode: 1s GOP for better compression efficiency
+        let isRemoteMode = (codecOverride == .hevc)  // Remote always uses HEVC override
+        let gopDuration = isRemoteMode ? AirCatchConfig.remoteGOPDuration : 1.0
+        let keyframeInterval = Int(Double(currentPreset.frameRate) * gopDuration)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: gopDuration as CFNumber)
         
         // Frame rate configuration
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: currentPreset.frameRate as CFNumber)

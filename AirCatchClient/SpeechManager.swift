@@ -65,10 +65,10 @@ final class SpeechManager: ObservableObject {
         self.onTextCallback = onText
         resetIncrementalState()
         
-        // update audio session for recording
+        // Configure audio session for speech recognition
         let audioSession = AVAudioSession.sharedInstance()
-        // Use playAndRecord to allow playback (AudioPlayer) to continue working if active
-        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+        // Use playAndRecord with spokenAudio mode for optimal speech recognition
+        try audioSession.setCategory(.playAndRecord, mode: .spokenAudio, options: [.duckOthers, .defaultToSpeaker])
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
@@ -100,14 +100,16 @@ final class SpeechManager: ObservableObject {
                 }
             }
 
-            if error != nil {
+            if let error {
+                AirCatchLog.error("Speech recognition error: \(error.localizedDescription)", category: .input)
                 self.stopRecording()
             }
         }
         
         // Setup audio engine input
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { (buffer, when) in
+        // Use larger buffer (4096) for smoother recognition - less choppy than 1024
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { (buffer, when) in
             recognitionRequest.append(buffer)
         }
         

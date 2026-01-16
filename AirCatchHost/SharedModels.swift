@@ -63,8 +63,12 @@ enum AirCatchConfig {
 
     // Remote Mode Specifics
     static let remoteFrameRate: Int = 30
-    static let remoteBitrate: Int = 10_000_000   // 10 Mbps
-    static let remoteMaxResolutionLongEdge: Int = 1920 // Cap remote at ~1080p equivalent
+    static let remoteBitrate: Int = 6_000_000     // 6 Mbps (target range: 4-10)
+    static let remoteMinBitrate: Int = 4_000_000  // Floor for adaptive
+    static let remoteMaxBitrate: Int = 10_000_000 // Ceiling for adaptive
+    static let remoteMinFPS: Int = 20             // Floor when congested
+    static let remoteMaxFPS: Int = 30             // Target FPS
+    static let remoteGOPDuration: Double = 0.5    // Short GOP (0.5s) for faster recovery
 
     
     // Resolution limits

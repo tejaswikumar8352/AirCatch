@@ -116,6 +116,7 @@ final class ClientManager: ObservableObject {
     private let bonjourBrowser = BonjourBrowser()
     private let mpcClient = MPCAirCatchClient()
     private let audioPlayer = AudioPlayer()
+    private let crypto = CryptoManager()  // E2EE decryption
     private var cancellables = Set<AnyCancellable>()
 
     private enum ActiveLink {
@@ -343,6 +344,9 @@ final class ClientManager: ObservableObject {
         state = .connecting
         connectedHost = host
         reconnectAttempts = 0 // Reset on manual connect
+        
+        // E2EE: Derive encryption key from PIN
+        crypto.deriveKey(from: enteredPIN)
 
         // MultipeerConnectivity is kept for discovery, but we always use Network.framework
         // for the actual stream/control connection.
@@ -361,8 +365,8 @@ final class ClientManager: ObservableObject {
         AirCatchLog.info(" Connecting (Remote) to session \(enteredPIN)")
         #endif
 
-        guard enteredPIN.count == 4 else {
-            state = .error("Enter a 4-digit PIN for Remote")
+        guard enteredPIN.count == 6 else {
+            state = .error("Enter a 6-character PIN")
             return
         }
 
@@ -442,7 +446,9 @@ final class ClientManager: ObservableObject {
     private func handleAirCatchPacket(_ packet: Packet) {
         switch packet.type {
         case .videoFrame:
-            videoFrameSubject.send(packet.payload)
+            // E2EE: Decrypt video frame
+            let frameData = crypto.decrypt(packet.payload) ?? packet.payload
+            videoFrameSubject.send(frameData)
             if state == .connected {
                 state = .streaming
                 reconnectAttempts = 0
@@ -456,8 +462,9 @@ final class ClientManager: ObservableObject {
                 debugConnectionStatus = "Streaming (AirCatch)"
             }
         case .audioPCM:
-            // Handle audio frame
-            break
+            // E2EE: Decrypt audio frame
+            let audioData = crypto.decrypt(packet.payload) ?? packet.payload
+            audioPlayer.playAudioPacket(audioData)
         case .ping:
             // Respond to ping with pong for RTT measurement
             handlePingPacket(packet.payload)
@@ -495,8 +502,9 @@ final class ClientManager: ObservableObject {
         guard connectionOption == .remote else { return }
 
         remotePingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let weakSelf = self else { return }
             Task { @MainActor in
-                self?.sendRemotePingAndReport()
+                weakSelf.sendRemotePingAndReport()
             }
         }
     }
@@ -750,8 +758,9 @@ final class ClientManager: ObservableObject {
         case .handshakeAck:
             handleHandshakeAck(packet.payload)
         case .videoFrame:
-            // Receive video frames via TCP
-            videoFrameSubject.send(packet.payload)
+            // E2EE: Decrypt video frames received via TCP
+            let frameData = crypto.decrypt(packet.payload) ?? packet.payload
+            videoFrameSubject.send(frameData)
             if state == .connected {
                 state = .streaming
                 reconnectAttempts = 0
@@ -791,17 +800,19 @@ final class ClientManager: ObservableObject {
         
         switch packet.type {
         case .videoFrame:
-            // UDP complete frame (legacy/fallback)
-            videoFrameSubject.send(packet.payload)
+            // E2EE: Decrypt UDP complete frame (legacy/fallback)
+            let frameData = crypto.decrypt(packet.payload) ?? packet.payload
+            videoFrameSubject.send(frameData)
             updateStreamingState()
             
         case .videoFrameChunk:
-            // Handle fragmented video frame
+            // Handle fragmented video frame (chunks are already encrypted as a whole frame)
             handleVideoChunk(packet.payload)
             
         case .audioPCM:
-            // Play audio packet
-            audioPlayer.playAudioPacket(packet.payload)
+            // E2EE: Decrypt audio packet
+            let audioData = crypto.decrypt(packet.payload) ?? packet.payload
+            audioPlayer.playAudioPacket(audioData)
             
         default:
             break
@@ -844,8 +855,9 @@ final class ClientManager: ObservableObject {
             onComplete: { [weak self] fullFrame in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Send frame to decoder (no logging - streaming is working)
-                self.videoFrameSubject.send(fullFrame)
+                // E2EE: Decrypt reassembled frame (chunks form the encrypted payload)
+                let decryptedFrame = self.crypto.decrypt(fullFrame) ?? fullFrame
+                self.videoFrameSubject.send(decryptedFrame)
                 self.updateStreamingState()
             }
         })

@@ -28,8 +28,8 @@ struct HostView: View {
                 HStack(spacing: 4) {
                     ForEach(Array(hostManager.currentPIN.enumerated()), id: \.offset) { index, char in
                         Text(String(char))
-                            .font(.system(size: 40, weight: .bold, design: .monospaced))
-                            .frame(width: 40, height: 60)
+                            .font(.system(size: 32, weight: .bold, design: .monospaced))
+                            .frame(width: 36, height: 50)
                             .background(Color.secondary.opacity(0.1))
                             .cornerRadius(8)
                     }

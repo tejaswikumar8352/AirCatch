@@ -24,7 +24,7 @@ final class HostManager: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isStreaming = false
     @Published private(set) var connectedClients = 0
-    @Published private(set) var currentPIN: String = "0000"
+    @Published private(set) var currentPIN: String = "------"
     @Published var currentQuality: QualityPreset = .balanced
     @Published var audioStreamingEnabled: Bool = false
     @Published private(set) var availableDisplays: [String] = []
@@ -41,11 +41,14 @@ final class HostManager: ObservableObject {
         }
     }
     
-    /// Generates a new random 4-digit PIN
+    /// Generates a new random 6-character alphanumeric PIN (729 million combinations vs 10,000)
     func regeneratePIN() {
-        currentPIN = String(format: "%04d", Int.random(in: 0...9999))
+        // Use uppercase letters + digits, excluding confusing characters (0, O, I, 1, L)
+        let allowedChars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+        currentPIN = String((0..<6).map { _ in allowedChars.randomElement()! })
         AirCatchLog.info("New PIN generated")
         remoteTransport.updateSessionId(currentPIN)
+        crypto.deriveKey(from: currentPIN)  // E2EE: Derive encryption key from PIN
     }
     
     // MARK: - Network Components
@@ -54,6 +57,7 @@ final class HostManager: ObservableObject {
     private let bonjourAdvertiser = BonjourAdvertiser()
     private let mpcHost = MPCAirCatchHost()
     private let remoteTransport = RemoteTransportHost()
+    private let crypto = CryptoManager()  // E2EE encryption
     
     // MARK: - Screen Capture
     
@@ -551,18 +555,13 @@ final class HostManager: ObservableObject {
         let wantsVideo = handshakeRequest?.requestVideo ?? true
         let wantsAudio = handshakeRequest?.requestAudio ?? false
         
-        // Resolution Cap logic
-        var clientW = handshakeRequest?.screenWidth
-        var clientH = handshakeRequest?.screenHeight
+        // Use client's native resolution directly (no cap)
+        // iPad sends its current display mode (Default or More Space)
+        let clientW = handshakeRequest?.screenWidth
+        let clientH = handshakeRequest?.screenHeight
         
         if let w = clientW, let h = clientH {
-            let longEdge = max(w, h)
-            if longEdge > AirCatchConfig.remoteMaxResolutionLongEdge {
-                let scale = Double(AirCatchConfig.remoteMaxResolutionLongEdge) / Double(longEdge)
-                clientW = Int(Double(w) * scale)
-                clientH = Int(Double(h) * scale)
-                AirCatchLog.info("Remote resolution capped to \(clientW!)x\(clientH!) (scale: \(scale))", category: .video)
-            }
+            AirCatchLog.info("Remote mode using client native resolution: \(w)x\(h)", category: .video)
         }
 
         postStatusChange()
@@ -653,11 +652,11 @@ final class HostManager: ObservableObject {
             qualityStableCount = 0
             
             // Back off aggressively
-            newBitrate = max(4_000_000, currentRemoteBitrate - 1_000_000)
+            newBitrate = max(AirCatchConfig.remoteMinBitrate, currentRemoteBitrate - 1_000_000)
             
             // If already at minimum bitrate, drop FPS
-            if newBitrate == 4_000_000 {
-                newFPS = 20
+            if newBitrate == AirCatchConfig.remoteMinBitrate {
+                newFPS = AirCatchConfig.remoteMinFPS
             }
             
             if newBitrate != currentRemoteBitrate || newFPS != currentRemoteFPS {
@@ -674,14 +673,14 @@ final class HostManager: ObservableObject {
                 qualityStableCount = 0 // Reset counter to pace increases
                 
                 // Recover FPS first
-                if currentRemoteFPS < 30 {
-                    newFPS = 30
-                    AirCatchLog.info("✅ Stability recovered. Restoring 30 FPS.")
+                if currentRemoteFPS < AirCatchConfig.remoteMaxFPS {
+                    newFPS = AirCatchConfig.remoteMaxFPS
+                    AirCatchLog.info("✅ Stability recovered. Restoring \(AirCatchConfig.remoteMaxFPS) FPS.")
                     changed = true
                 } 
                 // Then recover Bitrate
-                else if currentRemoteBitrate < 10_000_000 {
-                    newBitrate = min(10_000_000, currentRemoteBitrate + 500_000)
+                else if currentRemoteBitrate < AirCatchConfig.remoteMaxBitrate {
+                    newBitrate = min(AirCatchConfig.remoteMaxBitrate, currentRemoteBitrate + 500_000)
                     AirCatchLog.info("✅ Network stable. Increasing to \(newBitrate/1_000_000)Mbps")
                     changed = true
                 }
@@ -991,16 +990,24 @@ final class HostManager: ObservableObject {
     
     // Changed per instructions:
     private func broadcastVideoFrame(_ data: Data) {
+        // E2EE: Encrypt video data if crypto is ready
+        let frameData: Data
+        if crypto.isReady, let encrypted = crypto.encrypt(data) {
+            frameData = encrypted
+        } else {
+            frameData = data  // Fallback to unencrypted (shouldn't happen after handshake)
+        }
+        
         // Remote mode: always send complete frames via TCP (WebSocket is already TCP-based)
         // Chunking over WebSocket creates too many messages and overwhelms the connection
         if remoteSessionActive {
-            remoteTransport.sendTCP(type: .videoFrame, payload: data)
+            remoteTransport.sendTCP(type: .videoFrame, payload: frameData)
             return
         }
 
         // If client prefers reliability over latency, send complete frames over TCP.
         if !preferLowLatency {
-            NetworkManager.shared.broadcastTCP(type: .videoFrame, payload: data)
+            NetworkManager.shared.broadcastTCP(type: .videoFrame, payload: frameData)
             return
         }
 
@@ -1014,10 +1021,11 @@ final class HostManager: ObservableObject {
         let isRemoteSession = remoteSessionActive
         
         // Dispatch to avoid blocking the compression callback thread
+        let dataToChunk = frameData  // Use encrypted data for chunking
         broadcastQueue.async { [weak self] in
             guard let self else { return }
             
-            let totalLen = data.count
+            let totalLen = dataToChunk.count
             let totalChunks = Int(ceil(Double(totalLen) / Double(maxPayloadSize)))
             
             // Safety check to avoid overflowing 2-byte index
@@ -1038,7 +1046,7 @@ final class HostManager: ObservableObject {
             for i in 0..<totalChunks {
                 let start = i * maxPayloadSize
                 let end = min(start + maxPayloadSize, totalLen)
-                let chunkData = data.subdata(in: start..<end)
+                let chunkData = dataToChunk.subdata(in: start..<end)
                 
                 var packet = Data()
                 packet.reserveCapacity(8 + chunkData.count)
@@ -1078,12 +1086,20 @@ final class HostManager: ObservableObject {
     
     /// Broadcasts audio data to all connected clients via UDP
     private func broadcastAudioFrame(_ data: Data) {
+        // E2EE: Encrypt audio data
+        let audioData: Data
+        if crypto.isReady, let encrypted = crypto.encrypt(data) {
+            audioData = encrypted
+        } else {
+            audioData = data
+        }
+        
         // Audio packets are small enough to send in one UDP datagram (typically ~4KB for 48kHz stereo)
         // The data already contains 8-byte timestamp header from ScreenStreamer
         if remoteSessionActive {
-            remoteTransport.sendUDP(type: .audioPCM, payload: data)
+            remoteTransport.sendUDP(type: .audioPCM, payload: audioData)
         } else {
-            NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: data)
+            NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: audioData)
         }
     }
 
