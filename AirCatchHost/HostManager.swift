@@ -75,6 +75,9 @@ final class HostManager: ObservableObject {
     /// Whether the active session is a Remote (Internet) session.
     private var remoteSessionActive: Bool = false
     private var remoteCodecPreference: CodecPreference? = nil
+    
+    /// When true, stream at host's native resolution. When false, scale to client resolution.
+    private var optimizeForHostDisplay: Bool = false
 
     private struct CachedFrame {
         let createdAt: TimeInterval
@@ -374,6 +377,9 @@ final class HostManager: ObservableObject {
         self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
         self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
         
+        // Resolution optimization: use client's preference or preset's default
+        self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? currentQuality.defaultOptimizeForHostDisplay
+        
         // Always use main display (mirror mode)
         let mainID = CGMainDisplayID()
         self.targetDisplayID = mainID
@@ -467,6 +473,9 @@ final class HostManager: ObservableObject {
             self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
             self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
             
+            // Resolution optimization: use client's preference or preset's default
+            self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? currentQuality.defaultOptimizeForHostDisplay
+            
             // Always use main display (mirror mode)
             let mainID = CGMainDisplayID()
             self.targetDisplayID = mainID
@@ -546,6 +555,9 @@ final class HostManager: ObservableObject {
         // Remote mode: prioritize latency, disable retransmit
         self.preferLowLatency = true
         self.losslessVideoEnabled = false
+        
+        // Remote mode: always use client resolution to minimize bandwidth over internet
+        self.optimizeForHostDisplay = false
 
         // Always use main display (mirror mode)
         let mainID = CGMainDisplayID()
@@ -903,13 +915,14 @@ final class HostManager: ObservableObject {
         // Store audio preference for restart logic
         self.audioStreamingEnabled = audioEnabled
         
-        AirCatchLog.info("Starting stream with preset: \(currentQuality.displayName), audio: \(audioEnabled)", category: .video)
+        AirCatchLog.info("Starting stream with preset: \(currentQuality.displayName), audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay)", category: .video)
         screenStreamer = ScreenStreamer(
             preset: currentQuality,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
             codecOverride: remoteSessionActive ? remoteCodecPreference : nil,
             audioEnabled: audioEnabled,
+            optimizeForHostDisplay: optimizeForHostDisplay,
             onFrame: { [weak self] compressedFrame in
                 self?.broadcastVideoFrame(compressedFrame)
             },

@@ -93,7 +93,12 @@ final class ClientManager: ObservableObject {
     @Published var enteredPIN: String = ""
     
     /// Selected quality preset
-    @Published var selectedPreset: QualityPreset = .balanced
+    @Published var selectedPreset: QualityPreset = .balanced {
+        didSet {
+            // Update optimizeForHostDisplay to match the new preset's default
+            optimizeForHostDisplay = selectedPreset.defaultOptimizeForHostDisplay
+        }
+    }
 
     /// Connection mode for video/control.
     @Published var connectionOption: ConnectionOption = .udpPeerToPeerAWDL
@@ -103,6 +108,11 @@ final class ClientManager: ObservableObject {
     
     /// User preference: Stream audio from host
     @Published var audioEnabled: Bool = false
+    
+    /// User preference: Optimize streaming for host display resolution
+    /// When true, streams at host's native resolution (may require letterboxing on client).
+    /// When false, scales to client's display resolution for pixel-perfect fit.
+    @Published var optimizeForHostDisplay: Bool = false
     
     // MARK: - Video Frame Output
     
@@ -435,7 +445,8 @@ final class ClientManager: ObservableObject {
             requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: true,
-            pin: enteredPIN.isEmpty ? nil : enteredPIN
+            pin: enteredPIN.isEmpty ? nil : enteredPIN,
+            optimizeForHostDisplay: optimizeForHostDisplay
         )
 
         if let data = try? JSONEncoder().encode(request) {
@@ -696,7 +707,8 @@ final class ClientManager: ObservableObject {
             requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: connectionOption == .remote ? false : true,
-            pin: enteredPIN.isEmpty ? nil : enteredPIN
+            pin: enteredPIN.isEmpty ? nil : enteredPIN,
+            optimizeForHostDisplay: optimizeForHostDisplay
         )
         
         if let data = try? JSONEncoder().encode(request) {

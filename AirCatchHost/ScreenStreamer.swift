@@ -21,6 +21,8 @@ final class ScreenStreamer: NSObject {
     private var clientWidth: Int?
     private var clientHeight: Int?
     private var targetDisplayID: CGDirectDisplayID?
+    /// When true, stream at host's native resolution. When false, scale to client resolution.
+    private var optimizeForHostDisplay: Bool
 
     private(set) var captureWidth: Int = 0
     private(set) var captureHeight: Int = 0
@@ -62,6 +64,7 @@ final class ScreenStreamer: NSObject {
          targetDisplayID: CGDirectDisplayID? = nil,
          codecOverride: CodecPreference? = nil,
          audioEnabled: Bool = false,
+         optimizeForHostDisplay: Bool = false,
          onFrame: @escaping (Data) -> Void,
          onAudio: ((Data) -> Void)? = nil) {
         self.currentPreset = preset
@@ -70,6 +73,7 @@ final class ScreenStreamer: NSObject {
         self.targetDisplayID = targetDisplayID
         self.codecOverride = codecOverride
         self.audioEnabled = audioEnabled
+        self.optimizeForHostDisplay = optimizeForHostDisplay
         self.frameCallback = onFrame
         self.audioCallback = onAudio
         super.init()
@@ -334,8 +338,9 @@ final class ScreenStreamer: NSObject {
     }
 
 
-    /// Calculate optimal output resolution - Strictly matches Client Resolution
-    /// As requested: "Stream only at iPad's native resolution"
+    /// Calculate optimal output resolution based on settings.
+    /// - When `optimizeForHostDisplay` is true: Uses host's native resolution (pixel-perfect for host content)
+    /// - When `optimizeForHostDisplay` is false: Uses client's resolution (pixel-perfect for client display)
     /// ScreenCaptureKit will handle aspect ratio by letterboxing/pillarboxing the content within this frame.
     private func calculateOptimalOutputResolution(
         sourceWidth: Int,
@@ -343,21 +348,31 @@ final class ScreenStreamer: NSObject {
         clientWidth: Int?,
         clientHeight: Int?
     ) -> (Int, Int) {
-        // If no client dimensions provided, use source
+        // When optimizing for host display, use the host's native resolution
+        if optimizeForHostDisplay {
+            // Ensure even dimensions for video encoding
+            let targetWidth = max(2, sourceWidth & ~1)
+            let targetHeight = max(2, sourceHeight & ~1)
+            
+            AirCatchLog.info("📺 Using HOST resolution (optimizeForHostDisplay=true): \(targetWidth)x\(targetHeight)")
+            return (targetWidth, targetHeight)
+        }
+        
+        // When optimizing for client display (default), use the client's resolution
         guard let clientWidth = clientWidth, let clientHeight = clientHeight,
               clientWidth > 0, clientHeight > 0 else {
             AirCatchLog.info(" No client dimensions, using source: \(sourceWidth)x\(sourceHeight)")
             return (sourceWidth, sourceHeight)
         }
         
-        // Strictly use Client's Native Resolution
+        // Use Client's Native Resolution for pixel-perfect display
         // Ensure even dimensions for video encoding
         let targetWidth = max(2, clientWidth & ~1)
         let targetHeight = max(2, clientHeight & ~1)
         
         let sourceAspect = Double(sourceWidth) / Double(sourceHeight)
         
-        AirCatchLog.info(" Resolution: source=\(sourceWidth)x\(sourceHeight), client=\(clientWidth)x\(clientHeight), output=\(targetWidth)x\(targetHeight), sourceAspect=\(String(format: "%.3f", sourceAspect))")
+        AirCatchLog.info("📱 Using CLIENT resolution: source=\(sourceWidth)x\(sourceHeight), client=\(clientWidth)x\(clientHeight), output=\(targetWidth)x\(targetHeight), sourceAspect=\(String(format: "%.3f", sourceAspect))")
         
         return (targetWidth, targetHeight)
     }

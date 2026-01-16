@@ -99,6 +99,14 @@ enum QualityPreset: String, Codable, CaseIterable {
         return true
     }
     
+    /// Default value for optimize-for-host-display option per preset.
+    /// When true, streams at the host's native resolution (may require letterboxing on client).
+    /// When false, scales to the client's display resolution for pixel-perfect fit.
+    var defaultOptimizeForHostDisplay: Bool {
+        // Always use client resolution for pixel-perfect display
+        return false
+    }
+    
     var displayName: String {
         switch self {
         case .performance: return "Performance"
@@ -199,6 +207,9 @@ struct HandshakeRequest: Codable {
     let losslessVideo: Bool?
     let deviceId: String?           // Unique device identifier for trusted devices
     let pin: String?                // PIN for pairing verification
+    /// When true, stream at host's native resolution instead of scaling to client resolution.
+    /// This provides higher quality but may require letterboxing on the client.
+    let optimizeForHostDisplay: Bool?
     
     init(clientName: String,
          clientVersion: String,
@@ -214,7 +225,8 @@ struct HandshakeRequest: Codable {
          preferLowLatency: Bool? = nil,
          losslessVideo: Bool? = nil,
          deviceId: String? = nil,
-         pin: String? = nil) {
+         pin: String? = nil,
+         optimizeForHostDisplay: Bool? = nil) {
         self.clientName = clientName
         self.clientVersion = clientVersion
         self.deviceModel = deviceModel
@@ -230,6 +242,7 @@ struct HandshakeRequest: Codable {
         self.losslessVideo = losslessVideo
         self.deviceId = deviceId
         self.pin = pin
+        self.optimizeForHostDisplay = optimizeForHostDisplay
     }
 }
 

@@ -66,6 +66,7 @@ struct ContentView: View {
                     pin: $clientManager.enteredPIN,
                     selectedPreset: $clientManager.selectedPreset,
                     audioEnabled: $clientManager.audioEnabled,
+                    optimizeForHostDisplay: $clientManager.optimizeForHostDisplay,
                     connectionOption: $clientManager.connectionOption,
                     showsQualityOptions: !isRemoteHost,
                     onConnect: {
@@ -323,6 +324,7 @@ private struct PINEntryOverlay: View {
     @Binding var pin: String
     @Binding var selectedPreset: QualityPreset
     @Binding var audioEnabled: Bool
+    @Binding var optimizeForHostDisplay: Bool
     @Binding var connectionOption: ClientManager.ConnectionOption
     let showsQualityOptions: Bool
     let onConnect: () -> Void
@@ -371,6 +373,13 @@ private struct PINEntryOverlay: View {
                         
                         Toggle("Stream Audio", isOn: $audioEnabled)
                             .toggleStyle(.switch)
+                        
+                        Toggle("Optimize for Host Display", isOn: $optimizeForHostDisplay)
+                            .toggleStyle(.switch)
+                        
+                        Text(optimizeForHostDisplay ? "Uses host's native resolution" : "Scales to your display")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: 240, alignment: .leading)
                 }
