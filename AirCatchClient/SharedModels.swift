@@ -45,7 +45,7 @@ enum AirCatchConfig {
     nonisolated static let bonjourTCPServiceType = "_aircatch._tcp."
 
     // Remote (Internet) relay/signaling
-    nonisolated static let remoteRelayURL: String = "wss://aircatch-relay-teja.fly.dev/ws"
+    nonisolated static let remoteRelayURL: String = "wss://aircatch.duckdns.org/ws"
     
     // Port aliases for clarity
     nonisolated static let defaultUDPPort: UInt16 = 5555
@@ -60,6 +60,15 @@ enum AirCatchConfig {
     static let maxTouchEventsPerSecond: Int = 60
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
+    
+    // Remote Mode Specifics
+    static let remoteFrameRate: Int = 30
+    static let remoteBitrate: Int = 6_000_000     // 6 Mbps (target range: 4-10)
+    static let remoteMinBitrate: Int = 4_000_000  // Floor for adaptive
+    static let remoteMaxBitrate: Int = 10_000_000 // Ceiling for adaptive
+    static let remoteMinFPS: Int = 20             // Floor when congested
+    static let remoteMaxFPS: Int = 30             // Target FPS
+    static let remoteGOPDuration: Double = 0.5    // Short GOP (0.5s) for faster recovery
     
     // Resolution limits
     static let maxRenderPixels: Double = 8_000_000  // ~8MP cap for render resolution
@@ -84,9 +93,9 @@ enum QualityPreset: String, Codable, CaseIterable {
     
     var bitrate: Int {
         switch self {
-        case .performance: return 10_000_000  // 10 Mbps - light streaming
+        case .performance: return 12_000_000  // 12 Mbps - light streaming
         case .balanced: return 20_000_000     // 20 Mbps - sweet spot
-        case .pro: return 30_000_000          // 30 Mbps - high quality
+        case .pro: return 32_000_000          // 32 Mbps - high quality
         }
     }
     
@@ -121,9 +130,9 @@ enum QualityPreset: String, Codable, CaseIterable {
     
     var description: String {
         switch self {
-        case .performance: return "10 Mbps • 60 FPS"
+        case .performance: return "12 Mbps • 60 FPS"
         case .balanced: return "20 Mbps • 60 FPS"
-        case .pro: return "30 Mbps • 60 FPS"
+        case .pro: return "32 Mbps • 60 FPS"
         }
     }
     
@@ -189,9 +198,12 @@ struct VideoChunkNackRequest: Codable {
 struct HandshakeRequest: Codable {
     let clientName: String
     let clientVersion: String
-    let deviceModel: String?        // e.g., "iPad Pro 12.9"
-    let screenWidth: Int?           // Client screen width
-    let screenHeight: Int?          // Client screen height
+    let deviceModel: String?        // e.g., "iPad Pro 12.9-inch (6th generation)"
+    let screenWidth: Int?           // Client screen width in PIXELS (physical resolution)
+    let screenHeight: Int?          // Client screen height in PIXELS (physical resolution)
+    let screenScale: Double?        // Native scale factor (typically 2.0 for Retina)
+    let nativeBoundsWidth: Int?     // UIScreen.nativeBounds.width (always pixels)
+    let nativeBoundsHeight: Int?    // UIScreen.nativeBounds.height (always pixels)
     let preferredQuality: QualityPreset?
     let connectionMode: ConnectionMode?
     let codecPreference: CodecPreference?
@@ -216,6 +228,9 @@ struct HandshakeRequest: Codable {
          deviceModel: String? = nil,
          screenWidth: Int? = nil,
          screenHeight: Int? = nil,
+         screenScale: Double? = nil,
+         nativeBoundsWidth: Int? = nil,
+         nativeBoundsHeight: Int? = nil,
          preferredQuality: QualityPreset? = nil,
          connectionMode: ConnectionMode? = nil,
          codecPreference: CodecPreference? = nil,
@@ -232,6 +247,9 @@ struct HandshakeRequest: Codable {
         self.deviceModel = deviceModel
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
+        self.screenScale = screenScale
+        self.nativeBoundsWidth = nativeBoundsWidth
+        self.nativeBoundsHeight = nativeBoundsHeight
         self.preferredQuality = preferredQuality
         self.connectionMode = connectionMode
         self.codecPreference = codecPreference
@@ -496,4 +514,142 @@ enum ExtendedDisplayResolution: String, Codable, CaseIterable {
     case standard = "Standard"       // 1x scaling
     
     var displayName: String { rawValue }
+}
+
+// MARK: - Sidecar-like iPad Display Configuration
+
+/// iPad model-specific display configurations matching Apple Sidecar behavior.
+/// Sidecar uses fixed 2x HiDPI scaling with logical resolutions optimized for each iPad model.
+/// These are the LOGICAL (point) resolutions - actual pixels are 2x these values.
+enum iPadDisplayPreset {
+    /// iPad Pro 12.9" (all generations) - ~4:3 aspect ratio
+    /// Physical: 2732 × 2048 pixels, Sidecar logical: ~1366 × 1024 points
+    case iPadPro129
+    
+    /// iPad Pro 11" (all generations) - ~4.3:3 aspect ratio  
+    /// Physical: 2388 × 1668 pixels, Sidecar logical: ~1194 × 834 points
+    case iPadPro11
+    
+    /// iPad Air 10.9" / iPad 10th gen - ~4.3:3 aspect ratio
+    /// Physical: 2360 × 1640 pixels, Sidecar logical: ~1180 × 820 points
+    case iPadAir109
+    
+    /// iPad mini 6th gen - ~4.3:3 aspect ratio
+    /// Physical: 2266 × 1488 pixels, Sidecar logical: ~1133 × 744 points
+    case iPadMini6
+    
+    /// iPad 9th gen and older - ~4:3 aspect ratio
+    /// Physical: 2160 × 1620 pixels, Sidecar logical: ~1080 × 810 points
+    case iPadStandard
+    
+    /// Unknown/generic iPad - use detected resolution with 2x scaling
+    case generic(logicalWidth: Int, logicalHeight: Int)
+    
+    /// Logical resolution (points) - what macOS renders at
+    /// Sidecar displays UI at this size for readable text
+    var logicalResolution: (width: Int, height: Int) {
+        switch self {
+        case .iPadPro129:
+            return (1366, 1024)  // ~1366×1024 Retina points
+        case .iPadPro11:
+            return (1194, 834)   // ~1194×834 Retina points
+        case .iPadAir109:
+            return (1180, 820)   // ~1180×820 Retina points
+        case .iPadMini6:
+            return (1133, 744)   // ~1133×744 Retina points
+        case .iPadStandard:
+            return (1080, 810)   // ~1080×810 Retina points
+        case .generic(let w, let h):
+            return (w, h)
+        }
+    }
+    
+    /// Physical resolution (pixels) - iPad's native panel resolution
+    /// This is what the HEVC stream will be encoded at (2x logical)
+    var physicalResolution: (width: Int, height: Int) {
+        let logical = logicalResolution
+        return (logical.width * 2, logical.height * 2)
+    }
+    
+    /// Aspect ratio of the display
+    var aspectRatio: Double {
+        let logical = logicalResolution
+        return Double(logical.width) / Double(logical.height)
+    }
+    
+    /// Display name for UI
+    var displayName: String {
+        switch self {
+        case .iPadPro129:
+            return "iPad Pro 12.9\""
+        case .iPadPro11:
+            return "iPad Pro 11\""
+        case .iPadAir109:
+            return "iPad Air 10.9\""
+        case .iPadMini6:
+            return "iPad mini"
+        case .iPadStandard:
+            return "iPad"
+        case .generic:
+            return "iPad (Custom)"
+        }
+    }
+    
+    /// Detect iPad preset from device model string and screen dimensions.
+    /// This mimics how macOS identifies iPad hardware during Sidecar handshake.
+    ///
+    /// - Parameters:
+    ///   - deviceModel: The device model string (e.g., "iPad Pro 12.9-inch")
+    ///   - physicalWidth: Physical screen width in pixels (landscape)
+    ///   - physicalHeight: Physical screen height in pixels (landscape)
+    /// - Returns: The matching iPad display preset
+    static func detect(deviceModel: String?, physicalWidth: Int, physicalHeight: Int) -> iPadDisplayPreset {
+        // Ensure landscape orientation (width > height)
+        let width = max(physicalWidth, physicalHeight)
+        let height = min(physicalWidth, physicalHeight)
+        
+        // First try to match by device model string
+        if let model = deviceModel?.lowercased() {
+            if model.contains("12.9") || model.contains("12,9") {
+                return .iPadPro129
+            }
+            if model.contains("11") && model.contains("pro") {
+                return .iPadPro11
+            }
+            if model.contains("mini") {
+                return .iPadMini6
+            }
+            if model.contains("air") || model.contains("10.9") {
+                return .iPadAir109
+            }
+        }
+        
+        // Fallback: match by physical resolution
+        // iPad Pro 12.9": 2732 × 2048
+        if width >= 2700 && height >= 2000 {
+            return .iPadPro129
+        }
+        // iPad Pro 11": 2388 × 1668
+        if width >= 2350 && width < 2400 && height >= 1600 && height < 1700 {
+            return .iPadPro11
+        }
+        // iPad Air 10.9": 2360 × 1640
+        if width >= 2300 && width < 2400 && height >= 1600 && height < 1700 {
+            return .iPadAir109
+        }
+        // iPad mini 6: 2266 × 1488
+        if width >= 2200 && width < 2300 && height >= 1400 && height < 1550 {
+            return .iPadMini6
+        }
+        // iPad standard: 2160 × 1620 (or similar)
+        if width >= 2100 && width < 2200 {
+            return .iPadStandard
+        }
+        
+        // Generic fallback: calculate logical resolution with 2x scaling
+        // Cap to reasonable bounds to avoid overly large virtual displays
+        let logicalW = min(1920, width / 2)
+        let logicalH = min(1200, height / 2)
+        return .generic(logicalWidth: logicalW, logicalHeight: logicalH)
+    }
 }

@@ -333,7 +333,9 @@ final class ScreenStreamer: NSObject {
             AirCatchLog.info(" ⚠️ Warning: PrepareToEncodeFrames returned status \(prepareStatus)")
         }
         
-        AirCatchLog.info(" ✅ HEVC 4:2:2 10-bit compression session created: \(targetBitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - Rec.709 color space")
+        let codecName = useHEVC ? "HEVC" : "H.264"
+        let profileDesc = useHEVC ? (codecOverride == nil ? "Main10 4:2:0" : "Main 4:2:0") : "High"
+        AirCatchLog.info(" ✅ \(codecName) \(profileDesc) compression session created: \(targetBitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - P3/Rec.709 color space")
         self.compressionSession = session
     }
 

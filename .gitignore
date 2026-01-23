@@ -112,3 +112,10 @@ iOSInjectionProject/
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Specific Project Exclusions
+relay.zip
+*.zip
+*.pem
+node_modules/
+

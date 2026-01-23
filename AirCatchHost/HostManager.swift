@@ -58,6 +58,7 @@ final class HostManager: ObservableObject {
     private let mpcHost = MPCAirCatchHost()
     private let remoteTransport = RemoteTransportHost()
     private let crypto = CryptoManager()  // E2EE encryption
+    private let virtualDisplayManager = VirtualDisplayManager.shared
     
     // MARK: - Screen Capture
     
@@ -299,6 +300,7 @@ final class HostManager: ObservableObject {
         default:
             break
         }
+
     }
 
     private func setupMPCHostCallbacksIfNeeded() {
@@ -314,8 +316,20 @@ final class HostManager: ObservableObject {
             }
             self.postStatusChange()
             if self.connectedClients == 0 {
-                self.stopStreaming()
+                self.stopStreamingAndRestore()
             }
+        }
+    }
+    
+    // Helper to stop streaming and restore resolution
+    private func stopStreamingAndRestore() {
+        stopStreaming()
+        // Only restore if we are the last client disconnecting
+        if connectedClients == 0 {
+            // Destroy virtual display if active
+            virtualDisplayManager.destroyVirtualDisplay()
+            // Also restore main display if it was changed
+            DisplayManager.shared.restoreOriginalResolution()
         }
     }
 
@@ -339,7 +353,7 @@ final class HostManager: ObservableObject {
             }
             postStatusChange()
             if connectedClients == 0 {
-                stopStreaming()
+                stopStreamingAndRestore() // Restore resolution on disconnect
             }
         default:
             break
@@ -379,6 +393,14 @@ final class HostManager: ObservableObject {
         
         // Resolution optimization: use client's preference or preset's default
         self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? currentQuality.defaultOptimizeForHostDisplay
+
+        // Local TCP "Virtual Display" Logic: Switch Resolution to match client (HiDPI)
+        if let w = handshakeRequest?.screenWidth, let h = handshakeRequest?.screenHeight, w > 0, h > 0 {
+             // Apply resolution match for better full-screen experience
+             DisplayManager.shared.matchClientResolution(clientWidth: w, clientHeight: h)
+        }
+
+
         
         // Always use main display (mirror mode)
         let mainID = CGMainDisplayID()
@@ -392,10 +414,18 @@ final class HostManager: ObservableObject {
         Task {
             if wantsVideo {
                 if !isStreaming {
-                    await startStreaming(clientMaxWidth: handshakeRequest?.screenWidth, clientMaxHeight: handshakeRequest?.screenHeight)
+                    await startStreaming(
+                        clientMaxWidth: handshakeRequest?.screenWidth,
+                        clientMaxHeight: handshakeRequest?.screenHeight,
+                        deviceModel: handshakeRequest?.deviceModel
+                    )
                 } else if previousQuality != currentQuality {
                     stopStreaming()
-                    await startStreaming(clientMaxWidth: handshakeRequest?.screenWidth, clientMaxHeight: handshakeRequest?.screenHeight)
+                    await startStreaming(
+                        clientMaxWidth: handshakeRequest?.screenWidth,
+                        clientMaxHeight: handshakeRequest?.screenHeight,
+                        deviceModel: handshakeRequest?.deviceModel
+                    )
                 }
             }
 
@@ -493,6 +523,7 @@ final class HostManager: ObservableObject {
                     await startStreaming(
                         clientMaxWidth: handshakeRequest?.screenWidth,
                         clientMaxHeight: handshakeRequest?.screenHeight,
+                        deviceModel: handshakeRequest?.deviceModel,
                         audioEnabled: wantsAudio
                     )
                 } else if previousQuality != currentQuality || self.audioStreamingEnabled != wantsAudio {
@@ -501,6 +532,7 @@ final class HostManager: ObservableObject {
                     await startStreaming(
                         clientMaxWidth: handshakeRequest?.screenWidth,
                         clientMaxHeight: handshakeRequest?.screenHeight,
+                        deviceModel: handshakeRequest?.deviceModel,
                         audioEnabled: wantsAudio
                     )
                 }
@@ -586,6 +618,7 @@ final class HostManager: ObservableObject {
                 await startStreaming(
                     clientMaxWidth: clientW,
                     clientMaxHeight: clientH,
+                    deviceModel: handshakeRequest?.deviceModel,
                     audioEnabled: wantsAudio
                 )
             } else {
@@ -593,6 +626,7 @@ final class HostManager: ObservableObject {
                 await startStreaming(
                     clientMaxWidth: clientW,
                     clientMaxHeight: clientH,
+                    deviceModel: handshakeRequest?.deviceModel,
                     audioEnabled: wantsAudio
                 )
             }
@@ -762,32 +796,34 @@ final class HostManager: ObservableObject {
         #endif
         
         Task { @MainActor in
-            // Absolute positioning touch input (Magic Keyboard/Trackpad mode removed)
+            // Get the target display frame (virtual display if active, otherwise main)
             let screenFrame = self.targetDisplayFrame()
 
-            // Adjust for letterboxing/pillarboxing in the stream
-            // The stream is exactly client dimensions (e.g. 2778x1940)
-            // But Mac content is fit inside it.
-            // We must un-map the black bars to get correct screen coordinates.
+            // With virtual display, touch mapping is direct (1:1 pixel-perfect)
+            // No letterboxing adjustment needed as the virtual display matches iPad exactly
             var finalNormX = touch.normalizedX
             var finalNormY = touch.normalizedY
 
-            if let (clientW, clientH) = self.currentClientDimensions, clientW > 0, clientH > 0 {
-                let hostW = screenFrame.width
-                let hostH = screenFrame.height
+            // Only adjust for letterboxing if NOT using virtual display
+            // (i.e., when streaming main display with different aspect ratio)
+            if !virtualDisplayManager.isVirtualDisplayActive {
+                if let (clientW, clientH) = self.currentClientDimensions, clientW > 0, clientH > 0 {
+                    let hostW = screenFrame.width
+                    let hostH = screenFrame.height
 
-                if hostW > 0 && hostH > 0 {
-                    let hostAspect = hostW / hostH
-                    let clientAspect = Double(clientW) / Double(clientH)
+                    if hostW > 0 && hostH > 0 {
+                        let hostAspect = hostW / hostH
+                        let clientAspect = Double(clientW) / Double(clientH)
 
-                    if hostAspect > clientAspect {
-                        let coverageH = clientAspect / hostAspect
-                        let barH = (1.0 - coverageH) / 2.0
-                        finalNormY = (touch.normalizedY - barH) / coverageH
-                    } else {
-                        let coverageW = hostAspect / clientAspect
-                        let barW = (1.0 - coverageW) / 2.0
-                        finalNormX = (touch.normalizedX - barW) / coverageW
+                        if hostAspect > clientAspect {
+                            let coverageH = clientAspect / hostAspect
+                            let barH = (1.0 - coverageH) / 2.0
+                            finalNormY = (touch.normalizedY - barH) / coverageH
+                        } else {
+                            let coverageW = hostAspect / clientAspect
+                            let barW = (1.0 - coverageW) / 2.0
+                            finalNormX = (touch.normalizedX - barW) / coverageW
+                        }
                     }
                 }
             }
@@ -804,8 +840,14 @@ final class HostManager: ObservableObject {
         }
     }
     
-    /// Returns the frame of the target display (main display)
+    /// Returns the frame of the target display (virtual or main)
     private func targetDisplayFrame() -> CGRect {
+        // If virtual display is active, return its frame
+        if virtualDisplayManager.isVirtualDisplayActive,
+           let virtualFrame = virtualDisplayManager.virtualDisplayFrame {
+            return virtualFrame
+        }
+        
         // Use CoreGraphics for source-of-truth frame (Y-down, instant update)
         if let targetFrame = targetScreenFrame {
             return targetFrame
@@ -896,14 +938,22 @@ final class HostManager: ObservableObject {
             
             // Stop streaming if no clients
             if connectedClients == 0 {
-                stopStreaming()
+                stopStreamingAndRestore()
             }
         }
     }
     
     // MARK: - Screen Streaming
     
-    private func startStreaming(clientMaxWidth: Int? = nil, clientMaxHeight: Int? = nil, audioEnabled: Bool = false) async {
+    /// Current client device model (for Sidecar-like iPad detection)
+    private var currentClientDeviceModel: String?
+    
+    private func startStreaming(
+        clientMaxWidth: Int? = nil,
+        clientMaxHeight: Int? = nil,
+        deviceModel: String? = nil,
+        audioEnabled: Bool = false
+    ) async {
         guard screenStreamer == nil else { return }
         
         if let w = clientMaxWidth, let h = clientMaxHeight {
@@ -912,14 +962,45 @@ final class HostManager: ObservableObject {
             self.currentClientDimensions = nil
         }
         
+        // Store device model for Sidecar-like iPad detection
+        self.currentClientDeviceModel = deviceModel
+        
         // Store audio preference for restart logic
         self.audioStreamingEnabled = audioEnabled
         
-        AirCatchLog.info("Starting stream with preset: \(currentQuality.displayName), audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay)", category: .video)
+        // For local connections (not remote), try to create a virtual display
+        // This implements Sidecar-like behavior:
+        // - Detect iPad model from deviceModel string or resolution
+        // - Apply preset resolution with 2x HiDPI scaling
+        // - Match iPad's ~4:3 aspect ratio to avoid letterboxing
+        var virtualDisplayID: CGDirectDisplayID? = nil
+        if !remoteSessionActive, !optimizeForHostDisplay,
+           let w = clientMaxWidth, let h = clientMaxHeight, w > 0, h > 0 {
+            // Pass device model for better iPad detection (Sidecar-like hardware handshake)
+            virtualDisplayID = virtualDisplayManager.createVirtualDisplay(
+                clientWidth: w,
+                clientHeight: h,
+                deviceModel: deviceModel
+            )
+            if virtualDisplayID != nil {
+                // Wait for virtual display to be ready
+                try? await Task.sleep(for: .milliseconds(500))
+                AirCatchLog.info("✅ Using Sidecar-like virtual display: \(virtualDisplayManager.presetName)", category: .video)
+            } else {
+                AirCatchLog.info("Virtual display unavailable, using main display", category: .video)
+            }
+        }
+        
+        // Use virtual display if available, otherwise main display
+        let captureDisplayID = virtualDisplayID ?? CGMainDisplayID()
+        self.targetDisplayID = captureDisplayID
+        
+        AirCatchLog.info("Starting stream with preset: \(currentQuality.displayName), audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay), displayID: \(captureDisplayID)", category: .video)
         screenStreamer = ScreenStreamer(
             preset: currentQuality,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
+            targetDisplayID: captureDisplayID,
             codecOverride: remoteSessionActive ? remoteCodecPreference : nil,
             audioEnabled: audioEnabled,
             optimizeForHostDisplay: optimizeForHostDisplay,

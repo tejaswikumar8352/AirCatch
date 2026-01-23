@@ -34,6 +34,34 @@ enum ConnectionState: Equatable {
             return false
         }
     }
+    
+    /// User-friendly description of the current state
+    var displayDescription: String {
+        switch self {
+        case .disconnected:
+            return "Disconnected"
+        case .discovering:
+            return "Searching for hosts..."
+        case .connecting:
+            return "Connecting..."
+        case .connected:
+            return "Connected"
+        case .streaming:
+            return "Streaming"
+        case .error(let message):
+            return "Error: \(message)"
+        }
+    }
+    
+    /// Whether the state represents an active/healthy connection
+    var isConnected: Bool {
+        switch self {
+        case .connected, .streaming:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// Central manager for the AirCatch client.
@@ -418,25 +446,39 @@ final class ClientManager: ObservableObject {
             .screen
             ?? windowScenes.first?.screen
         
-        // Use bounds * scale to get actual render resolution (accounts for "More Space" mode)
-        let bounds = screen?.bounds ?? CGRect(x: 0, y: 0, width: 1024, height: 768)
+        // Get iPad display properties for Sidecar-like hardware handshake
+        // nativeBounds always returns PIXELS (unaffected by Display Zoom)
+        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
         let scale = screen?.scale ?? 2.0
-        let renderW = Int(bounds.size.width * scale)
-        let renderH = Int(bounds.size.height * scale)
-        let capped = capRenderResolution(width: renderW, height: renderH)
-        let maxW = max(capped.width, capped.height)
-        let maxH = min(capped.width, capped.height)
+        
+        // For Sidecar-like behavior, we send the iPad's native physical resolution
+        // The host will detect the iPad model and apply the appropriate Retina scaling
+        let nativeW = Int(nativeBounds.width)
+        let nativeH = Int(nativeBounds.height)
+        
+        // Ensure landscape orientation (width > height) for consistency
+        let physicalWidth = max(nativeW, nativeH)
+        let physicalHeight = min(nativeW, nativeH)
+        
+        // Get detailed device model string for better iPad detection
+        let deviceModel = Self.detailedDeviceModel()
         
         #if DEBUG
-        AirCatchLog.info("Screen resolution: bounds=\(bounds.width)x\(bounds.height) scale=\(scale) render=\(maxW)x\(maxH)", category: .video)
+        AirCatchLog.info("📱 iPad Sidecar handshake:", category: .video)
+        AirCatchLog.info("   Device: \(deviceModel)", category: .video)
+        AirCatchLog.info("   Native: \(physicalWidth)×\(physicalHeight) pixels", category: .video)
+        AirCatchLog.info("   Scale: \(scale)x", category: .video)
         #endif
 
         let request = HandshakeRequest(
             clientName: UIDevice.current.name,
             clientVersion: "1.0",
-            deviceModel: UIDevice.current.model,
-            screenWidth: maxW,
-            screenHeight: maxH,
+            deviceModel: deviceModel,
+            screenWidth: physicalWidth,
+            screenHeight: physicalHeight,
+            screenScale: scale,
+            nativeBoundsWidth: Int(nativeBounds.width),
+            nativeBoundsHeight: Int(nativeBounds.height),
             preferredQuality: selectedPreset,
             connectionMode: currentConnectionMode(),
             codecPreference: .auto,
@@ -452,6 +494,76 @@ final class ClientManager: ObservableObject {
         if let data = try? JSONEncoder().encode(request) {
             mpcClient.send(type: .handshake, payload: data, mode: .reliable)
         }
+    }
+    
+    /// Returns a detailed device model string for Sidecar-like iPad detection.
+    /// Uses the hardware identifier (e.g., "iPad14,3") to look up the marketing name.
+    private static func detailedDeviceModel() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let identifier = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+        
+        // Map common iPad identifiers to marketing names
+        // This helps the host detect iPad model for Sidecar-like resolution presets
+        let modelMap: [String: String] = [
+            // iPad Pro 12.9-inch
+            "iPad8,5": "iPad Pro 12.9-inch (3rd generation)",
+            "iPad8,6": "iPad Pro 12.9-inch (3rd generation)",
+            "iPad8,7": "iPad Pro 12.9-inch (3rd generation)",
+            "iPad8,8": "iPad Pro 12.9-inch (3rd generation)",
+            "iPad8,11": "iPad Pro 12.9-inch (4th generation)",
+            "iPad8,12": "iPad Pro 12.9-inch (4th generation)",
+            "iPad13,8": "iPad Pro 12.9-inch (5th generation)",
+            "iPad13,9": "iPad Pro 12.9-inch (5th generation)",
+            "iPad13,10": "iPad Pro 12.9-inch (5th generation)",
+            "iPad13,11": "iPad Pro 12.9-inch (5th generation)",
+            "iPad14,5": "iPad Pro 12.9-inch (6th generation)",
+            "iPad14,6": "iPad Pro 12.9-inch (6th generation)",
+            "iPad16,5": "iPad Pro 13-inch (M4)",
+            "iPad16,6": "iPad Pro 13-inch (M4)",
+            
+            // iPad Pro 11-inch
+            "iPad8,1": "iPad Pro 11-inch (1st generation)",
+            "iPad8,2": "iPad Pro 11-inch (1st generation)",
+            "iPad8,3": "iPad Pro 11-inch (1st generation)",
+            "iPad8,4": "iPad Pro 11-inch (1st generation)",
+            "iPad8,9": "iPad Pro 11-inch (2nd generation)",
+            "iPad8,10": "iPad Pro 11-inch (2nd generation)",
+            "iPad13,4": "iPad Pro 11-inch (3rd generation)",
+            "iPad13,5": "iPad Pro 11-inch (3rd generation)",
+            "iPad13,6": "iPad Pro 11-inch (3rd generation)",
+            "iPad13,7": "iPad Pro 11-inch (3rd generation)",
+            "iPad14,3": "iPad Pro 11-inch (4th generation)",
+            "iPad14,4": "iPad Pro 11-inch (4th generation)",
+            "iPad16,3": "iPad Pro 11-inch (M4)",
+            "iPad16,4": "iPad Pro 11-inch (M4)",
+            
+            // iPad Air
+            "iPad13,1": "iPad Air (4th generation)",
+            "iPad13,2": "iPad Air (4th generation)",
+            "iPad13,16": "iPad Air (5th generation)",
+            "iPad13,17": "iPad Air (5th generation)",
+            "iPad14,8": "iPad Air 11-inch (M2)",
+            "iPad14,9": "iPad Air 11-inch (M2)",
+            "iPad14,10": "iPad Air 13-inch (M2)",
+            "iPad14,11": "iPad Air 13-inch (M2)",
+            
+            // iPad mini
+            "iPad14,1": "iPad mini (6th generation)",
+            "iPad14,2": "iPad mini (6th generation)",
+            
+            // iPad (standard)
+            "iPad12,1": "iPad (9th generation)",
+            "iPad12,2": "iPad (9th generation)",
+            "iPad13,18": "iPad (10th generation)",
+            "iPad13,19": "iPad (10th generation)",
+        ]
+        
+        return modelMap[identifier] ?? "iPad \(identifier)"
     }
 
     private func handleAirCatchPacket(_ packet: Packet) {
@@ -673,32 +785,39 @@ final class ClientManager: ObservableObject {
             .screen
             ?? windowScenes.first?.screen
         
-        // Use bounds * scale to get actual render resolution (accounts for "More Space" mode)
-        let bounds = screen?.bounds ?? CGRect(x: 0, y: 0, width: 1024, height: 768)
+        // Get iPad display properties for Sidecar-like hardware handshake
+        // nativeBounds always returns PIXELS (unaffected by Display Zoom)
+        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
         let scale = screen?.scale ?? 2.0
-        let renderW = Int(bounds.size.width * scale)
-        let renderH = Int(bounds.size.height * scale)
-        let (maxW, maxH): (Int, Int)
-        if connectionOption == .remote {
-            // Remote mode: always use full client resolution
-            maxW = max(renderW, renderH)
-            maxH = min(renderW, renderH)
-        } else {
-            let capped = capRenderResolution(width: renderW, height: renderH)
-            maxW = max(capped.width, capped.height)
-            maxH = min(capped.width, capped.height)
-        }
+        
+        // For Sidecar-like behavior, we send the iPad's native physical resolution
+        // The host will detect the iPad model and apply the appropriate Retina scaling
+        let nativeW = Int(nativeBounds.width)
+        let nativeH = Int(nativeBounds.height)
+        
+        // Ensure landscape orientation (width > height) for consistency
+        let physicalWidth = max(nativeW, nativeH)
+        let physicalHeight = min(nativeW, nativeH)
+        
+        // Get detailed device model string for better iPad detection
+        let deviceModel = Self.detailedDeviceModel()
         
         #if DEBUG
-        AirCatchLog.info("Screen resolution: bounds=\(bounds.width)x\(bounds.height) scale=\(scale) render=\(maxW)x\(maxH)", category: .video)
+        AirCatchLog.info("📱 iPad Sidecar handshake:", category: .video)
+        AirCatchLog.info("   Device: \(deviceModel)", category: .video)
+        AirCatchLog.info("   Native: \(physicalWidth)×\(physicalHeight) pixels", category: .video)
+        AirCatchLog.info("   Scale: \(scale)x", category: .video)
         #endif
 
         let request = HandshakeRequest(
             clientName: UIDevice.current.name,
             clientVersion: "1.0",
-            deviceModel: UIDevice.current.model,
-            screenWidth: maxW,
-            screenHeight: maxH,
+            deviceModel: deviceModel,
+            screenWidth: physicalWidth,
+            screenHeight: physicalHeight,
+            screenScale: scale,
+            nativeBoundsWidth: Int(nativeBounds.width),
+            nativeBoundsHeight: Int(nativeBounds.height),
             preferredQuality: selectedPreset,
             connectionMode: currentConnectionMode(),
             codecPreference: .auto,

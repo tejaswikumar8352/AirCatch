@@ -36,7 +36,7 @@ AirCatch is a two‑app system that streams a Mac screen to an iPad with low lat
 
 **Remote (Internet):**
 
-- Uses a **WebSocket relay** (`wss://aircatch-relay-teja.fly.dev/ws` by default).
+- Uses a **WebSocket relay** (`ws://<YOUR_GCE_IP>:8080/ws` by default).
 - Host sends **full video frames over TCP channel** to reduce relay overhead.
 - Audio is sent over the UDP channel (still via WebSocket relay messages).
 
@@ -51,7 +51,7 @@ From `AirCatchConfig`:
 
 - UDP port: **5555**
 - TCP port: **5556**
-- Remote relay URL: **wss://aircatch-relay-teja.fly.dev/ws**
+- Remote relay URL: **ws://<YOUR_GCE_IP>:8080/ws**
 - Default local presets (HEVC): **10/20/30 Mbps @ 60 FPS**
 - Remote defaults: **~6 Mbps @ 30 FPS**, adaptive in **4–10 Mbps** range
 - Max UDP payload size: **1200 bytes**
@@ -93,7 +93,7 @@ The relay server is in `RemoteRelayServer/` and uses the `ws` library.
 2. Start: `npm start`
 3. Set `AirCatchConfig.remoteRelayURL` in both client and host if you use a custom relay.
 
-Fly.io config is included in `RemoteRelayServer/fly.toml`.
+GCE deployment script is included as `RemoteRelayServer/deploy_gce.sh`.
 
 ## Project Structure
 
@@ -131,7 +131,7 @@ LICENSE                       MIT License
 
 - `server.js`: WebSocket relay with session pairing and rate limiting
 - `Dockerfile`: container build
-- `fly.toml`: Fly.io deployment config
+- `deploy_gce.sh`: GCE deployment script
 
 ## License
 

@@ -65,8 +65,14 @@ final class RemoteTransport {
             onStateChange(.connecting)
         }
 
+        // Configure WebSocket for better reliability
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 300
+        config.waitsForConnectivity = true
+        
         let request = URLRequest(url: url)
-        let task = URLSession(configuration: .default).webSocketTask(with: request)
+        let task = URLSession(configuration: config).webSocketTask(with: request)
         webSocket = task
         task.resume()
 

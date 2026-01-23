@@ -177,8 +177,19 @@ private struct HostCard: View {
     let onTap: () -> Void
 
     private var subtitle: String {
-        if host.mpcPeerName != nil { return "P2P available" }
+        if host.mpcPeerName != nil && host.endpoint != nil {
+            return "P2P + Local network"
+        } else if host.mpcPeerName != nil {
+            return "P2P available"
+        }
         return "Local network"
+    }
+    
+    private var statusColor: Color {
+        if host.mpcPeerName != nil {
+            return .green
+        }
+        return .blue
     }
 
     var body: some View {
@@ -186,9 +197,14 @@ private struct HostCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(host.name)
-                            .font(.headline)
-                            .foregroundStyle(.white)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(statusColor)
+                                .frame(width: 8, height: 8)
+                            Text(host.name)
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                        }
 
                         Text(subtitle)
                             .font(.caption)
@@ -294,7 +310,7 @@ private struct AboutScreen: View {
         ZStack {
             DevicesBackground().ignoresSafeArea()
 
-            VStack(spacing: 16) {
+            VStack(spacing: 24) {
                 Image(systemName: "display")
                     .font(.system(size: 56))
                     .foregroundStyle(.white)
@@ -307,12 +323,40 @@ private struct AboutScreen: View {
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
+                
+                Divider()
+                    .background(.white.opacity(0.3))
+                    .padding(.horizontal, 40)
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    featureRow(icon: "bolt.fill", text: "Ultra-low latency HEVC streaming")
+                    featureRow(icon: "lock.shield.fill", text: "End-to-end encrypted (AES-256-GCM)")
+                    featureRow(icon: "display.2", text: "Pixel-perfect display matching")
+                    featureRow(icon: "globe", text: "Local network & remote modes")
+                    featureRow(icon: "hand.tap.fill", text: "Full touch & keyboard support")
+                }
+                .padding(.horizontal, 20)
+                
+                Text("Version 1.0")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
             }
             .padding(32)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
+    }
+    
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(.white.opacity(0.7))
+                .frame(width: 24)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.9))
+        }
     }
 }
 
@@ -351,30 +395,48 @@ private struct PINEntryOverlay: View {
                         pin = String(newValue.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
                     }
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 240)
+                    .frame(maxWidth: 260)
 
                 VStack(alignment: .leading, spacing: 10) {
                     if showsQualityOptions {
-                        Picker("Quality", selection: $selectedPreset) {
-                            ForEach(QualityPreset.allCases, id: \.self) { preset in
-                                Text(preset.displayName).tag(preset)
+                        HStack {
+                            Text("Quality")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Picker("", selection: $selectedPreset) {
+                                ForEach(QualityPreset.allCases, id: \.self) { preset in
+                                    HStack {
+                                        Image(systemName: preset.icon)
+                                        Text(preset.displayName)
+                                    }.tag(preset)
+                                }
                             }
+                            .pickerStyle(.menu)
                         }
-                        .pickerStyle(.menu)
+                        
+                        // Show bitrate info
+                        Text(selectedPreset.description)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
 
-                        Picker("Connection", selection: $connectionOption) {
-                            ForEach(ClientManager.ConnectionOption.allCases.filter { $0 != .remote }) { option in
-                                Text(option.displayName).tag(option)
+                        HStack {
+                            Text("Connection")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Picker("", selection: $connectionOption) {
+                                ForEach(ClientManager.ConnectionOption.allCases.filter { $0 != .remote }) { option in
+                                    Text(option.displayName).tag(option)
+                                }
                             }
+                            .pickerStyle(.menu)
                         }
-                        .pickerStyle(.menu)
                     }
                     
                     // Audio toggle available for all modes (including remote)
                     Toggle("Stream Audio", isOn: $audioEnabled)
                         .toggleStyle(.switch)
                 }
-                .frame(maxWidth: 240, alignment: .leading)
+                .frame(maxWidth: 260, alignment: .leading)
 
                 HStack(spacing: 12) {
                     Button("Cancel", action: onCancel)

@@ -457,11 +457,20 @@ final class VideoDecoder {
         
         if decodeStatus != noErr {
             decodeErrorCount += 1
+            consecutiveErrors += 1
             #if DEBUG
             if decodeErrorCount <= 5 {
                 AirCatchLog.debug(" ❌ Decode error: \(decodeStatus), isIDR: \(isIDR), NAL size: \(nalUnit.count)")
             }
             #endif
+            
+            // Auto-recovery: Reset decoder after too many consecutive errors
+            if consecutiveErrors >= maxConsecutiveErrors {
+                AirCatchLog.info("Too many decode errors, resetting decoder", category: .video)
+                reset()
+            }
+        } else {
+            consecutiveErrors = 0
         }
     }
     
@@ -469,9 +478,12 @@ final class VideoDecoder {
     private var decodeErrorCount = 0
     private var callbackErrorCount = 0
     private var callbackNullCount = 0
+    private var consecutiveErrors = 0
+    private let maxConsecutiveErrors = 10
     
     private func handleDecodedFrame(_ pixelBuffer: CVPixelBuffer, presentationTime: CMTime) {
         decodedCount += 1
+        consecutiveErrors = 0  // Reset error counter on successful decode
         #if DEBUG
         // Only log first decoded frame
         if decodedCount == 1 {

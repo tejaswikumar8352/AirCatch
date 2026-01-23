@@ -116,11 +116,11 @@ final class NetworkManager {
         connection.stateUpdateHandler = { [weak self] (state: NWConnection.State) in
             switch state {
             case .ready:
-                AirCatchLog.error("TCP connected to \(host):\(port)")
+                AirCatchLog.info("TCP connected to \(host):\(port)", category: .network)
                 self?.tcpClientConnection = connection
                 onConnected?(connection)
             case .failed(let error):
-                AirCatchLog.error("TCP connection failed: \(error)")
+                AirCatchLog.error("TCP connection failed: \(error)", category: .network)
             case .cancelled:
                 break
             default:

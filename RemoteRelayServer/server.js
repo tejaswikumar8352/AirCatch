@@ -3,7 +3,10 @@ import { WebSocketServer } from 'ws';
 
 const port = process.env.PORT || 8080;
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('AirCatch Relay is Running');
+});
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 const sessions = new Map();
@@ -53,7 +56,7 @@ function getSession(sessionId) {
 }
 
 wss.on('connection', (ws, req) => {
-  // Get client IP (handles proxies like Fly.io)
+  // Get client IP (handles proxies)
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
   
   // Check rate limit on connection
