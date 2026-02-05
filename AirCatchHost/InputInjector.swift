@@ -257,15 +257,16 @@ final class InputInjector {
         AXIsProcessTrusted()
     }
 
-    /// Gets the current main screen frame (always queries fresh to handle resolution changes)
+    /// Gets the current main screen frame in global CG display coordinates.
     private func currentMainScreenFrame() -> CGRect? {
-        guard let screen = NSScreen.main else {
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        guard bounds != .zero else {
             #if DEBUG
-            AirCatchLog.debug(" No main screen available")
+            AirCatchLog.debug(" No main screen bounds available")
             #endif
             return nil
         }
-        return screen.frame
+        return bounds
     }
 
     private func pointForNormalized(xPercent: Double, yPercent: Double) -> CGPoint? {
@@ -277,32 +278,11 @@ final class InputInjector {
     }
 
     /// Converts normalized (0-1) coordinates to CGEvent screen coordinates.
-    /// CGEvent uses a coordinate system with origin at the top-left of the primary display.
-    /// For multi-monitor setups, secondary displays can have negative or offset origins.
+    /// CGEvent and CGDisplayBounds share the same global coordinate space.
     private func pointForNormalized(xPercent: Double, yPercent: Double, in screenFrame: CGRect) -> CGPoint {
-        // screenFrame is in AppKit coordinates (origin at bottom-left of primary screen)
-        // CGEvent coordinates have origin at top-left of primary screen
-        // We need to convert properly
-        
-        guard let primaryScreen = NSScreen.screens.first else {
-            // Fallback - assume simple case
-            let x = screenFrame.origin.x + (xPercent * screenFrame.width)
-            let y = screenFrame.origin.y + (yPercent * screenFrame.height)
-            return CGPoint(x: x, y: y)
-        }
-        
-        let primaryHeight = primaryScreen.frame.height
-        
-        // Calculate the position within the target screen (in AppKit coords)
-        let appKitX = screenFrame.origin.x + (xPercent * screenFrame.width)
-        // In AppKit, Y increases upward, but we want yPercent=0 to be at TOP of screen
-        let appKitY = screenFrame.origin.y + screenFrame.height - (yPercent * screenFrame.height)
-        
-        // Convert from AppKit (bottom-left origin) to CG (top-left origin)
-        let cgX = appKitX
-        let cgY = primaryHeight - appKitY
-        
-        return CGPoint(x: cgX, y: cgY)
+        let x = screenFrame.origin.x + (xPercent * screenFrame.width)
+        let y = screenFrame.origin.y + (yPercent * screenFrame.height)
+        return CGPoint(x: x, y: y)
     }
 
     // MARK: - Keyboard Input

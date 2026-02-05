@@ -34,6 +34,9 @@ final class AudioPlayer {
     private var isRunning = false
     private var packetCount = 0
     private var hasLoggedResync = false  // Prevents log spam during resyncs
+    private let stateQueue = DispatchQueue(label: "com.aircatch.audio.state")
+    private var pendingBuffers = 0
+    private let maxPendingBuffers = 30
     
     // MARK: - Initialization
     
@@ -141,7 +144,8 @@ final class AudioPlayer {
         // 60 buffers ~= 1200ms latency (acceptable for streaming).
         // If we exceed this, flush the queue to "jump" to the present.
         
-        if pendingBuffers > 60 {
+        let pendingAfterAdd = updatePendingBuffers(1)
+        if pendingAfterAdd > maxPendingBuffers {
             // Log sparingly to avoid console spam (only once per resync)
             if !hasLoggedResync {
                 AirCatchLog.debug("Audio drift detected (Queue: \(pendingBuffers)). Resyncing...", category: .general)
@@ -149,7 +153,7 @@ final class AudioPlayer {
             }
             playerNode.stop() // Clears all scheduled buffers instantly
             playerNode.play()
-            pendingBuffers = 0
+            resetPendingBuffers()
             // Reset log flag after a delay to allow future logging
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                 self?.hasLoggedResync = false
@@ -158,11 +162,8 @@ final class AudioPlayer {
         }
         
         // Schedule buffer for playback
-        pendingBuffers += 1
         playerNode.scheduleBuffer(buffer) { [weak self] in
-            DispatchQueue.main.async { // Completion might be on background thread
-                self?.pendingBuffers = max(0, (self?.pendingBuffers ?? 1) - 1)
-            }
+            self?.updatePendingBuffers(-1)
         }
         
         #if DEBUG
@@ -172,5 +173,16 @@ final class AudioPlayer {
         #endif
     }
     
-    private var pendingBuffers = 0
+    private func updatePendingBuffers(_ delta: Int) -> Int {
+        stateQueue.sync {
+            pendingBuffers = max(0, pendingBuffers + delta)
+            return pendingBuffers
+        }
+    }
+
+    private func resetPendingBuffers() {
+        stateQueue.sync {
+            pendingBuffers = 0
+        }
+    }
 }

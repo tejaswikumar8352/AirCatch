@@ -94,7 +94,11 @@ final class NetworkManager {
     // MARK: - TCP Listener (Host)
     
     /// Starts a TCP listener - uses port 0 to let OS pick an available port
-    func startTCPListener(port: UInt16 = 0, onPacket: @escaping (Packet, NWConnection) -> Void) throws {
+    func startTCPListener(
+        port: UInt16 = 0,
+        onConnection: ((NWConnection) -> Void)? = nil,
+        onPacket: @escaping (Packet, NWConnection) -> Void
+    ) throws {
         guard tcpListener == nil else { return }
         tcpReceiveHandler = onPacket
         
@@ -135,6 +139,7 @@ final class NetworkManager {
             guard let self else { return }
             self.addConnection(connection, to: &self.tcpConnections)
             self.prepareTCPConnection(connection)
+            onConnection?(connection)
         }
         
         listener.start(queue: queue)

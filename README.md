@@ -1,12 +1,13 @@
 # AirCatch
 
 Turn your iPad into a wireless display for your Mac — with full touch, keyboard, and audio support.
+Works on local networks and over the internet via an optional relay server.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iPadOS-blue)
 ![Swift](https://img.shields.io/badge/swift-5.9-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-AirCatch is a native screen mirroring solution that streams your Mac's display to your iPad over WiFi or the internet. Unlike Apple's Sidecar, it works on any Mac running macOS 13+ and any iPad running iPadOS 16+, with no Apple Silicon requirement on the Mac side.
+AirCatch is a native screen mirroring solution that streams your Mac's display to your iPad over WiFi. Unlike Apple's Sidecar, it works on any Mac running macOS 13+ and any iPad running iPadOS 16+, with no Apple Silicon requirement on the Mac side.
 
 ---
 
@@ -14,11 +15,11 @@ AirCatch is a native screen mirroring solution that streams your Mac's display t
 
 ### Display Streaming
 - **Hardware-accelerated HEVC (H.265) encoding** via VideoToolbox for buttery smooth 60fps streaming
-- **H.264 fallback** for compatibility when needed (remote mode adaptive codec)
+- **H.264 fallback** for compatibility when needed
 - **Metal-powered rendering** on iPad with zero-copy texture display for minimal latency
 - **Retina resolution support** with automatic iPad model detection
 - **Virtual display mode** — create an additional display that only exists on your iPad
-- **Three quality presets**: Performance (12 Mbps), Balanced (20 Mbps), Pro (32 Mbps)
+- **Adaptive bitrate + frame rate** to keep streams responsive under changing network conditions
 
 ### Input & Control
 - **Full touch support** — tap, drag, scroll, pinch-to-zoom, and right-click (long press)
@@ -34,8 +35,8 @@ AirCatch is a native screen mirroring solution that streams your Mac's display t
 ### Connectivity
 - **Auto-discovery via Bonjour** — your Mac appears automatically on your iPad
 - **PIN-based authentication** — 6-digit PIN protects against unauthorized access
-- **End-to-end encryption** — AES-256-GCM encryption derived from the PIN
-- **Remote mode** — connect over the internet via WebSocket relay
+- **End-to-end encryption** — AES-256-GCM encryption derived from the PIN (local mode)
+- **Remote relay mode** — connect over the internet using a WebSocket relay server
 - **Automatic reconnection** with exponential backoff
 
 ---
@@ -50,7 +51,8 @@ AirCatch is a native screen mirroring solution that streams your Mac's display t
 ### iPad (Client)
 - iPadOS 16.0 or later
 - iPad only (iPhone not supported)
-- Same WiFi network as Mac, or internet for remote mode
+- Same WiFi network as Mac (local mode)
+- Internet access for remote relay mode
 
 ---
 
@@ -70,15 +72,37 @@ AirCatch is a native screen mirroring solution that streams your Mac's display t
    - **AirCatchHost** — Run on your Mac
    - **AirCatchClient** — Run on your iPad
 
+### Optional: Remote Relay Server
+
+Run the relay server if you want to connect across different networks.
+
+```bash
+cd RemoteRelayServer
+npm install
+npm run start
+```
+
+By default the server listens on port `8080`. Use a public IP or domain name for remote access.
+If you expose it to the internet, run behind TLS and use `wss://`.
+
 ### First Connection
 
 1. Launch **AirCatch Host** on your Mac
 2. Grant Screen Recording and Accessibility permissions when prompted
 3. Note the 6-digit PIN displayed in the app window
 4. Launch **AirCatch** on your iPad
-5. Your Mac should appear in the devices list (or tap "Remote Host" for internet mode)
-6. Tap your Mac, enter the PIN, choose quality preset, and connect
+5. Your Mac should appear in the devices list
+6. Tap your Mac, enter the PIN, and connect
 7. Enjoy your extended display!
+
+### Remote Relay Connection
+
+1. Start **AirCatch Host** and choose or create a relay room code
+2. Start **AirCatch** on your iPad and open **Remote Relay**
+3. Enter the relay server URL and room code
+4. Connect and start streaming
+
+Relay defaults (current): starts at 4 Mbps / 30 FPS and caps at 8 Mbps / 30 FPS, with adaptive bitrate under load.
 
 ---
 
@@ -97,49 +121,15 @@ AirCatch is a native screen mirroring solution that streams your Mac's display t
 
 ---
 
-## ⚙️ Quality Presets
-
-| Preset | Bitrate | Best For |
-|--------|---------|----------|
-| **Performance** | 12 Mbps | Crowded networks, battery saving |
-| **Balanced** | 20 Mbps | General use (default) |
-| **Pro** | 32 Mbps | Text-heavy work, design, reading |
-
----
-
-## 🌐 Remote Mode
-
-AirCatch supports streaming over the internet using a WebSocket relay server.
-
-### Using the Public Relay
-By default, AirCatch connects to `wss://aircatch.duckdns.org/ws`. Just tap "Remote Host" on your iPad and enter your Mac's PIN.
-
-### Self-Hosting a Relay
-The relay server is included in `RemoteRelayServer/`. Deploy it to your own server:
-
-```bash
-cd RemoteRelayServer
-npm install
-node server.js
-```
-
-Or use Docker:
-```bash
-docker build -t aircatch-relay .
-docker run -p 8080:8080 aircatch-relay
-```
-
-See [GCE_DEPLOYMENT_GUIDE.md](RemoteRelayServer/GCE_DEPLOYMENT_GUIDE.md) for Google Cloud deployment instructions.
-
 ---
 
 ## 🔒 Security
 
 - **PIN-based pairing** — 6-digit PIN must match on host and client
-- **AES-256-GCM encryption** — All data encrypted end-to-end using PIN-derived keys
+- **AES-256-GCM encryption** — All data encrypted end-to-end using PIN-derived keys (local mode)
 - **HKDF key derivation** — Secure key generation from short PINs
-- **Rate limiting** — Relay server blocks IPs after 5 failed attempts
-- **No data stored** — Relay only forwards packets, never stores content
+- **Relay mode note** — Remote relay traffic is not end-to-end encrypted in the current implementation
+   (the relay server forwards raw video/audio). Use a trusted relay or self-host.
 
 ---
 
@@ -156,12 +146,12 @@ See [GCE_DEPLOYMENT_GUIDE.md](RemoteRelayServer/GCE_DEPLOYMENT_GUIDE.md) for Goo
 │ AVAudioEngine   │  ← Audio capture         │ AudioPlayer     │ ← Audio playback
 │ CGVirtualDisplay│  ← Virtual monitor       │ SpeechManager   │ ← Voice typing
 └─────────────────┘                          └─────────────────┘
-         │                                            │
-         │         ┌───────────────────┐              │
-         └────────►│   Relay Server    │◄─────────────┘
-                   │   (WebSocket)     │
-                   │   Remote Mode     │
-                   └───────────────────┘
+
+Remote relay path:
+
+┌─────────────────┐      WebSocket      ┌────────────────────┐      WebSocket      ┌─────────────────┐
+│   AirCatchHost  │◄───────────────────►│  Relay Server (WS) │◄───────────────────►│  AirCatchClient │
+└─────────────────┘                      └────────────────────┘                      └─────────────────┘
 ```
 
 ### Key Components
@@ -198,10 +188,9 @@ AirCatch/
 │   ├── MacKeyboardView.swift     # On-screen keyboard
 │   └── SpeechManager.swift       # Voice typing
 │
-└── RemoteRelayServer/     # WebSocket relay for internet mode
-    ├── server.js
-    ├── Dockerfile
-    └── GCE_DEPLOYMENT_GUIDE.md
+├── RemoteRelayServer/     # Optional WebSocket relay server
+│   ├── server.js
+│   └── package.json
 ```
 
 ---
@@ -211,7 +200,7 @@ AirCatch/
 ### Mac not appearing on iPad
 - Ensure both devices are on the same WiFi network
 - Check that your router allows mDNS/Bonjour traffic
-- Try using the IP address directly or Remote mode
+- Try using the IP address directly
 
 ### "Screen Recording permission required"
 - Go to System Settings → Privacy & Security → Screen Recording
@@ -224,13 +213,18 @@ AirCatch/
 - You may need to restart the app
 
 ### High latency or stuttering
-- Try switching to "Performance" quality preset
 - Move closer to your WiFi router
 - Ensure no other apps are heavily using the network
+
+### Relay connection drops
+- Verify your relay server is reachable (port `8080` open)
+- Prefer `wss://` behind TLS for stability across networks
+- Check that both host and client are using the same room code
 
 ### Audio not playing
 - Enable audio in the connection settings before connecting
 - Check that iPad volume is up and not in silent mode
+- If audio drifts under relay latency, reduce FPS
 
 ---
 

@@ -16,6 +16,13 @@ struct ContentView: View {
 
     @State private var showPINOverlay = false
     @State private var pinTargetHost: DiscoveredHost?
+    
+    // Relay connection state
+    @State private var showRelayOverlay = false
+    @AppStorage("relayServerURL") private var relayServerURL = "ws://"
+    @State private var relayRoomCode = ""
+    @StateObject private var relayClient = RelayClient()
+    @State private var relayError: String?
 
 
     fileprivate enum SidebarItem: Hashable {
@@ -42,6 +49,9 @@ struct ContentView: View {
                                 pinTargetHost = host
                                 clientManager.enteredPIN = ""
                                 showPINOverlay = true
+                            },
+                            onRelayTapped: {
+                                showRelayOverlay = true
                             }
                         )
                     case .about:
@@ -60,13 +70,12 @@ struct ContentView: View {
         .onAppear { clientManager.startDiscovery() }
         .overlay {
             if showPINOverlay {
-                let isRemoteHost = pinTargetHost?.id == "remote"
                 PINEntryOverlay(
-                    hostName: isRemoteHost ? "Remote Host" : (pinTargetHost?.name ?? "Mac"),
+                    hostName: pinTargetHost?.name ?? "Mac",
                     pin: $clientManager.enteredPIN,
                     audioEnabled: $clientManager.audioEnabled,
                     connectionOption: $clientManager.connectionOption,
-                    showsQualityOptions: !isRemoteHost,
+                    showsQualityOptions: true,
                     onConnect: {
                         guard let host = pinTargetHost else {
                             showPINOverlay = false
@@ -84,7 +93,72 @@ struct ContentView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
         }
+        .overlay {
+            if showRelayOverlay {
+                RelayConnectOverlay(
+                    serverURL: $relayServerURL,
+                    roomCode: $relayRoomCode,
+                    audioEnabled: $clientManager.audioEnabled,
+                    error: relayError,
+                    isConnecting: relayClient.isConnected && !relayClient.hostConnected,
+                    onConnect: {
+                        relayError = nil
+                        relayClient.connect(to: relayServerURL, roomCode: relayRoomCode)
+                    },
+                    onCancel: {
+                        showRelayOverlay = false
+                        relayClient.disconnect()
+                        relayRoomCode = ""
+                        relayError = nil
+                        clientManager.stopRelaySession(shouldRestartDiscovery: false)
+                    }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+        }
         .animation(.snappy(duration: 0.25), value: showPINOverlay)
+        .animation(.snappy(duration: 0.25), value: showRelayOverlay)
+        .onAppear {
+            setupRelayCallbacks()
+        }
+    }
+    
+    private func setupRelayCallbacks() {
+        relayClient.onHostConnected = { [self] in
+            showRelayOverlay = false
+            clientManager.startRelaySession(with: relayClient)
+            AirCatchLog.info("Host connected via relay - ready to stream")
+        }
+
+        relayClient.onHostDisconnected = { [self] in
+            clientManager.stopRelaySession()
+        }
+
+        relayClient.onDisconnected = { [self] _ in
+            clientManager.stopRelaySession(shouldRestartDiscovery: false)
+        }
+        
+        relayClient.onError = { error in
+            relayError = error
+        }
+        
+        relayClient.onDataReceived = { data in
+            // Forward received data to ClientManager for video/audio processing
+            guard data.count >= 5 else { return }
+            let type = data[0]
+            let length = Int(UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4]))
+            let payloadStart = 5
+            let payloadEnd = min(data.count, payloadStart + length)
+            guard payloadEnd >= payloadStart else { return }
+            let payload = data[payloadStart..<payloadEnd]
+            
+            if let packetType = PacketType(rawValue: type) {
+                let packet = Packet(type: packetType, payload: Data(payload))
+                Task { @MainActor in
+                    ClientManager.shared.handleRelayPacket(packet)
+                }
+            }
+        }
     }
 }
 
@@ -122,6 +196,7 @@ private struct DevicesScreen: View {
     @Binding var selectedHostId: DiscoveredHost.ID?
 
     let onConnectTapped: (DiscoveredHost) -> Void
+    let onRelayTapped: () -> Void
 
     var body: some View {
         ZStack {
@@ -130,13 +205,39 @@ private struct DevicesScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header
-
-                    RemoteHostCard {
-                        clientManager.connectionOption = .remote
-                        let remoteHost = DiscoveredHost(id: "remote", name: "Remote Host")
-                        selectedHostId = remoteHost.id
-                        onConnectTapped(remoteHost)
+                    
+                    // Remote Relay Button
+                    Button(action: onRelayTapped) {
+                        HStack {
+                            Image(systemName: "globe")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Remote Relay")
+                                    .font(.headline)
+                                Text("Connect via cloud server")
+                                    .font(.caption)
+                                    .opacity(0.7)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.subheadline.weight(.semibold))
+                                .opacity(0.55)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.purple.opacity(0.25), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(Color.purple.opacity(0.4), lineWidth: 1)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    
+                    Text("Local Network")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.top, 8)
 
                     if clientManager.discoveredHosts.isEmpty {
                         Text("Searching for AirCatch Hosts…")
@@ -238,48 +339,6 @@ private struct HostCard: View {
     }
 }
 
-private struct RemoteHostCard: View {
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Remote Host")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-
-                        Text("Connect over the internet")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "globe")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-
-                Text("Requires relay server")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .background(
-            Color.white.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
-    }
-}
 
 private struct DevicesBackground: View {
     var body: some View {
@@ -331,7 +390,7 @@ private struct AboutScreen: View {
                     featureRow(icon: "bolt.fill", text: "Ultra-low latency HEVC streaming")
                     featureRow(icon: "lock.shield.fill", text: "End-to-end encrypted (AES-256-GCM)")
                     featureRow(icon: "display.2", text: "Pixel-perfect display matching")
-                    featureRow(icon: "globe", text: "Local network & remote modes")
+                    featureRow(icon: "globe", text: "Local network and P2P modes")
                     featureRow(icon: "hand.tap.fill", text: "Full touch & keyboard support")
                 }
                 .padding(.horizontal, 20)
@@ -402,7 +461,7 @@ private struct PINEntryOverlay: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Picker("", selection: $connectionOption) {
-                                ForEach(ClientManager.ConnectionOption.allCases.filter { $0 != .remote }) { option in
+                                ForEach(ClientManager.ConnectionOption.allCases) { option in
                                     Text(option.displayName).tag(option)
                                 }
                             }
@@ -410,7 +469,7 @@ private struct PINEntryOverlay: View {
                         }
                     }
                     
-                    // Audio toggle available for all modes (including remote)
+                    // Audio toggle available for all modes
                     Toggle("Stream Audio", isOn: $audioEnabled)
                         .toggleStyle(.switch)
                 }
@@ -430,6 +489,111 @@ private struct PINEntryOverlay: View {
             .frame(maxWidth: 380)
         }
         .onAppear { isFocused = true }
+    }
+}
+
+// MARK: - Relay Connect Overlay
+
+private struct RelayConnectOverlay: View {
+    @Binding var serverURL: String
+    @Binding var roomCode: String
+    @Binding var audioEnabled: Bool
+    let error: String?
+    let isConnecting: Bool
+    let onConnect: () -> Void
+    let onCancel: () -> Void
+    
+    @FocusState private var focusedField: Field?
+    
+    enum Field {
+        case serverURL, roomCode
+    }
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .onTapGesture { onCancel() }
+            
+            VStack(spacing: 16) {
+                Image(systemName: "globe")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.purple)
+                
+                Text("Remote Relay Connection")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                
+                Text("Connect to your Mac through a relay server when not on the same network.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Relay Server")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("ws://your-ec2-ip:8080", text: $serverURL)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.URL)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .focused($focusedField, equals: .serverURL)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Room Code (from Host)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("XXXXXX", text: $roomCode)
+                            .textFieldStyle(.roundedBorder)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .focused($focusedField, equals: .roomCode)
+                            .onChange(of: roomCode) { _, newValue in
+                                roomCode = String(newValue.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
+                            }
+                    }
+
+                    Toggle("Stream Audio", isOn: $audioEnabled)
+                        .toggleStyle(.switch)
+                }
+                .frame(maxWidth: 280)
+                
+                if let error = error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                }
+                
+                if isConnecting {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Connecting...")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                HStack(spacing: 12) {
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                    
+                    Button("Connect", action: onConnect)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .disabled(serverURL.count < 10 || roomCode.count != 6 || isConnecting)
+                }
+            }
+            .padding(24)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .frame(maxWidth: 380)
+        }
+        .onAppear { focusedField = .roomCode }
     }
 }
 

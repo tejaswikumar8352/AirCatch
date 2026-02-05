@@ -44,9 +44,6 @@ enum AirCatchConfig {
     nonisolated static let bonjourServiceType = "_aircatch._udp."
     nonisolated static let bonjourTCPServiceType = "_aircatch._tcp."
 
-    // Remote (Internet) relay/signaling
-    nonisolated static let remoteRelayURL: String = "wss://aircatch.duckdns.org/ws"
-    
     // Port aliases for clarity
     nonisolated static let defaultUDPPort: UInt16 = 5555
     nonisolated static let defaultTCPPort: UInt16 = 5556
@@ -57,18 +54,13 @@ enum AirCatchConfig {
     // Streaming defaults (optimized for HEVC on Apple Silicon)
     static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot
     static let defaultFrameRate: Int = 60        // General default
+    static let relayInitialBitrate: Int = 4_000_000  // 4 Mbps starting point for relay
+    static let relayMaxBitrate: Int = 8_000_000      // 8 Mbps cap for relay
+    static let relayInitialFrameRate: Int = 30       // 30 FPS starting point for relay
+    static let relayMaxFrameRate: Int = 30           // 30 FPS cap for relay
     static let maxTouchEventsPerSecond: Int = 60
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
-
-    // Remote Mode Specifics
-    static let remoteFrameRate: Int = 30
-    static let remoteBitrate: Int = 6_000_000     // 6 Mbps (target range: 4-10)
-    static let remoteMinBitrate: Int = 4_000_000  // Floor for adaptive
-    static let remoteMaxBitrate: Int = 10_000_000 // Ceiling for adaptive
-    static let remoteMinFPS: Int = 20             // Floor when congested
-    static let remoteMaxFPS: Int = 30             // Target FPS
-    static let remoteGOPDuration: Double = 0.5    // Short GOP (0.5s) for faster recovery
 
     
     // Resolution limits
@@ -107,7 +99,6 @@ enum PacketType: UInt8 {
 enum ConnectionMode: String, Codable {
     case localPeerToPeer
     case localNetwork
-    case remote
 }
 
 enum CodecPreference: String, Codable {

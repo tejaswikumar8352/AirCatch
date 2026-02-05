@@ -12,6 +12,7 @@ import AppKit
 import Combine
 import MultipeerConnectivity
 import CoreGraphics
+import Security
 
 /// Central manager for the AirCatch host functionality.
 @MainActor
@@ -55,7 +56,6 @@ final class HostManager: ObservableObject {
         let allowedChars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
         currentPIN = String((0..<6).map { _ in allowedChars.randomElement()! })
         AirCatchLog.info("New PIN generated")
-        remoteTransport.updateSessionId(currentPIN)
         crypto.deriveKey(from: currentPIN)  // E2EE: Derive encryption key from PIN
     }
     
@@ -64,9 +64,13 @@ final class HostManager: ObservableObject {
     private let networkManager = NetworkManager.shared
     private let bonjourAdvertiser = BonjourAdvertiser()
     private let mpcHost = MPCAirCatchHost()
-    private let remoteTransport = RemoteTransportHost()
     private let crypto = CryptoManager()  // E2EE encryption
     private let virtualDisplayManager = VirtualDisplayManager.shared
+    
+    /// Relay client for remote connections (set by HostView when in relay mode)
+    var relayClient: RelayClient?
+
+    private var tcpAuthChallenges: [ObjectIdentifier: Data] = [:]
     
     // MARK: - Screen Capture
     
@@ -83,14 +87,13 @@ final class HostManager: ObservableObject {
     /// When true, keep a short retransmit window for UDP video chunks (wired mode).
     private var losslessVideoEnabled: Bool = true
 
-    /// Whether the active session is a Remote (Internet) session.
-    private var remoteSessionActive: Bool = false
-    private var remoteCodecPreference: CodecPreference? = nil
-
     private var lastEstimatedBandwidthBps: Int?
     
     /// When true, stream at host's native resolution. When false, scale to client resolution.
     private var optimizeForHostDisplay: Bool = false
+
+    /// Track whether the active session is relay-based for lower default caps.
+    private var isRelaySession: Bool = false
 
     private struct CachedFrame {
         let createdAt: TimeInterval
@@ -125,9 +128,17 @@ final class HostManager: ObservableObject {
                 }
                 
                 // Start TCP listener on fixed port
-                try networkManager.startTCPListener(port: AirCatchConfig.tcpPort) { [weak self] packet, connection in
-                    self?.handleTCPPacket(packet, from: connection)
-                }
+                try networkManager.startTCPListener(
+                    port: AirCatchConfig.tcpPort,
+                    onConnection: { [weak self] connection in
+                        Task { @MainActor in
+                            self?.sendTCPAuthChallenge(to: connection)
+                        }
+                    },
+                    onPacket: { [weak self] packet, connection in
+                        self?.handleTCPPacket(packet, from: connection)
+                    }
+                )
                 
                 // Check for Accessibility Permissions (Required for Mouse/Touch Injection)
                 if !InputInjector.shared.hasAccessibilityPermission {
@@ -171,25 +182,6 @@ final class HostManager: ObservableObject {
                 self.setupMPCHostCallbacksIfNeeded()
                 self.mpcHost.start()
 
-                // Remote relay (Internet) listener
-                self.remoteTransport.start(
-                    sessionId: self.currentPIN,
-                    onTCPPacket: { [weak self] packet in
-                        self?.handleRemoteTCPPacket(packet)
-                    },
-                    onUDPPacket: { [weak self] packet in
-                        self?.handleRemoteUDPPacket(packet)
-                    },
-                    onStateChange: { state in
-                        switch state {
-                        case .failed(let error):
-                            AirCatchLog.error("Remote relay failed: \(error)", category: .network)
-                        default:
-                            break
-                        }
-                    }
-                )
-                
                 isRunning = true
                 postStatusChange()
                 
@@ -208,8 +200,7 @@ final class HostManager: ObservableObject {
         networkManager.stopAll()
         bonjourAdvertiser.stopAdvertising()
         mpcHost.stop()
-        remoteTransport.stop()
-        remoteSessionActive = false
+        tcpAuthChallenges.removeAll()
         
         isRunning = false
         isStreaming = false
@@ -217,6 +208,49 @@ final class HostManager: ObservableObject {
         postStatusChange()
         
         AirCatchLog.info("Stopped", category: .network)
+    }
+    
+    // MARK: - Relay Packet Handling
+    
+    /// Handle packets received from the relay server (from the iPad client)
+    func handleRelayPacket(_ packet: Packet) {
+        switch packet.type {
+        case .handshake:
+            Task { @MainActor in
+                self.handleRelayHandshake(payload: packet.payload)
+            }
+        case .touchEvent:
+            handleTouchEvent(packet.payload)
+        case .scrollEvent:
+            handleScrollEvent(packet.payload)
+        case .keyEvent:
+            handleKeyEvent(packet.payload)
+        case .mediaKeyEvent:
+            handleMediaKeyEvent(packet.payload)
+        case .ping:
+            Task { @MainActor in
+                self.handleRelayPingPacket(packet.payload)
+            }
+        case .qualityReport:
+            Task { @MainActor in
+                self.handleQualityReport(packet.payload)
+            }
+        case .videoFrameChunkNack:
+            Task { @MainActor in
+                self.handleRelayVideoChunkNack(packet.payload)
+            }
+        case .disconnect:
+            // Client disconnected via relay
+            if connectedClients > 0 {
+                connectedClients -= 1
+            }
+            postStatusChange()
+            if connectedClients == 0 {
+                stopStreamingAndRestore()
+            }
+        default:
+            AirCatchLog.debug("Relay: Unhandled packet type \(packet.type)", category: .network)
+        }
     }
     
     // MARK: - Packet Handling
@@ -277,44 +311,6 @@ final class HostManager: ObservableObject {
         }
     }
 
-    @MainActor
-    private func handleRemoteTCPPacket(_ packet: Packet) {
-        switch packet.type {
-        case .handshake:
-            Task { @MainActor in
-                await handleRemoteHandshake(payload: packet.payload)
-            }
-        case .touchEvent:
-            handleTouchEvent(packet.payload)
-        case .scrollEvent:
-            handleScrollEvent(packet.payload)
-        case .keyEvent:
-            handleKeyEvent(packet.payload)
-        case .mediaKeyEvent:
-            handleMediaKeyEvent(packet.payload)
-        case .ping:
-            handleRemotePingPacket(packet.payload)
-        case .qualityReport:
-            handleQualityReport(packet.payload)
-        case .disconnect:
-            handleRemoteDisconnect()
-        default:
-            break
-        }
-    }
-
-    @MainActor
-    private func handleRemoteUDPPacket(_ packet: Packet) {
-        switch packet.type {
-        case .videoFrameChunkNack:
-            // Lossless retransmit disabled in Remote mode
-            break
-        default:
-            break
-        }
-
-    }
-
     private func setupMPCHostCallbacksIfNeeded() {
         // Safe to assign multiple times; closures are idempotent.
         mpcHost.onPeerConnected = { [weak self] peer in
@@ -336,6 +332,43 @@ final class HostManager: ObservableObject {
                 self.stopStreamingAndRestore()
             }
         }
+    }
+
+    private func sendTCPAuthChallenge(to connection: NWConnection) {
+        var challenge = Data(count: 32)
+        let result = challenge.withUnsafeMutableBytes { buffer in
+            SecRandomCopyBytes(kSecRandomDefault, 32, buffer.baseAddress!)
+        }
+        guard result == errSecSuccess else {
+            AirCatchLog.error("E2EE: Failed to generate TCP auth challenge", category: .network)
+            return
+        }
+
+        tcpAuthChallenges[ObjectIdentifier(connection)] = challenge
+        let authChallenge = AuthChallenge(challenge: challenge)
+        if let payload = try? JSONEncoder().encode(authChallenge) {
+            networkManager.sendTCP(to: connection, type: .authChallenge, payload: payload)
+        }
+    }
+
+    private func clearTCPAuthChallenge(for connection: NWConnection) {
+        tcpAuthChallenges.removeValue(forKey: ObjectIdentifier(connection))
+    }
+
+    private func verifyTCPAuthResponse(_ response: Data, for connection: NWConnection) -> Bool {
+        guard let challenge = tcpAuthChallenges[ObjectIdentifier(connection)] else {
+            return false
+        }
+        guard let expected = crypto.computeChallengeResponse(challenge: challenge, pin: currentPIN) else {
+            return false
+        }
+
+        guard response.count == expected.count else { return false }
+        var result: UInt8 = 0
+        for (a, b) in zip(response, expected) {
+            result |= a ^ b
+        }
+        return result == 0
     }
     
     /// SECURITY: Sends an auth challenge to a newly connected peer.
@@ -427,12 +460,9 @@ final class HostManager: ObservableObject {
             return
         }
 
-        // Local session (non-remote)
-        remoteSessionActive = false
-        remoteCodecPreference = nil
-
         connectedClients += 1
 
+        isRelaySession = false
         currentFrameRate = AirCatchConfig.defaultFrameRate
         currentBitrate = AirCatchConfig.defaultBitrate
 
@@ -494,6 +524,84 @@ final class HostManager: ObservableObject {
             }
         }
     }
+
+    @MainActor
+    private func handleRelayHandshake(payload: Data) {
+        let handshakeRequest: HandshakeRequest?
+        do {
+            handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
+        } catch {
+            #if DEBUG
+            AirCatchLog.error("Failed to decode relay handshake request: \(error)", category: .network)
+            #endif
+            return
+        }
+
+        connectedClients = max(connectedClients, 1)
+
+        isRelaySession = true
+        currentFrameRate = AirCatchConfig.relayInitialFrameRate
+        currentBitrate = AirCatchConfig.relayInitialBitrate
+
+        self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
+        self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
+        self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? false
+
+        if let w = handshakeRequest?.screenWidth, let h = handshakeRequest?.screenHeight, w > 0, h > 0 {
+            currentClientNativeBounds = (w, h)
+        } else {
+            currentClientNativeBounds = nil
+        }
+        if let nativeScale = handshakeRequest?.nativeScale {
+            currentClientNativeScale = nativeScale
+        } else {
+            currentClientNativeScale = handshakeRequest?.screenScale
+        }
+
+        let wantsVideo = handshakeRequest?.requestVideo ?? true
+        let wantsAudio = handshakeRequest?.requestAudio ?? false
+
+        postStatusChange()
+
+        Task {
+            if wantsVideo {
+                if !isStreaming {
+                    await startStreaming(
+                        clientMaxWidth: handshakeRequest?.screenWidth,
+                        clientMaxHeight: handshakeRequest?.screenHeight,
+                        deviceModel: handshakeRequest?.deviceModel,
+                        audioEnabled: wantsAudio
+                    )
+                } else if self.audioStreamingEnabled != wantsAudio {
+                    stopStreaming()
+                    await startStreaming(
+                        clientMaxWidth: handshakeRequest?.screenWidth,
+                        clientMaxHeight: handshakeRequest?.screenHeight,
+                        deviceModel: handshakeRequest?.deviceModel,
+                        audioEnabled: wantsAudio
+                    )
+                }
+            }
+
+            let fallbackSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
+            let ackWidth = screenStreamer?.captureWidth ?? Int(fallbackSize.width)
+            let ackHeight = screenStreamer?.captureHeight ?? Int(fallbackSize.height)
+            let ack = HandshakeAck(
+                width: ackWidth,
+                height: ackHeight,
+                frameRate: currentFrameRate,
+                hostName: Host.current().localizedName ?? "Mac",
+                bitrate: currentBitrate,
+                isVirtualDisplay: false,
+                displayMode: .mirror,
+                displayPosition: nil
+            )
+
+            if let data = try? JSONEncoder().encode(ack) {
+                self.sendRelayControl(type: .handshakeAck, payload: data)
+            }
+        }
+    }
     
     private nonisolated func handleHandshake(payload: Data, from connection: NWConnection) {
         #if DEBUG
@@ -501,7 +609,7 @@ final class HostManager: ObservableObject {
         #endif
         
         Task { @MainActor in
-            // Decode the handshake request to extract PIN
+            // Decode the handshake request to extract auth response
             let handshakeRequest: HandshakeRequest?
             do {
                 handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
@@ -510,27 +618,31 @@ final class HostManager: ObservableObject {
                 networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
                 return
             }
-            let receivedPIN = handshakeRequest?.pin ?? ""
-            
-            // Verify PIN
-            if receivedPIN != currentPIN {
+            guard let authResponse = handshakeRequest?.authResponse else {
+                networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
+                self.clearTCPAuthChallenge(for: connection)
+                return
+            }
+
+            // Verify PIN via challenge-response
+            if !self.verifyTCPAuthResponse(authResponse, for: connection) {
                 #if DEBUG
                 AirCatchLog.debug("PIN mismatch for: \(connection.endpoint)", category: .network)
                 #endif
                 // Send pairing failed response
                 networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
+                self.clearTCPAuthChallenge(for: connection)
                 return
             }
 
-            // Local session (non-remote)
-            self.remoteSessionActive = false
-            self.remoteCodecPreference = nil
-            
+            self.clearTCPAuthChallenge(for: connection)
+
             #if DEBUG
             AirCatchLog.debug("PIN verified successfully for: \(connection.endpoint)", category: .network)
             #endif
             connectedClients += 1
             
+            isRelaySession = false
             currentFrameRate = AirCatchConfig.defaultFrameRate
             currentBitrate = AirCatchConfig.defaultBitrate
 
@@ -605,122 +717,11 @@ final class HostManager: ObservableObject {
         }
     }
 
-    @MainActor
-    private func handleRemoteHandshake(payload: Data) async {
-        let handshakeRequest: HandshakeRequest?
-        do {
-            handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
-        } catch {
-            AirCatchLog.error("Failed to decode remote handshake: \(error)", category: .network)
-            remoteTransport.sendTCP(type: .pairingFailed, payload: Data())
-            return
-        }
-
-        let receivedPIN = handshakeRequest?.pin ?? ""
-        guard receivedPIN == currentPIN else {
-            remoteTransport.sendTCP(type: .pairingFailed, payload: Data())
-            return
-        }
-
-        remoteSessionActive = true
-        connectedClients += 1
-        
-        // --- REMOTE QUALITY POLICY ENFORCEMENT ---
-        // Force HEVC Main (8-bit) for best compatibility/bandwidth ratio
-        remoteCodecPreference = .hevc
-        
-        // Remote mode: prioritize latency, disable retransmit
-        self.preferLowLatency = true
-        self.losslessVideoEnabled = false
-        
-        // Remote mode: always use client resolution to minimize bandwidth over internet
-        self.optimizeForHostDisplay = false
-
-        // Always use main display (mirror mode)
-        let mainID = CGMainDisplayID()
-        self.targetDisplayID = mainID
-        self.targetScreenFrame = nil
-
-        let wantsVideo = handshakeRequest?.requestVideo ?? true
-        let wantsAudio = handshakeRequest?.requestAudio ?? false
-        
-        // Use client's native resolution directly (no cap)
-        // iPad sends its current display mode (Default or More Space)
-        let clientW = handshakeRequest?.screenWidth
-        let clientH = handshakeRequest?.screenHeight
-        
-        if let w = clientW, let h = clientH {
-            AirCatchLog.info("Remote mode using client native resolution: \(w)x\(h)", category: .video)
-        }
-
-        postStatusChange()
-
-        if wantsVideo {
-            currentFrameRate = AirCatchConfig.remoteMaxFPS
-
-            if !isStreaming {
-                await startStreaming(
-                    clientMaxWidth: clientW,
-                    clientMaxHeight: clientH,
-                    deviceModel: handshakeRequest?.deviceModel,
-                    audioEnabled: wantsAudio
-                )
-            } else {
-                stopStreaming()
-                await startStreaming(
-                    clientMaxWidth: clientW,
-                    clientMaxHeight: clientH,
-                    deviceModel: handshakeRequest?.deviceModel,
-                    audioEnabled: wantsAudio
-                )
-            }
-            
-
-            
-            // INITIAL Remote Bitrate (Target 4-10 Mbps, 30 FPS)
-            if let streamer = self.screenStreamer {
-                let initialBitrate = min(AirCatchConfig.remoteMaxBitrate, max(AirCatchConfig.remoteMinBitrate, currentBitrate))
-                currentBitrate = initialBitrate
-                streamer.setBitrate(initialBitrate)
-                streamer.setFrameRate(currentFrameRate)
-                AirCatchLog.info("Remote mode started: \(initialBitrate / 1_000_000)Mbps @ \(currentFrameRate)fps (Adaptive)", category: .video)
-            }
-        }
-
-        let fallbackSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
-        let ackWidth = screenStreamer?.captureWidth ?? Int(fallbackSize.width)
-        let ackHeight = screenStreamer?.captureHeight ?? Int(fallbackSize.height)
-        
-        // Send ACK with the initial values
-        let ack = HandshakeAck(
-            width: ackWidth,
-            height: ackHeight,
-            frameRate: currentFrameRate,
-            hostName: Host.current().localizedName ?? "Mac",
-            bitrate: currentBitrate,
-            isVirtualDisplay: false,
-            displayMode: .mirror,
-            displayPosition: nil
-        )
-
-        if let data = try? JSONEncoder().encode(ack) {
-            remoteTransport.sendTCP(type: .handshakeAck, payload: data)
-        }
-    }
-
-    @MainActor
-    private func handleRemoteDisconnect() {
-        remoteSessionActive = false
-        connectedClients = max(0, connectedClients - 1)
-        postStatusChange()
-        if connectedClients == 0 {
-            stopStreaming()
-        }
-    }
-    
     // MARK: - Adaptive Bitrate Logic
     
     private var qualityStableCount = 0
+    private var frameRateStableCount = 0
+    private var frameRateDegradeCount = 0
 
     @MainActor
     private func handlePingPacket(_ payload: Data, from connection: NWConnection) {
@@ -732,11 +733,11 @@ final class HostManager: ObservableObject {
     }
 
     @MainActor
-    private func handleRemotePingPacket(_ payload: Data) {
+    private func handleRelayPingPacket(_ payload: Data) {
         guard let ping = try? JSONDecoder().decode(PingPacket.self, from: payload) else { return }
         let pong = PongPacket(pingTimestamp: ping.timestamp)
         if let data = try? JSONEncoder().encode(pong) {
-            remoteTransport.sendTCP(type: .pong, payload: data)
+            sendRelayControl(type: .pong, payload: data)
         }
     }
 
@@ -748,14 +749,36 @@ final class HostManager: ObservableObject {
             lastEstimatedBandwidthBps = estimated
         }
 
-        let isRemote = remoteSessionActive
-        let minBitrate = isRemote ? AirCatchConfig.remoteMinBitrate : BitrateCalculator.minimumBitrate
-        let maxBitrate = isRemote ? AirCatchConfig.remoteMaxBitrate : BitrateCalculator.maximumBitrate
-        let targetFPS = isRemote ? AirCatchConfig.remoteMaxFPS : AirCatchConfig.defaultFrameRate
+        let minBitrate = BitrateCalculator.minimumBitrate
+        let maxBitrate = isRelaySession
+            ? min(BitrateCalculator.maximumBitrate, AirCatchConfig.relayMaxBitrate)
+            : BitrateCalculator.maximumBitrate
+        let maxFPS = isRelaySession
+            ? AirCatchConfig.relayMaxFrameRate
+            : AirCatchConfig.defaultFrameRate
+        let minFPS = 30
 
-        if currentFrameRate != targetFPS {
-            currentFrameRate = targetFPS
-            screenStreamer?.setFrameRate(targetFPS)
+        let latencyThreshold = 80.0
+        let droppedFrameThreshold = 0
+        let decreaseStep = 2_000_000
+        let increaseStep = 1_000_000
+
+        let isCongested = report.droppedFrames > droppedFrameThreshold || report.latencyMs > latencyThreshold
+
+        if isCongested {
+            frameRateStableCount = 0
+            frameRateDegradeCount += 1
+            if frameRateDegradeCount >= 2 && currentFrameRate > minFPS {
+                currentFrameRate = minFPS
+                screenStreamer?.setFrameRate(minFPS)
+            }
+        } else {
+            frameRateDegradeCount = 0
+            frameRateStableCount += 1
+            if frameRateStableCount >= 4 && currentFrameRate < maxFPS {
+                currentFrameRate = maxFPS
+                screenStreamer?.setFrameRate(maxFPS)
+            }
         }
 
         let refWidth = currentClientDimensions?.width ?? screenStreamer?.captureWidth ?? 1920
@@ -763,19 +786,14 @@ final class HostManager: ObservableObject {
         let baseBitrate = BitrateCalculator.calculateOptimal(
             width: refWidth,
             height: refHeight,
-            fps: targetFPS,
+            fps: currentFrameRate,
             measuredBandwidth: lastEstimatedBandwidthBps
         )
-
-        let latencyThreshold = isRemote ? 150.0 : 80.0
-        let droppedFrameThreshold = 0
-        let decreaseStep = isRemote ? 1_000_000 : 2_000_000
-        let increaseStep = isRemote ? 500_000 : 1_000_000
 
         var newBitrate = currentBitrate
         var changed = false
 
-        if report.droppedFrames > droppedFrameThreshold || report.latencyMs > latencyThreshold {
+        if isCongested {
             qualityStableCount = 0
             newBitrate = max(minBitrate, currentBitrate - decreaseStep)
             if newBitrate != currentBitrate {
@@ -801,14 +819,6 @@ final class HostManager: ObservableObject {
         }
     }
 
-    @MainActor
-    private func updateRemoteCodecIfNeeded(_ target: CodecPreference) {
-        // Disabled for remote mode - codec switching causes decoder mismatch on client
-        // Just update preference for next session, don't restart stream
-        guard remoteSessionActive else { return }
-        remoteCodecPreference = target
-    }
-    
     private func handleTouchEvent(_ payload: Data) {
         // PERFORMANCE: Use cached decoder instead of creating new one per event
         guard let touch = try? Self.jsonDecoder.decode(TouchEvent.self, from: payload) else {
@@ -969,6 +979,7 @@ final class HostManager: ObservableObject {
         AirCatchLog.info("Client disconnected: \(connection.endpoint)", category: .network)
         
         Task { @MainActor in
+            self.clearTCPAuthChallenge(for: connection)
             connectedClients = max(0, connectedClients - 1)
             postStatusChange()
             
@@ -980,6 +991,23 @@ final class HostManager: ObservableObject {
     }
     
     // MARK: - Screen Streaming
+    
+    /// Start streaming for relay mode clients
+    func startStreaming(clientDimensions: (width: Int, height: Int)) {
+        Task {
+            await self.startStreaming(
+                clientMaxWidth: clientDimensions.width,
+                clientMaxHeight: clientDimensions.height,
+                deviceModel: nil,
+                audioEnabled: self.audioStreamingEnabled
+            )
+        }
+    }
+    
+    /// Stop streaming for relay mode (public wrapper)
+    func stopRelayStreaming() {
+        stopStreamingAndRestore()
+    }
     
     /// Current client device model (for Sidecar-like iPad detection)
     private var currentClientDeviceModel: String?
@@ -1004,13 +1032,13 @@ final class HostManager: ObservableObject {
         // Store audio preference for restart logic
         self.audioStreamingEnabled = audioEnabled
         
-        // For local connections (not remote), try to create a virtual display
+        // Try to create a virtual display
         // This implements Sidecar-like behavior:
         // - Detect iPad model from deviceModel string or resolution
         // - Apply preset resolution with 2x HiDPI scaling
         // - Match iPad's ~4:3 aspect ratio to avoid letterboxing
         var virtualDisplayID: CGDirectDisplayID? = nil
-        if !remoteSessionActive, !optimizeForHostDisplay,
+        if !optimizeForHostDisplay,
            let w = clientMaxWidth, let h = clientMaxHeight, w > 0, h > 0 {
             // Pass device model for better iPad detection (Sidecar-like hardware handshake)
             virtualDisplayID = virtualDisplayManager.createVirtualDisplay(
@@ -1029,7 +1057,7 @@ final class HostManager: ObservableObject {
 
         // If no virtual display is available, switch the main display to a HiDPI mirror mode
         // when the client requested "Optimize for Client" (optimizeForHostDisplay == false).
-        if !remoteSessionActive, !optimizeForHostDisplay, virtualDisplayID == nil,
+        if !optimizeForHostDisplay, virtualDisplayID == nil,
            let nativeBounds = currentClientNativeBounds,
            let nativeScale = currentClientNativeScale {
             DisplayManager.shared.applyHiDPIMirroring(
@@ -1043,23 +1071,19 @@ final class HostManager: ObservableObject {
         let captureDisplayID = virtualDisplayID ?? CGMainDisplayID()
         self.targetDisplayID = captureDisplayID
 
-        let targetFPS = remoteSessionActive ? AirCatchConfig.remoteMaxFPS : AirCatchConfig.defaultFrameRate
+        let targetFPS = AirCatchConfig.defaultFrameRate
         currentFrameRate = targetFPS
         if let clientW = clientMaxWidth, let clientH = clientMaxHeight, clientW > 0, clientH > 0 {
-            var initialBitrate = BitrateCalculator.calculateOptimal(
+            let initialBitrate = BitrateCalculator.calculateOptimal(
                 width: clientW,
                 height: clientH,
                 fps: targetFPS,
                 measuredBandwidth: lastEstimatedBandwidthBps
             )
 
-            if remoteSessionActive {
-                initialBitrate = min(AirCatchConfig.remoteMaxBitrate, max(AirCatchConfig.remoteMinBitrate, initialBitrate))
-            }
-
             currentBitrate = initialBitrate
         } else {
-            currentBitrate = remoteSessionActive ? AirCatchConfig.remoteBitrate : AirCatchConfig.defaultBitrate
+            currentBitrate = AirCatchConfig.defaultBitrate
         }
         
         AirCatchLog.info("Starting stream: \(currentBitrate / 1_000_000)Mbps @ \(currentFrameRate)fps, audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay), displayID: \(captureDisplayID)", category: .video)
@@ -1069,7 +1093,7 @@ final class HostManager: ObservableObject {
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
             targetDisplayID: captureDisplayID,
-            codecOverride: remoteSessionActive ? remoteCodecPreference : nil,
+            codecOverride: nil,
             audioEnabled: audioEnabled,
             optimizeForHostDisplay: optimizeForHostDisplay,
             onFrame: { [weak self] compressedFrame in
@@ -1159,27 +1183,30 @@ final class HostManager: ObservableObject {
     
     // Changed per instructions:
     private func broadcastVideoFrame(_ data: Data) {
-        // SECURITY: Encrypt video data - refuse to send unencrypted
-        guard crypto.isReady else {
-            #if DEBUG
-            AirCatchLog.error("E2EE: Cannot broadcast - encryption not ready", category: .video)
-            #endif
-            return
-        }
-        guard let frameData = crypto.encrypt(data) else {
-            #if DEBUG
-            AirCatchLog.error("E2EE: Video frame encryption failed - dropping frame", category: .video)
-            #endif
-            return
+        // In relay mode, skip E2EE since there's no PIN-based key exchange
+        let isRelayMode = relayClient?.isConnected ?? false
+        
+        let frameData: Data
+        if isRelayMode {
+            // Relay mode: send unencrypted (no PIN exchange possible)
+            frameData = data
+        } else {
+            // Local mode: require encryption
+            guard crypto.isReady else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: Cannot broadcast - encryption not ready", category: .video)
+                #endif
+                return
+            }
+            guard let encrypted = crypto.encrypt(data) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: Video frame encryption failed - dropping frame", category: .video)
+                #endif
+                return
+            }
+            frameData = encrypted
         }
         
-        // Remote mode: always send complete frames via TCP (WebSocket is already TCP-based)
-        // Chunking over WebSocket creates too many messages and overwhelms the connection
-        if remoteSessionActive {
-            remoteTransport.sendTCP(type: .videoFrame, payload: frameData)
-            return
-        }
-
         // If client prefers reliability over latency, send complete frames over TCP.
         if !preferLowLatency {
             NetworkManager.shared.broadcastTCP(type: .videoFrame, payload: frameData)
@@ -1193,8 +1220,6 @@ final class HostManager: ObservableObject {
         // Capture main-actor state needed for the background send.
         let maxPayloadSize = maxUDPPayloadSize
         let shouldCacheForRetransmit = losslessVideoEnabled
-        let isRemoteSession = remoteSessionActive
-        
         // Dispatch to avoid blocking the compression callback thread
         let dataToChunk = frameData  // Use encrypted data for chunking
         broadcastQueue.async { [weak self] in
@@ -1218,33 +1243,34 @@ final class HostManager: ObservableObject {
             if shouldCacheForRetransmit {
                 chunksForCache.reserveCapacity(totalChunks)
             }
-            for i in 0..<totalChunks {
-                let start = i * maxPayloadSize
-                let end = min(start + maxPayloadSize, totalLen)
-                let chunkData = dataToChunk.subdata(in: start..<end)
-                
-                var packet = Data()
-                packet.reserveCapacity(8 + chunkData.count)
-                
-                // Header: [FrameId: 4][ChunkIdx: 2][TotalChunks: 2]
-                var fId = frameId.bigEndian
-                var idx = UInt16(i).bigEndian
-                var total = UInt16(totalChunks).bigEndian
+            dataToChunk.withUnsafeBytes { rawBuffer in
+                for i in 0..<totalChunks {
+                    let start = i * maxPayloadSize
+                    let end = min(start + maxPayloadSize, totalLen)
 
-                withUnsafeBytes(of: &fId) { packet.append(contentsOf: $0) }
-                withUnsafeBytes(of: &idx) { packet.append(contentsOf: $0) }
-                withUnsafeBytes(of: &total) { packet.append(contentsOf: $0) }
-                packet.append(chunkData)
-                
-                // Send chunk via UDP (remote relay or local broadcast)
-                if isRemoteSession {
-                    self.remoteTransport.sendUDP(type: .videoFrameChunk, payload: packet)
-                } else {
+                    var packet = Data()
+                    packet.reserveCapacity(8 + (end - start))
+
+                    // Header: [FrameId: 4][ChunkIdx: 2][TotalChunks: 2]
+                    var fId = frameId.bigEndian
+                    var idx = UInt16(i).bigEndian
+                    var total = UInt16(totalChunks).bigEndian
+
+                    withUnsafeBytes(of: &fId) { packet.append(contentsOf: $0) }
+                    withUnsafeBytes(of: &idx) { packet.append(contentsOf: $0) }
+                    withUnsafeBytes(of: &total) { packet.append(contentsOf: $0) }
+                    packet.append(contentsOf: rawBuffer[start..<end])
+
                     NetworkManager.shared.broadcastUDP(type: .videoFrameChunk, payload: packet)
-                }
+                    
+                    // Also send through relay if connected
+                    if let relay = HostManager.shared.relayClient, relay.isConnected {
+                        relay.send(type: .videoFrameChunk, payload: packet)
+                    }
 
-                if shouldCacheForRetransmit {
-                    chunksForCache[i] = packet
+                    if shouldCacheForRetransmit {
+                        chunksForCache[i] = packet
+                    }
                 }
             }
 
@@ -1261,9 +1287,14 @@ final class HostManager: ObservableObject {
     
     /// Broadcasts audio data to all connected clients via UDP
     private func broadcastAudioFrame(_ data: Data) {
-        // E2EE: Encrypt audio data
+        // In relay mode, skip E2EE since there's no PIN-based key exchange
+        let isRelayMode = relayClient?.isConnected ?? false
+
+        // E2EE: Encrypt audio data only for local sessions
         let audioData: Data
-        if crypto.isReady, let encrypted = crypto.encrypt(data) {
+        if isRelayMode {
+            audioData = data
+        } else if crypto.isReady, let encrypted = crypto.encrypt(data) {
             audioData = encrypted
         } else {
             audioData = data
@@ -1271,10 +1302,11 @@ final class HostManager: ObservableObject {
         
         // Audio packets are small enough to send in one UDP datagram (typically ~4KB for 48kHz stereo)
         // The data already contains 8-byte timestamp header from ScreenStreamer
-        if remoteSessionActive {
-            remoteTransport.sendUDP(type: .audioPCM, payload: audioData)
-        } else {
-            NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: audioData)
+        NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: audioData)
+        
+        // Also send through relay if connected
+        if let relay = relayClient, relay.isConnected {
+            relay.send(type: .audioPCM, payload: audioData)
         }
     }
 
@@ -1315,6 +1347,42 @@ final class HostManager: ObservableObject {
                 }
             }
         }
+    }
+
+    @MainActor
+    private func handleRelayVideoChunkNack(_ payload: Data) {
+        let request: VideoChunkNackRequest?
+        do {
+            request = try JSONDecoder().decode(VideoChunkNackRequest.self, from: payload)
+        } catch {
+            #if DEBUG
+            AirCatchLog.error("Failed to decode relay VideoChunkNackRequest: \(error)", category: .network)
+            #endif
+            return
+        }
+        guard let request else { return }
+        guard losslessVideoEnabled else { return }
+
+        cachedFramesQueue.async { [weak self] in
+            guard let self else { return }
+            guard let cached = self.cachedFrames[request.frameId] else { return }
+
+            let payloadsToResend: [Data] = request.missingChunkIndices.compactMap { idx in
+                cached.chunksByIndex[Int(idx)]
+            }
+
+            self.broadcastQueue.async { [weak self] in
+                guard let self else { return }
+                for payload in payloadsToResend {
+                    self.sendRelayControl(type: .videoFrameChunk, payload: payload)
+                }
+            }
+        }
+    }
+
+    private func sendRelayControl(type: PacketType, payload: Data) {
+        guard let relay = relayClient, relay.isConnected else { return }
+        relay.send(type: type, payload: payload)
     }
     
     // MARK: - Notifications

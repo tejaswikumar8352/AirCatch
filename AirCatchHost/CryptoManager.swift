@@ -10,7 +10,7 @@ import Foundation
 import CryptoKit
 
 /// Provides end-to-end encryption using AES-256-GCM with PIN-derived key.
-/// This ensures neither network sniffers nor the relay server can read data.
+/// This ensures neither network sniffers nor intermediaries can read data.
 final class CryptoManager {
     private var key: SymmetricKey?
     

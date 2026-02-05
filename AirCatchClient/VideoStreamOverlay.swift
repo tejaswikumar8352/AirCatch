@@ -105,7 +105,7 @@ struct VideoStreamOverlay: View {
                 }
             }
         }
-        .onReceive(clientManager.videoFrameSubject) { data in
+        .onReceive(clientManager.videoFrameSubject.receive(on: DispatchQueue.main)) { data in
             viewModel.decode(frameData: data)
         }
         .onChange(of: clientManager.state) { _, newState in
@@ -190,7 +190,7 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
         }
         
         // Display frame immediately for lowest latency
-        DispatchQueue.main.async {
+        Task { @MainActor in
             self.pixelBuffer = pixelBuffer
         }
     }

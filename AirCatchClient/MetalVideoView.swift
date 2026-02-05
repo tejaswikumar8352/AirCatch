@@ -48,8 +48,15 @@ struct MetalVideoView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: MTKView, context: Context) {
-        context.coordinator.currentPixelBuffer = pixelBuffer
-        uiView.setNeedsDisplay()
+        if Thread.isMainThread {
+            context.coordinator.currentPixelBuffer = pixelBuffer
+            uiView.setNeedsDisplay()
+        } else {
+            DispatchQueue.main.async {
+                context.coordinator.currentPixelBuffer = pixelBuffer
+                uiView.setNeedsDisplay()
+            }
+        }
     }
     
     func makeCoordinator() -> MetalVideoRenderer {

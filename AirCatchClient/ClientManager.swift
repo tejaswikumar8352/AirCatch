@@ -75,7 +75,6 @@ final class ClientManager: ObservableObject {
     enum ConnectionOption: String, CaseIterable, Identifiable {
         case udpPeerToPeerAWDL = "udp_p2p_awdl"
         case udpNetworkFramework = "udp_network"
-        case remote = "remote"
 
         var id: String { rawValue }
 
@@ -85,8 +84,6 @@ final class ClientManager: ObservableObject {
                 return "AWDL"
             case .udpNetworkFramework:
                 return "Local Network"
-            case .remote:
-                return "Remote (Internet)"
             }
         }
 
@@ -95,8 +92,6 @@ final class ClientManager: ObservableObject {
             case .udpPeerToPeerAWDL:
                 return true
             case .udpNetworkFramework:
-                return false
-            case .remote:
                 return false
             }
         }
@@ -145,20 +140,13 @@ final class ClientManager: ObservableObject {
     // to avoid SwiftUI view thrashing at 60 FPS
     
     private let networkManager = NetworkManager.shared
-    private let remoteTransport = RemoteTransport()
     private let bonjourBrowser = BonjourBrowser()
     private let mpcClient = MPCAirCatchClient()
     private let audioPlayer = AudioPlayer()
     private let crypto = CryptoManager()  // E2EE decryption
+    private var relayClient: RelayClient?
     private var cancellables = Set<AnyCancellable>()
 
-    private enum ActiveLink {
-        case network
-        case aircatch
-    }
-
-    private var activeLink: ActiveLink = .network
-    private var remoteActive: Bool = false
     
     // Video Reassembly
     private let reassembler = VideoReassembler()
@@ -202,13 +190,10 @@ final class ClientManager: ObservableObject {
     
     func disconnect(shouldRetry: Bool = false) {
         networkManager.stopAll()
-        remoteTransport.stop()
         stopTelemetry()
-        mpcClient.disconnect()
         audioPlayer.stop()
         screenInfo = nil
-        activeLink = .network
-        remoteActive = false
+        relayClient = nil
         
         if shouldRetry {
              attemptReconnect()
@@ -220,6 +205,39 @@ final class ClientManager: ObservableObject {
             #if DEBUG
             AirCatchLog.info(" Disconnected")
             #endif
+        }
+    }
+
+    // MARK: - Relay Mode
+
+    func startRelaySession(with relayClient: RelayClient) {
+        stopDiscovery()
+        self.relayClient = relayClient
+        pendingRequestVideo = true
+        videoRequested = true
+        state = .connected
+        debugConnectionStatus = "Connected (Relay)"
+        if audioEnabled {
+            audioPlayer.start()
+        }
+        sendRelayHandshake()
+    }
+
+    func stopRelaySession(shouldRestartDiscovery: Bool = true) {
+        relayClient = nil
+        audioPlayer.stop()
+        videoRequested = false
+        state = .disconnected
+        debugConnectionStatus = "Disconnected (Relay)"
+        if shouldRestartDiscovery {
+            startDiscovery()
+        }
+    }
+
+    private func sendRelayHandshake() {
+        let request = makeHandshakeRequest(authResponse: nil, connectionMode: nil)
+        if let data = try? JSONEncoder().encode(request) {
+            sendControl(type: .handshake, payload: data)
         }
     }
     
@@ -322,35 +340,9 @@ final class ClientManager: ObservableObject {
             }
         }
 
-        mpcClient.onPacketReceived = { [weak self] packet in
-            guard let self else { return }
-            switch packet.type {
-            case .authChallenge:
-                // SECURITY: Host sent challenge - compute response and send handshake
-                self.handleAuthChallenge(packet.payload)
-            case .handshakeAck, .pairingFailed, .disconnect:
-                self.handleTCPPacket(packet)
-            case .videoFrame, .videoFrameChunk:
-                self.handleAirCatchPacket(packet)
-            case .touchEvent:
-                break
-            default:
-                break
-            }
-        }
-
-        mpcClient.onConnected = { [weak self] in
-            guard let self else { return }
-            self.activeLink = .aircatch
-            self.debugConnectionStatus = "Connected (AirCatch) - awaiting auth challenge"
-            // Don't send handshake immediately - wait for auth challenge from host
-        }
-
-        mpcClient.onDisconnected = { [weak self] in
-            guard let self else { return }
-            // Treat as a drop; try fallback reconnect.
-            self.disconnect(shouldRetry: true)
-        }
+        mpcClient.onPacketReceived = nil
+        mpcClient.onConnected = nil
+        mpcClient.onDisconnected = nil
     }
     
     // MARK: - Auto-Connect Logic
@@ -385,55 +377,10 @@ final class ClientManager: ObservableObject {
         // E2EE: Derive encryption key from PIN
         crypto.deriveKey(from: enteredPIN)
 
-        // MultipeerConnectivity is kept for discovery, but we always use Network.framework
-        // for the actual stream/control connection.
+        // MultipeerConnectivity is kept for discovery only.
         
         // Resolve the service endpoint to get IP address
-        if connectionOption == .remote {
-            connectRemote(host: host)
-        } else {
-            resolveAndConnect(host: host)
-        }
-    }
-
-    private func connectRemote(host: DiscoveredHost) {
-        #if DEBUG
-        debugConnectionStatus = "Connecting (Remote)..."
-        AirCatchLog.info(" Connecting (Remote) to session \(enteredPIN)")
-        #endif
-
-        guard enteredPIN.count == 6 else {
-            state = .error("Enter a 6-character PIN")
-            return
-        }
-
-        remoteActive = true
-        activeLink = .network
-
-        remoteTransport.start(
-            sessionId: enteredPIN,
-            onTCPPacket: { [weak self] packet in
-                self?.handleTCPPacket(packet)
-            },
-            onUDPPacket: { [weak self] packet in
-                self?.handleUDPPacket(packet)
-            },
-            onStateChange: { [weak self] state in
-                guard let self else { return }
-                switch state {
-                case .connecting:
-                    self.debugConnectionStatus = "Remote: Connecting..."
-                case .ready:
-                    self.debugConnectionStatus = "Remote: Connected"
-                    self.startTelemetry()
-                    self.sendHandshake()
-                case .failed(let error):
-                    self.state = .error("Remote failed: \(error)")
-                case .idle:
-                    self.debugConnectionStatus = "Remote: Idle"
-                }
-            }
-        )
+        resolveAndConnect(host: host)
     }
 
     // MARK: - Challenge-Response Authentication
@@ -448,89 +395,16 @@ final class ClientManager: ObservableObject {
         }
         
         pendingAuthChallenge = authChallenge.challenge
-        debugConnectionStatus = "Connected (AirCatch) - authenticating"
+        debugConnectionStatus = "Connected - authenticating"
         
         #if DEBUG
         AirCatchLog.info("E2EE: Received auth challenge (v\(authChallenge.version)), sending response", category: .network)
         #endif
         
         // Now send handshake with auth response instead of plaintext PIN
-        sendHandshakeViaAirCatch()
-    }
-
-    private func sendHandshakeViaAirCatch() {
-        let windowScenes = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-        let screen: UIScreen? = windowScenes
-            .first(where: { $0.activationState == .foregroundActive })?
-            .screen
-            ?? windowScenes.first?.screen
-        
-        // Get iPad display properties for Sidecar-like hardware handshake
-        // nativeBounds always returns PIXELS (unaffected by Display Zoom)
-        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
-        let scale = screen?.scale ?? 2.0
-        let nativeScale = screen?.nativeScale ?? scale
-        
-        // For Sidecar-like behavior, we send the iPad's native physical resolution
-        // The host will detect the iPad model and apply the appropriate Retina scaling
-        let nativeW = Int(nativeBounds.width)
-        let nativeH = Int(nativeBounds.height)
-        
-        // Ensure landscape orientation (width > height) for consistency
-        let physicalWidth = max(nativeW, nativeH)
-        let physicalHeight = min(nativeW, nativeH)
-        
-        // Get detailed device model string for better iPad detection
-        let deviceModel = Self.detailedDeviceModel()
-        
-        #if DEBUG
-        AirCatchLog.info("📱 iPad Sidecar handshake:", category: .video)
-        AirCatchLog.info("   Device: \(deviceModel)", category: .video)
-        AirCatchLog.info("   Native: \(physicalWidth)×\(physicalHeight) pixels", category: .video)
-        AirCatchLog.info("   Scale: \(scale)x", category: .video)
-        #endif
-        
-        // SECURITY: Compute auth response if we have a challenge, otherwise fall back to legacy PIN
-        let authResponse: Data?
-        if let challenge = pendingAuthChallenge, !enteredPIN.isEmpty {
-            authResponse = crypto.computeChallengeResponse(challenge: challenge, pin: enteredPIN)
-            pendingAuthChallenge = nil  // Clear after use
-            #if DEBUG
-            AirCatchLog.info("E2EE: Using challenge-response auth", category: .network)
-            #endif
-        } else {
-            authResponse = nil
-            #if DEBUG
-            AirCatchLog.info("E2EE: No challenge received, using legacy PIN auth", category: .network)
-            #endif
-        }
-
-        let request = HandshakeRequest(
-            clientName: UIDevice.current.name,
-            clientVersion: "2.0",  // Updated version for challenge-response support
-            deviceModel: deviceModel,
-            screenWidth: physicalWidth,
-            screenHeight: physicalHeight,
-            screenScale: scale,
-            nativeScale: nativeScale,
-            nativeBoundsWidth: Int(nativeBounds.width),
-            nativeBoundsHeight: Int(nativeBounds.height),
-            connectionMode: currentConnectionMode(),
-            codecPreference: .auto,
-            displayConfig: nil,  // Mirror mode only (extend display removed)
-            requestVideo: pendingRequestVideo,
-            requestAudio: audioEnabled,
-            preferLowLatency: true,
-            losslessVideo: true,
-            pin: authResponse == nil ? enteredPIN : nil,  // Only send PIN if no auth response
-            authResponse: authResponse,
-            optimizeForHostDisplay: optimizeForHostDisplay
-        )
-
-        if let data = try? JSONEncoder().encode(request) {
-            mpcClient.send(type: .handshake, payload: data, mode: .reliable)
-        }
+        let response = crypto.computeChallengeResponse(challenge: authChallenge.challenge, pin: enteredPIN)
+        pendingAuthChallenge = nil
+        sendHandshake(authResponse: response)
     }
     
     /// Returns a detailed device model string for Sidecar-like iPad detection.
@@ -603,60 +477,65 @@ final class ClientManager: ObservableObject {
         return modelMap[identifier] ?? "iPad \(identifier)"
     }
 
-    private func handleAirCatchPacket(_ packet: Packet) {
-        switch packet.type {
-        case .videoFrame:
-            recordIncomingBytes(packet.payload.count)
-            // SECURITY: Decrypt video frame - reject if decryption fails
-            guard let frameData = crypto.decrypt(packet.payload) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: Video frame decryption failed - dropping packet", category: .video)
-                #endif
-                return
-            }
-            videoFrameSubject.send(frameData)
-            if state == .connected {
-                state = .streaming
-                reconnectAttempts = 0
-                debugConnectionStatus = "Streaming (AirCatch)"
-            }
-        case .videoFrameChunk:
-            recordIncomingBytes(packet.payload.count)
-            handleVideoChunk(packet.payload)
-            if state == .connected {
-                state = .streaming
-                reconnectAttempts = 0
-                debugConnectionStatus = "Streaming (AirCatch)"
-            }
-        case .audioPCM:
-            recordIncomingBytes(packet.payload.count)
-            // SECURITY: Decrypt audio frame - reject if decryption fails
-            guard let audioData = crypto.decrypt(packet.payload) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: Audio frame decryption failed - dropping packet", category: .general)
-                #endif
-                return
-            }
-            audioPlayer.playAudioPacket(audioData)
-        case .ping:
-            // Respond to ping with pong for RTT measurement
-            handlePingPacket(packet.payload)
-        default:
-            break
-        }
+    private func makeHandshakeRequest(authResponse: Data?, connectionMode: ConnectionMode?) -> HandshakeRequest {
+        let isRelay = relayClient != nil
+        // Get iPad display properties for Sidecar-like hardware handshake
+        // nativeBounds always returns PIXELS (unaffected by Display Zoom)
+        let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let screen = windowScenes
+            .first(where: { $0.activationState == .foregroundActive })?
+            .screen
+            ?? windowScenes.first?.screen
+
+        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
+        let scale = screen?.scale ?? 2.0
+        let nativeScale = screen?.nativeScale ?? scale
+
+        let nativeW = Int(nativeBounds.width)
+        let nativeH = Int(nativeBounds.height)
+
+        let physicalWidth = max(nativeW, nativeH)
+        let physicalHeight = min(nativeW, nativeH)
+
+        let deviceModel = Self.detailedDeviceModel()
+
+        #if DEBUG
+        AirCatchLog.info("📱 iPad Sidecar handshake:", category: .video)
+        AirCatchLog.info("   Device: \(deviceModel)", category: .video)
+        AirCatchLog.info("   Native: \(physicalWidth)×\(physicalHeight) pixels", category: .video)
+        AirCatchLog.info("   Scale: \(scale)x", category: .video)
+        #endif
+
+        return HandshakeRequest(
+            clientName: UIDevice.current.name,
+            clientVersion: "2.0",
+            deviceModel: deviceModel,
+            screenWidth: physicalWidth,
+            screenHeight: physicalHeight,
+            screenScale: scale,
+            nativeScale: nativeScale,
+            nativeBoundsWidth: Int(nativeBounds.width),
+            nativeBoundsHeight: Int(nativeBounds.height),
+            connectionMode: connectionMode,
+            codecPreference: .auto,
+            displayConfig: nil,  // Mirror mode only (extend display removed)
+            requestVideo: pendingRequestVideo,
+            requestAudio: audioEnabled,
+            preferLowLatency: true,
+            losslessVideo: !isRelay,
+            pin: nil,
+            authResponse: authResponse,
+            optimizeForHostDisplay: optimizeForHostDisplay
+        )
     }
-    
+
     /// Handle ping from Host and respond with pong
     private func handlePingPacket(_ payload: Data) {
         guard let ping = try? JSONDecoder().decode(PingPacket.self, from: payload) else { return }
         
         let pong = PongPacket(pingTimestamp: ping.timestamp)
         if let data = try? JSONEncoder().encode(pong) {
-            if activeLink == .aircatch {
-                mpcClient.send(type: .pong, payload: data, mode: .reliable)
-            } else {
-                sendControl(type: .pong, payload: data)
-            }
+            sendControl(type: .pong, payload: data)
         }
     }
 
@@ -737,11 +616,7 @@ final class ClientManager: ObservableObject {
         state = .connecting // Updates UI to "Connecting..."
         
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            if self?.connectionOption == .remote {
-                self?.connectRemote(host: host)
-            } else {
-                self?.resolveAndConnect(host: host)
-            }
+            self?.resolveAndConnect(host: host)
         }
     }
     
@@ -809,16 +684,16 @@ final class ClientManager: ObservableObject {
         let udpPort = connectedHost?.udpPort ?? AirCatchConfig.udpPort
 
         // Connect TCP for touch events and handshake
-        // We now wait for onConnected to send the handshake to avoid race condition
+        // Wait for auth challenge before sending the handshake.
         networkManager.connectTCP(
             to: hostIP,
             port: tcpPort,
             includePeerToPeer: connectionOption.includePeerToPeer,
             requiredInterfaceType: nil,
             onConnected: { _ in
-            Task { @MainActor in
-                ClientManager.shared.sendHandshake()
-            }
+                Task { @MainActor in
+                    ClientManager.shared.debugConnectionStatus = "Connected - awaiting auth challenge"
+                }
         }) { packet, _ in
             ClientManager.shared.handleTCPPacket(packet)
         }
@@ -844,60 +719,13 @@ final class ClientManager: ObservableObject {
         }
     }
     
-    private func sendHandshake() {
-        // Prefer an active UIWindowScene screen. Avoids deprecated UIScreen.main / UIScreen.screens.
-        let windowScenes = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-        let screen: UIScreen? = windowScenes
-            .first(where: { $0.activationState == .foregroundActive })?
-            .screen
-            ?? windowScenes.first?.screen
-        
-        // Get iPad display properties for Sidecar-like hardware handshake
-        // nativeBounds always returns PIXELS (unaffected by Display Zoom)
-        let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
-        let scale = screen?.scale ?? 2.0
-        let nativeScale = screen?.nativeScale ?? scale
-        
-        // For Sidecar-like behavior, we send the iPad's native physical resolution
-        // The host will detect the iPad model and apply the appropriate Retina scaling
-        let nativeW = Int(nativeBounds.width)
-        let nativeH = Int(nativeBounds.height)
-        
-        // Ensure landscape orientation (width > height) for consistency
-        let physicalWidth = max(nativeW, nativeH)
-        let physicalHeight = min(nativeW, nativeH)
-        
-        // Get detailed device model string for better iPad detection
-        let deviceModel = Self.detailedDeviceModel()
-        
-        #if DEBUG
-        AirCatchLog.info("📱 iPad Sidecar handshake:", category: .video)
-        AirCatchLog.info("   Device: \(deviceModel)", category: .video)
-        AirCatchLog.info("   Native: \(physicalWidth)×\(physicalHeight) pixels", category: .video)
-        AirCatchLog.info("   Scale: \(scale)x", category: .video)
-        #endif
+    private func sendHandshake(authResponse: Data?) {
+        guard let authResponse else {
+            state = .error("Authentication failed")
+            return
+        }
 
-        let request = HandshakeRequest(
-            clientName: UIDevice.current.name,
-            clientVersion: "1.0",
-            deviceModel: deviceModel,
-            screenWidth: physicalWidth,
-            screenHeight: physicalHeight,
-            screenScale: scale,
-            nativeScale: nativeScale,
-            nativeBoundsWidth: Int(nativeBounds.width),
-            nativeBoundsHeight: Int(nativeBounds.height),
-            connectionMode: currentConnectionMode(),
-            codecPreference: .auto,
-            displayConfig: nil,  // Mirror mode only (extend display removed)
-            requestVideo: pendingRequestVideo,
-            requestAudio: audioEnabled,
-            preferLowLatency: true,
-            losslessVideo: connectionOption == .remote ? false : true,
-            pin: enteredPIN.isEmpty ? nil : enteredPIN,
-            optimizeForHostDisplay: optimizeForHostDisplay
-        )
+        let request = makeHandshakeRequest(authResponse: authResponse, connectionMode: currentConnectionMode())
         
         if let data = try? JSONEncoder().encode(request) {
             sendControl(type: .handshake, payload: data)
@@ -913,17 +741,15 @@ final class ClientManager: ObservableObject {
             return .localPeerToPeer
         case .udpNetworkFramework:
             return .localNetwork
-        case .remote:
-            return .remote
         }
     }
 
     private func sendControl(type: PacketType, payload: Data) {
-        if connectionOption == .remote {
-            remoteTransport.sendTCP(type: type, payload: payload)
-        } else {
-            networkManager.sendTCP(type: type, payload: payload)
+        if let relay = relayClient, relay.isConnected {
+            relay.send(type: type, payload: payload)
+            return
         }
+        networkManager.sendTCP(type: type, payload: payload)
     }
 
     /// Caps the streaming render resolution to improve sharp text and reduce encoder pressure.
@@ -955,6 +781,8 @@ final class ClientManager: ObservableObject {
     
     private func handleTCPPacket(_ packet: Packet) {
         switch packet.type {
+        case .authChallenge:
+            handleAuthChallenge(packet.payload)
         case .handshakeAck:
             handleHandshakeAck(packet.payload)
         case .videoFrame:
@@ -967,18 +795,17 @@ final class ClientManager: ObservableObject {
                 return
             }
             videoFrameSubject.send(frameData)
-            if state == .connected {
-                state = .streaming
-                reconnectAttempts = 0
-                debugConnectionStatus = "Streaming (TCP)"
-            }
+            setStreamingStateIfNeeded(debugStatus: "Streaming (TCP)")
         case .pairingFailed:
             // Wrong PIN - disconnect and show error
             #if DEBUG
             AirCatchLog.info(" Pairing failed - wrong PIN")
             #endif
-            state = .error("Wrong PIN")
-            enteredPIN = "" // Clear the PIN
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.state = .error("Wrong PIN")
+                self.enteredPIN = "" // Clear the PIN
+            }
             // Don't call disconnect() as we're already handling state
         case .ping:
             handlePingPacket(packet.payload)
@@ -988,9 +815,65 @@ final class ClientManager: ObservableObject {
             // Server requested disconnect? Usually we just want to reconnect.
             // But if it's explicit, maybe we should stop?
             // For stability, let's treat it as a drop and try to reconnect.
-            disconnect(shouldRetry: true)
+            DispatchQueue.main.async { [weak self] in
+                self?.disconnect(shouldRetry: true)
+            }
         default:
             break
+        }
+    }
+    
+    // MARK: - Relay Packet Handling
+    
+    /// Handle packets received from the relay server (video/audio from Host)
+    /// Note: Relay packets are NOT encrypted since there's no PIN-based key exchange in relay mode
+    func handleRelayPacket(_ packet: Packet) {
+        switch packet.type {
+        case .videoFrame:
+            recordIncomingBytes(packet.payload.count)
+            // Relay mode: no encryption, use payload directly
+            videoFrameSubject.send(packet.payload)
+            setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
+        case .pong:
+            handlePongPacket(packet.payload)
+        case .ping:
+            handlePingPacket(packet.payload)
+        case .videoFrameChunk:
+            recordIncomingBytes(packet.payload.count)
+            // Handle chunked video via reassembler (no decryption needed for relay)
+            reassembler.process(
+                chunk: packet.payload,
+                losslessEnabled: false,
+                onNack: { [weak self] frameId, missingChunks in
+                    guard let self else { return }
+                    let request = VideoChunkNackRequest(frameId: frameId, missingChunkIndices: missingChunks)
+                    if let data = try? JSONEncoder().encode(request) {
+                        self.sendControl(type: .videoFrameChunkNack, payload: data)
+                    }
+                },
+                onComplete: { [weak self] frameData in
+                    guard let self = self else { return }
+                    // Relay mode: no encryption, use frame directly
+                    self.videoFrameSubject.send(frameData)
+                    self.setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
+                }
+            )
+        case .audioPCM:
+            // Relay mode: no encryption, use payload directly
+            if audioEnabled {
+                audioPlayer.playAudioPacket(packet.payload)
+            }
+        case .handshakeAck:
+            handleHandshakeAck(packet.payload)
+        case .disconnect:
+            // Host disconnected from relay
+            DispatchQueue.main.async { [weak self] in
+                self?.stopRelaySession()
+            }
+        default:
+            #if DEBUG
+            AirCatchLog.debug("Relay: Unhandled packet type \(packet.type)", category: .network)
+            #endif
         }
     }
     
@@ -1061,10 +944,9 @@ final class ClientManager: ObservableObject {
         
         reassembler.process(
             chunk: data,
-            losslessEnabled: connectionOption == .remote ? false : true,
+            losslessEnabled: true,
             onNack: { [weak self] frameId, missingChunkIndices in
                 guard let self else { return }
-                guard self.activeLink == .network else { return }
                 guard !missingChunkIndices.isEmpty else { return }
                 let request = VideoChunkNackRequest(frameId: frameId, missingChunkIndices: missingChunkIndices)
                 if let payload = try? JSONEncoder().encode(request) {
@@ -1096,9 +978,12 @@ final class ClientManager: ObservableObject {
             return
         }
         
-        screenInfo = ack
-        state = .connected
-        startTelemetry()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.screenInfo = ack
+            self.state = .connected
+            self.startTelemetry()
+        }
         
         #if DEBUG
         AirCatchLog.info(" Connected! Screen: \(ack.width)x\(ack.height) @ \(ack.frameRate)fps")
@@ -1115,8 +1000,7 @@ final class ClientManager: ObservableObject {
     func sendTouchEvent(normalizedX: Double, normalizedY: Double, eventType: TouchEventType) {
         guard state == .connected || state == .streaming else { return }
         
-        // NOTE: No throttling for P2P mode - user wants lowest latency possible
-        // Throttling would be added here for remote/WAN connections in Phase 3
+        // NOTE: No throttling for local modes - user wants lowest latency possible
         
         // Timestamp is critical for detecting stale events on host side
         let event = TouchEvent(
@@ -1128,12 +1012,7 @@ final class ClientManager: ObservableObject {
         
         // PERFORMANCE: Use cached encoder instead of creating new one per event
         if let data = try? Self.jsonEncoder.encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
-            case .network:
-                sendControl(type: .touchEvent, payload: data)
-            }
+            sendControl(type: .touchEvent, payload: data)
         }
     }
 
@@ -1145,12 +1024,7 @@ final class ClientManager: ObservableObject {
         let zoomDelta = (scale - 1.0) * 10.0  // Convert scale to scroll-like delta
         let event = ScrollEvent(deltaX: 0, deltaY: zoomDelta)
         if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .scrollEvent, payload: data, mode: .reliable)
-            case .network:
-                sendControl(type: .scrollEvent, payload: data)
-            }
+            sendControl(type: .scrollEvent, payload: data)
         }
     }
 
@@ -1159,12 +1033,7 @@ final class ClientManager: ObservableObject {
         guard state == .connected || state == .streaming else { return }
         let event = ScrollEvent(deltaX: deltaX, deltaY: deltaY)
         if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .scrollEvent, payload: data, mode: .reliable)
-            case .network:
-                sendControl(type: .scrollEvent, payload: data)
-            }
+            sendControl(type: .scrollEvent, payload: data)
         }
     }
 
@@ -1178,12 +1047,7 @@ final class ClientManager: ObservableObject {
             isKeyDown: isKeyDown
         )
         if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .keyEvent, payload: data, mode: .reliable)
-            case .network:
-                sendControl(type: .keyEvent, payload: data)
-            }
+            sendControl(type: .keyEvent, payload: data)
         }
     }
     
@@ -1192,17 +1056,23 @@ final class ClientManager: ObservableObject {
         guard state == .connected || state == .streaming else { return }
         let event = MediaKeyEvent(mediaKey: mediaKey, keyCode: keyCode)
         if let data = try? JSONEncoder().encode(event) {
-            switch activeLink {
-            case .aircatch:
-                mpcClient.send(type: .mediaKeyEvent, payload: data, mode: .reliable)
-            case .network:
-                sendControl(type: .mediaKeyEvent, payload: data)
-            }
+            sendControl(type: .mediaKeyEvent, payload: data)
         }
     }
 
     private func recordIncomingBytes(_ count: Int) {
         receivedBytesSinceLastReport += count
+    }
+
+    private nonisolated func setStreamingStateIfNeeded(debugStatus: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.state != .streaming {
+                self.state = .streaming
+            }
+            self.reconnectAttempts = 0
+            self.debugConnectionStatus = debugStatus
+        }
     }
 
 }

@@ -1,3 +1,0 @@
-aircatch.duckdns.org {
-    reverse_proxy current-relay:8080
-}

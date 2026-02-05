@@ -207,7 +207,7 @@ final class ScreenStreamer: NSObject {
     private func setupCompressionSession(width: Int, height: Int) throws {
         var session: VTCompressionSession?
         
-        // Choose codec based on quality preset or override (remote adaptive codec)
+        // Choose codec based on quality preset or override
         let useHEVC: Bool
         if let codecOverride {
             useHEVC = codecOverride != .h264
@@ -258,7 +258,6 @@ final class ScreenStreamer: NSObject {
         if useHEVC {
             // ----------------------------------------------------------------------
             // HEVC Main (8-bit) 4:2:0 - Low Latency & Compatibility
-            // Enforced for Remote Mode usage
             // ----------------------------------------------------------------------
             
             let statusMain = VTSessionSetProperty(session, 
@@ -289,11 +288,8 @@ final class ScreenStreamer: NSObject {
             }
         }
         
-        // GOP Configuration
-        // Remote Mode: Short GOP (0.5s) for faster recovery after packet loss
-        // Local Mode: 1s GOP for better compression efficiency
-        let isRemoteMode = (codecOverride == .hevc)  // Remote always uses HEVC override
-        let gopDuration = isRemoteMode ? AirCatchConfig.remoteGOPDuration : 1.0
+        // GOP Configuration (1s) for balanced recovery and compression efficiency
+        let gopDuration = 1.0
         let keyframeInterval = Int(Double(targetFrameRate) * gopDuration)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: gopDuration as CFNumber)
