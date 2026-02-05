@@ -20,6 +20,68 @@ final class DisplayManager {
     private let displayID = CGMainDisplayID()
     
     private init() {}
+
+    /// Switches the main display into a HiDPI mode that matches the client's native resolution.
+    /// Example: client 2732x2048 @ 2.0 -> logical 1366x1024 with 2x HiDPI rendering.
+    func applyHiDPIMirroring(clientNativeWidth: Int, clientNativeHeight: Int, nativeScale: Double) {
+        guard !isResolutionChanged else { return }
+
+        guard let current = CGDisplayCopyDisplayMode(displayID) else {
+            AirCatchLog.error("Failed to get current display mode")
+            return
+        }
+        originalMode = current
+
+        let scale = max(1.0, nativeScale)
+        let targetLogicalWidth = Int(round(Double(clientNativeWidth) / scale))
+        let targetLogicalHeight = Int(round(Double(clientNativeHeight) / scale))
+        let targetAspect = Double(targetLogicalWidth) / Double(targetLogicalHeight)
+
+        let options: [CFString: Any] = [kCGDisplayShowDuplicateLowResolutionModes: true]
+        guard let modes = CGDisplayCopyAllDisplayModes(displayID, options as CFDictionary) as? [CGDisplayMode] else {
+            AirCatchLog.error("Failed to list display modes")
+            return
+        }
+
+        var bestMode: CGDisplayMode?
+        var bestScore = Double.greatestFiniteMagnitude
+
+        for mode in modes {
+            let isHiDPI = mode.pixelWidth > mode.width
+            guard isHiDPI else { continue }
+
+            let modeAspect = Double(mode.width) / Double(mode.height)
+            let aspectDiff = abs(modeAspect - targetAspect)
+            if aspectDiff > 0.03 { continue }
+
+            let logicalDiff = abs(Double(mode.width - targetLogicalWidth)) + abs(Double(mode.height - targetLogicalHeight))
+            let pixelDiff = abs(Double(mode.pixelWidth - clientNativeWidth)) + abs(Double(mode.pixelHeight - clientNativeHeight))
+
+            let score = (aspectDiff * 1000.0) + logicalDiff + (pixelDiff * 0.5)
+            if score < bestScore {
+                bestScore = score
+                bestMode = mode
+            }
+        }
+
+        guard let selected = bestMode else {
+            AirCatchLog.info("No HiDPI mode matched native size; falling back to aspect match")
+            matchClientResolution(clientWidth: targetLogicalWidth, clientHeight: targetLogicalHeight)
+            return
+        }
+
+        AirCatchLog.info("Switching to HiDPI mirror mode: \(selected.width)x\(selected.height) points / \(selected.pixelWidth)x\(selected.pixelHeight) pixels")
+
+        var config: CGDisplayConfigRef?
+        CGBeginDisplayConfiguration(&config)
+        CGConfigureDisplayWithDisplayMode(config, displayID, selected, nil)
+        let error = CGCompleteDisplayConfiguration(config, .permanently)
+        if error == .success {
+            isResolutionChanged = true
+        } else {
+            AirCatchLog.error("HiDPI mirror mode switch failed: \(error)")
+        }
+    }
     
     /// Switches the main display to a resolution that matches the client's aspect ratio.
     /// Prioritizes HiDPI modes where the "Points" size is close to the client's logical size,

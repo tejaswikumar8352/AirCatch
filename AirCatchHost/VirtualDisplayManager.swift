@@ -440,7 +440,7 @@ final class VirtualDisplayManager {
         }
         
         // Try to create display with descriptor
-        if let display = try? displayClass.perform(NSSelectorFromString("displayWithDescriptor:"), with: descriptor)?.takeUnretainedValue() as? NSObject {
+        if let display = displayClass.perform(NSSelectorFromString("displayWithDescriptor:"), with: descriptor)?.takeUnretainedValue() as? NSObject {
             if let displayID = display.value(forKey: "displayID") as? CGDirectDisplayID, displayID != 0 {
                 
                 // Apply settings with HiDPI enabled
@@ -466,7 +466,7 @@ final class VirtualDisplayManager {
                 
                 settings.setValue(modes, forKey: "modes")
                 
-                _ = try? display.perform(NSSelectorFromString("applySettings:"), with: settings)
+                _ = display.perform(NSSelectorFromString("applySettings:"), with: settings)
                 
                 self.virtualDisplay = display
                 return displayID

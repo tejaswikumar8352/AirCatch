@@ -78,72 +78,6 @@ enum AirCatchConfig {
     nonisolated static let frameCacheTTL: TimeInterval = 1.0  // Seconds before cached frames expire
     nonisolated static let cachePruneInterval: Int = 60       // Prune every N frames
     
-    // Quality presets defaults
-    static let defaultPreset: QualityPreset = .balanced
-}
-
-
-// MARK: - Quality Presets
-// Optimized for HEVC on Apple Silicon (M2/M3)
-// 3 presets: one for each use case
-
-enum QualityPreset: String, Codable, CaseIterable {
-    case performance  // Light streaming, bandwidth-conscious
-    case balanced     // Default - best balance of quality and responsiveness
-    case pro          // Maximum quality - best for static content/reading
-    
-    var bitrate: Int {
-        switch self {
-        case .performance: return 12_000_000  // 12 Mbps
-        case .balanced: return 20_000_000     // 20 Mbps
-        case .pro: return 32_000_000          // 32 Mbps
-        }
-    }
-    
-    var frameRate: Int {
-        return 60  // All presets use 60 FPS
-    }
-    
-    /// Always use HEVC for best quality-per-bit
-    var useHEVC: Bool {
-        return true
-    }
-    
-    /// Default value for optimize-for-host-display option per preset.
-    /// When true, streams at the host's native resolution (may require letterboxing on client).
-    /// When false, scales to the client's display resolution for pixel-perfect fit.
-    var defaultOptimizeForHostDisplay: Bool {
-        // Always use client resolution for pixel-perfect display
-        return false
-    }
-    
-    var displayName: String {
-        switch self {
-        case .performance: return "Performance"
-        case .balanced: return "Balanced"
-        case .pro: return "Pro"
-        }
-    }
-    
-    var shortName: String {
-        displayName
-    }
-    
-    var description: String {
-        switch self {
-        case .performance: return "12 Mbps • 60 FPS"
-        case .balanced: return "20 Mbps • 60 FPS"
-        case .pro: return "32 Mbps • 60 FPS"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .performance: return "hare"
-        case .balanced: return "scale.3d"
-        case .pro: return "sparkles"
-        }
-    }
 }
 
 // MARK: - Packet Types
@@ -159,11 +93,13 @@ enum PacketType: UInt8 {
     case qualityReport = 0x08  // Client reports quality metrics
     case ping = 0x09
     case pong = 0x0A
+    case authChallenge = 0x0B  // SECURITY: Host sends challenge for PIN verification
     case videoFrameChunk = 0x0C
     case pairingFailed = 0x0D  // PIN mismatch
     case videoFrameChunkNack = 0x0E // Client requests resend of missing chunks (lossless mode)
     case audioPCM = 0x0F
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
+    case authResponse = 0x11   // SECURITY: Client responds with HMAC proof of PIN
 }
 
 // MARK: - Connection/Codec Preferences
@@ -185,6 +121,32 @@ struct Packet {
     let payload: Data
 }
 
+// MARK: - Authentication (Challenge-Response)
+
+/// SECURITY: Sent by host to client on connection.
+/// Client must respond with HMAC(challenge, PIN-derived-key) to prove knowledge of PIN.
+struct AuthChallenge: Codable {
+    let challenge: Data  // 32 random bytes
+    let version: Int     // Protocol version for future compatibility
+    
+    init(challenge: Data, version: Int = 2) {
+        self.challenge = challenge
+        self.version = version
+    }
+}
+
+/// SECURITY: Sent by client in response to AuthChallenge.
+/// Contains HMAC proof that client knows the PIN without revealing it.
+struct AuthResponse: Codable {
+    let response: Data  // HMAC-SHA256(challenge, authKey)
+    let version: Int    // Must match challenge version
+    
+    init(response: Data, version: Int = 2) {
+        self.response = response
+        self.version = version
+    }
+}
+
 // MARK: - Lossless Video (UDP Retransmit)
 
 /// Sent by client over TCP when some UDP chunks for a frame are missing.
@@ -202,10 +164,10 @@ struct HandshakeRequest: Codable {
     let deviceModel: String?        // e.g., "iPad Pro 12.9-inch (6th generation)"
     let screenWidth: Int?           // Client screen width in PIXELS (physical resolution)
     let screenHeight: Int?          // Client screen height in PIXELS (physical resolution)
-    let screenScale: Double?        // Native scale factor (typically 2.0 for Retina)
+    let screenScale: Double?        // Legacy scale factor (logical scale)
+    let nativeScale: Double?        // UIScreen.nativeScale (physical scale for Retina)
     let nativeBoundsWidth: Int?     // UIScreen.nativeBounds.width (always pixels)
     let nativeBoundsHeight: Int?    // UIScreen.nativeBounds.height (always pixels)
-    let preferredQuality: QualityPreset?
     let connectionMode: ConnectionMode?
     let codecPreference: CodecPreference?
     /// Extended display configuration (for virtual display mode)
@@ -219,7 +181,11 @@ struct HandshakeRequest: Codable {
     /// When true, client requests lossless-ish video delivery (UDP + retransmit over TCP).
     let losslessVideo: Bool?
     let deviceId: String?           // Unique device identifier for trusted devices
-    let pin: String?                // PIN for pairing verification
+    /// DEPRECATED: Legacy PIN field - only used for backward compatibility with v1 clients.
+    /// New clients should use authResponse instead.
+    let pin: String?
+    /// SECURITY: HMAC response to host's AuthChallenge - proves PIN knowledge without revealing it.
+    let authResponse: Data?
     /// When true, stream at host's native resolution instead of scaling to client resolution.
     /// This provides higher quality but may require letterboxing on the client.
     let optimizeForHostDisplay: Bool?
@@ -230,9 +196,9 @@ struct HandshakeRequest: Codable {
          screenWidth: Int? = nil,
          screenHeight: Int? = nil,
          screenScale: Double? = nil,
+         nativeScale: Double? = nil,
          nativeBoundsWidth: Int? = nil,
          nativeBoundsHeight: Int? = nil,
-         preferredQuality: QualityPreset? = nil,
          connectionMode: ConnectionMode? = nil,
          codecPreference: CodecPreference? = nil,
          displayConfig: ExtendedDisplayConfig? = nil,
@@ -242,6 +208,7 @@ struct HandshakeRequest: Codable {
          losslessVideo: Bool? = nil,
          deviceId: String? = nil,
          pin: String? = nil,
+         authResponse: Data? = nil,
          optimizeForHostDisplay: Bool? = nil) {
         self.clientName = clientName
         self.clientVersion = clientVersion
@@ -249,9 +216,9 @@ struct HandshakeRequest: Codable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.screenScale = screenScale
+        self.nativeScale = nativeScale
         self.nativeBoundsWidth = nativeBoundsWidth
         self.nativeBoundsHeight = nativeBoundsHeight
-        self.preferredQuality = preferredQuality
         self.connectionMode = connectionMode
         self.codecPreference = codecPreference
         self.displayConfig = displayConfig
@@ -261,6 +228,7 @@ struct HandshakeRequest: Codable {
         self.losslessVideo = losslessVideo
         self.deviceId = deviceId
         self.pin = pin
+        self.authResponse = authResponse
         self.optimizeForHostDisplay = optimizeForHostDisplay
     }
 }
@@ -271,7 +239,6 @@ struct HandshakeAck: Codable {
     let height: Int
     let frameRate: Int
     let hostName: String
-    let qualityPreset: QualityPreset?
     let bitrate: Int?
     /// Whether virtual display mode is active
     let isVirtualDisplay: Bool?
@@ -280,15 +247,14 @@ struct HandshakeAck: Codable {
     /// Position of extended display (if virtual display is active)
     let displayPosition: ExtendedDisplayPosition?
     
-    init(width: Int, height: Int, frameRate: Int, hostName: String,
-         qualityPreset: QualityPreset? = nil, bitrate: Int? = nil,
-         isVirtualDisplay: Bool? = nil, displayMode: StreamDisplayMode? = nil,
+        init(width: Int, height: Int, frameRate: Int, hostName: String,
+            bitrate: Int? = nil,
+            isVirtualDisplay: Bool? = nil, displayMode: StreamDisplayMode? = nil,
          displayPosition: ExtendedDisplayPosition? = nil) {
         self.width = width
         self.height = height
         self.frameRate = frameRate
         self.hostName = hostName
-        self.qualityPreset = qualityPreset
         self.bitrate = bitrate
         self.isVirtualDisplay = isVirtualDisplay
         self.displayMode = displayMode
@@ -396,13 +362,16 @@ struct QualityReport: Codable {
     let droppedFrames: Int
     let latencyMs: Double
     let jitterMs: Double
+    let estimatedBandwidthBps: Int?
     let timestamp: TimeInterval
     
     init(droppedFrames: Int, latencyMs: Double, jitterMs: Double,
+         estimatedBandwidthBps: Int? = nil,
          timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.droppedFrames = droppedFrames
         self.latencyMs = latencyMs
         self.jitterMs = jitterMs
+        self.estimatedBandwidthBps = estimatedBandwidthBps
         self.timestamp = timestamp
     }
 }

@@ -64,7 +64,6 @@ struct ContentView: View {
                 PINEntryOverlay(
                     hostName: isRemoteHost ? "Remote Host" : (pinTargetHost?.name ?? "Mac"),
                     pin: $clientManager.enteredPIN,
-                    selectedPreset: $clientManager.selectedPreset,
                     audioEnabled: $clientManager.audioEnabled,
                     connectionOption: $clientManager.connectionOption,
                     showsQualityOptions: !isRemoteHost,
@@ -365,7 +364,6 @@ private struct AboutScreen: View {
 private struct PINEntryOverlay: View {
     let hostName: String
     @Binding var pin: String
-    @Binding var selectedPreset: QualityPreset
     @Binding var audioEnabled: Bool
     @Binding var connectionOption: ClientManager.ConnectionOption
     let showsQualityOptions: Bool
@@ -399,26 +397,6 @@ private struct PINEntryOverlay: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     if showsQualityOptions {
-                        HStack {
-                            Text("Quality")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Picker("", selection: $selectedPreset) {
-                                ForEach(QualityPreset.allCases, id: \.self) { preset in
-                                    HStack {
-                                        Image(systemName: preset.icon)
-                                        Text(preset.displayName)
-                                    }.tag(preset)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        }
-                        
-                        // Show bitrate info
-                        Text(selectedPreset.description)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-
                         HStack {
                             Text("Connection")
                                 .foregroundStyle(.secondary)

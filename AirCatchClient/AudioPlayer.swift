@@ -8,6 +8,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import Accelerate  // PERFORMANCE: SIMD-optimized audio processing
 
 /// Plays PCM audio streamed from the AirCatch host.
 final class AudioPlayer {
@@ -119,16 +120,18 @@ final class AudioPlayer {
         }
         buffer.frameLength = frameCount
         
-        // De-interleave: Copy L R L R... to [L L L...] and [R R R...]
+        // PERFORMANCE: Use vDSP for SIMD-optimized de-interleaving (L R L R... → [L L L...] and [R R R...])
         pcmData.withUnsafeBytes { rawBufferPointer in
             guard let src = rawBufferPointer.bindMemory(to: Float.self).baseAddress else { return }
             
             if let dstLeft = buffer.floatChannelData?[0], let dstRight = buffer.floatChannelData?[1] {
-                // Perform de-interleaving loop
-                for i in 0..<Int(frameCount) {
-                    dstLeft[i] = src[i*2]
-                    dstRight[i] = src[i*2+1]
-                }
+                // Use Accelerate framework for SIMD-optimized strided copy
+                // vDSP_vsadd with stride extracts every other sample efficiently
+                var zero: Float = 0
+                // Extract left channel (stride 2, starting at index 0)
+                vDSP_vsadd(src, 2, &zero, dstLeft, 1, vDSP_Length(frameCount))
+                // Extract right channel (stride 2, starting at index 1)
+                vDSP_vsadd(src.advanced(by: 1), 2, &zero, dstRight, 1, vDSP_Length(frameCount))
             }
         }
         

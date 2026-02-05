@@ -68,6 +68,9 @@ enum ConnectionState: Equatable {
 @MainActor
 final class ClientManager: ObservableObject {
     static let shared = ClientManager()
+    
+    // PERFORMANCE: Cached JSON encoder to avoid allocation per touch event
+    private static let jsonEncoder = JSONEncoder()
 
     enum ConnectionOption: String, CaseIterable, Identifiable {
         case udpPeerToPeerAWDL = "udp_p2p_awdl"
@@ -79,9 +82,9 @@ final class ClientManager: ObservableObject {
         var displayName: String {
             switch self {
             case .udpPeerToPeerAWDL:
-                return "UDP + P2P (AWDL)"
+                return "AWDL"
             case .udpNetworkFramework:
-                return "UDP + Network"
+                return "Local Network"
             case .remote:
                 return "Remote (Internet)"
             }
@@ -120,14 +123,9 @@ final class ClientManager: ObservableObject {
     /// PIN entered by user for pairing
     @Published var enteredPIN: String = ""
     
-    /// Selected quality preset
-    @Published var selectedPreset: QualityPreset = .balanced {
-        didSet {
-            // Update optimizeForHostDisplay to match the new preset's default
-            optimizeForHostDisplay = selectedPreset.defaultOptimizeForHostDisplay
-        }
-    }
-
+    /// SECURITY: Challenge received from host for PIN verification
+    private var pendingAuthChallenge: Data?
+    
     /// Connection mode for video/control.
     @Published var connectionOption: ConnectionOption = .udpPeerToPeerAWDL
 
@@ -142,12 +140,9 @@ final class ClientManager: ObservableObject {
     /// When false, scales to client's display resolution for pixel-perfect fit.
     @Published var optimizeForHostDisplay: Bool = false
     
-    // MARK: - Video Frame Output
-    
-    /// Latest compressed video frame data for the renderer
-    @Published private(set) var latestFrameData: Data?
-    
     // MARK: - Components
+    // NOTE: latestFrameData was removed - use videoFrameSubject (PassthroughSubject) instead
+    // to avoid SwiftUI view thrashing at 60 FPS
     
     private let networkManager = NetworkManager.shared
     private let remoteTransport = RemoteTransport()
@@ -168,10 +163,12 @@ final class ClientManager: ObservableObject {
     // Video Reassembly
     private let reassembler = VideoReassembler()
 
-    // Remote telemetry
-    private var remotePingTimer: Timer?
+    // Telemetry
+    private var telemetryTimer: Timer?
     private var lastPingTimestamp: TimeInterval?
     private var lastRttMs: Double = 0
+    private var lastReportTimestamp: TimeInterval?
+    private var receivedBytesSinceLastReport: Int = 0
     
     private init() {
         setupBonjourCallbacks()
@@ -206,11 +203,10 @@ final class ClientManager: ObservableObject {
     func disconnect(shouldRetry: Bool = false) {
         networkManager.stopAll()
         remoteTransport.stop()
-        stopRemoteTelemetry()
+        stopTelemetry()
         mpcClient.disconnect()
         audioPlayer.stop()
         screenInfo = nil
-        latestFrameData = nil
         activeLink = .network
         remoteActive = false
         
@@ -329,6 +325,9 @@ final class ClientManager: ObservableObject {
         mpcClient.onPacketReceived = { [weak self] packet in
             guard let self else { return }
             switch packet.type {
+            case .authChallenge:
+                // SECURITY: Host sent challenge - compute response and send handshake
+                self.handleAuthChallenge(packet.payload)
             case .handshakeAck, .pairingFailed, .disconnect:
                 self.handleTCPPacket(packet)
             case .videoFrame, .videoFrameChunk:
@@ -343,8 +342,8 @@ final class ClientManager: ObservableObject {
         mpcClient.onConnected = { [weak self] in
             guard let self else { return }
             self.activeLink = .aircatch
-            self.debugConnectionStatus = "Connected (AirCatch)"
-            self.sendHandshakeViaAirCatch()
+            self.debugConnectionStatus = "Connected (AirCatch) - awaiting auth challenge"
+            // Don't send handshake immediately - wait for auth challenge from host
         }
 
         mpcClient.onDisconnected = { [weak self] in
@@ -426,7 +425,7 @@ final class ClientManager: ObservableObject {
                     self.debugConnectionStatus = "Remote: Connecting..."
                 case .ready:
                     self.debugConnectionStatus = "Remote: Connected"
-                    self.startRemoteTelemetry()
+                    self.startTelemetry()
                     self.sendHandshake()
                 case .failed(let error):
                     self.state = .error("Remote failed: \(error)")
@@ -437,6 +436,27 @@ final class ClientManager: ObservableObject {
         )
     }
 
+    // MARK: - Challenge-Response Authentication
+    
+    /// SECURITY: Handles auth challenge from host, computes HMAC response, sends handshake.
+    private func handleAuthChallenge(_ payload: Data) {
+        guard let authChallenge = try? JSONDecoder().decode(AuthChallenge.self, from: payload) else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: Failed to decode auth challenge", category: .network)
+            #endif
+            return
+        }
+        
+        pendingAuthChallenge = authChallenge.challenge
+        debugConnectionStatus = "Connected (AirCatch) - authenticating"
+        
+        #if DEBUG
+        AirCatchLog.info("E2EE: Received auth challenge (v\(authChallenge.version)), sending response", category: .network)
+        #endif
+        
+        // Now send handshake with auth response instead of plaintext PIN
+        sendHandshakeViaAirCatch()
+    }
 
     private func sendHandshakeViaAirCatch() {
         let windowScenes = UIApplication.shared.connectedScenes
@@ -450,6 +470,7 @@ final class ClientManager: ObservableObject {
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
         let scale = screen?.scale ?? 2.0
+        let nativeScale = screen?.nativeScale ?? scale
         
         // For Sidecar-like behavior, we send the iPad's native physical resolution
         // The host will detect the iPad model and apply the appropriate Retina scaling
@@ -469,17 +490,32 @@ final class ClientManager: ObservableObject {
         AirCatchLog.info("   Native: \(physicalWidth)×\(physicalHeight) pixels", category: .video)
         AirCatchLog.info("   Scale: \(scale)x", category: .video)
         #endif
+        
+        // SECURITY: Compute auth response if we have a challenge, otherwise fall back to legacy PIN
+        let authResponse: Data?
+        if let challenge = pendingAuthChallenge, !enteredPIN.isEmpty {
+            authResponse = crypto.computeChallengeResponse(challenge: challenge, pin: enteredPIN)
+            pendingAuthChallenge = nil  // Clear after use
+            #if DEBUG
+            AirCatchLog.info("E2EE: Using challenge-response auth", category: .network)
+            #endif
+        } else {
+            authResponse = nil
+            #if DEBUG
+            AirCatchLog.info("E2EE: No challenge received, using legacy PIN auth", category: .network)
+            #endif
+        }
 
         let request = HandshakeRequest(
             clientName: UIDevice.current.name,
-            clientVersion: "1.0",
+            clientVersion: "2.0",  // Updated version for challenge-response support
             deviceModel: deviceModel,
             screenWidth: physicalWidth,
             screenHeight: physicalHeight,
             screenScale: scale,
+            nativeScale: nativeScale,
             nativeBoundsWidth: Int(nativeBounds.width),
             nativeBoundsHeight: Int(nativeBounds.height),
-            preferredQuality: selectedPreset,
             connectionMode: currentConnectionMode(),
             codecPreference: .auto,
             displayConfig: nil,  // Mirror mode only (extend display removed)
@@ -487,7 +523,8 @@ final class ClientManager: ObservableObject {
             requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: true,
-            pin: enteredPIN.isEmpty ? nil : enteredPIN,
+            pin: authResponse == nil ? enteredPIN : nil,  // Only send PIN if no auth response
+            authResponse: authResponse,
             optimizeForHostDisplay: optimizeForHostDisplay
         )
 
@@ -569,8 +606,14 @@ final class ClientManager: ObservableObject {
     private func handleAirCatchPacket(_ packet: Packet) {
         switch packet.type {
         case .videoFrame:
-            // E2EE: Decrypt video frame
-            let frameData = crypto.decrypt(packet.payload) ?? packet.payload
+            recordIncomingBytes(packet.payload.count)
+            // SECURITY: Decrypt video frame - reject if decryption fails
+            guard let frameData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: Video frame decryption failed - dropping packet", category: .video)
+                #endif
+                return
+            }
             videoFrameSubject.send(frameData)
             if state == .connected {
                 state = .streaming
@@ -578,6 +621,7 @@ final class ClientManager: ObservableObject {
                 debugConnectionStatus = "Streaming (AirCatch)"
             }
         case .videoFrameChunk:
+            recordIncomingBytes(packet.payload.count)
             handleVideoChunk(packet.payload)
             if state == .connected {
                 state = .streaming
@@ -585,8 +629,14 @@ final class ClientManager: ObservableObject {
                 debugConnectionStatus = "Streaming (AirCatch)"
             }
         case .audioPCM:
-            // E2EE: Decrypt audio frame
-            let audioData = crypto.decrypt(packet.payload) ?? packet.payload
+            recordIncomingBytes(packet.payload.count)
+            // SECURITY: Decrypt audio frame - reject if decryption fails
+            guard let audioData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: Audio frame decryption failed - dropping packet", category: .general)
+                #endif
+                return
+            }
             audioPlayer.playAudioPacket(audioData)
         case .ping:
             // Respond to ping with pong for RTT measurement
@@ -620,27 +670,28 @@ final class ClientManager: ObservableObject {
         }
     }
 
-    private func startRemoteTelemetry() {
-        stopRemoteTelemetry()
-        guard connectionOption == .remote else { return }
+    private func startTelemetry() {
+        stopTelemetry()
 
-        remotePingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            guard let weakSelf = self else { return }
-            Task { @MainActor in
-                weakSelf.sendRemotePingAndReport()
+        // Timer fires on main run loop but callback closure is not automatically MainActor-isolated.
+        // Use Task to properly dispatch to MainActor.
+        telemetryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.sendPingAndReport()
             }
         }
     }
 
-    private func stopRemoteTelemetry() {
-        remotePingTimer?.invalidate()
-        remotePingTimer = nil
+    private func stopTelemetry() {
+        telemetryTimer?.invalidate()
+        telemetryTimer = nil
         lastPingTimestamp = nil
         lastRttMs = 0
+        lastReportTimestamp = nil
+        receivedBytesSinceLastReport = 0
     }
 
-    private func sendRemotePingAndReport() {
-        guard connectionOption == .remote else { return }
+    private func sendPingAndReport() {
         let now = Date().timeIntervalSince1970
         lastPingTimestamp = now
         let ping = PingPacket(timestamp: now)
@@ -648,7 +699,24 @@ final class ClientManager: ObservableObject {
             sendControl(type: .ping, payload: data)
         }
 
-        let report = QualityReport(droppedFrames: 0, latencyMs: lastRttMs, jitterMs: 0)
+        let estimatedBandwidth: Int?
+        if let lastReportTimestamp {
+            let elapsed = max(0.001, now - lastReportTimestamp)
+            let bps = Int(Double(receivedBytesSinceLastReport * 8) / elapsed)
+            estimatedBandwidth = bps
+        } else {
+            estimatedBandwidth = nil
+        }
+
+        lastReportTimestamp = now
+        receivedBytesSinceLastReport = 0
+
+        let report = QualityReport(
+            droppedFrames: 0,
+            latencyMs: lastRttMs,
+            jitterMs: 0,
+            estimatedBandwidthBps: estimatedBandwidth
+        )
         if let reportData = try? JSONEncoder().encode(report) {
             sendControl(type: .qualityReport, payload: reportData)
         }
@@ -789,6 +857,7 @@ final class ClientManager: ObservableObject {
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let nativeBounds = screen?.nativeBounds ?? CGRect(x: 0, y: 0, width: 2048, height: 1536)
         let scale = screen?.scale ?? 2.0
+        let nativeScale = screen?.nativeScale ?? scale
         
         // For Sidecar-like behavior, we send the iPad's native physical resolution
         // The host will detect the iPad model and apply the appropriate Retina scaling
@@ -816,9 +885,9 @@ final class ClientManager: ObservableObject {
             screenWidth: physicalWidth,
             screenHeight: physicalHeight,
             screenScale: scale,
+            nativeScale: nativeScale,
             nativeBoundsWidth: Int(nativeBounds.width),
             nativeBoundsHeight: Int(nativeBounds.height),
-            preferredQuality: selectedPreset,
             connectionMode: currentConnectionMode(),
             codecPreference: .auto,
             displayConfig: nil,  // Mirror mode only (extend display removed)
@@ -833,7 +902,7 @@ final class ClientManager: ObservableObject {
         if let data = try? JSONEncoder().encode(request) {
             sendControl(type: .handshake, payload: data)
             #if DEBUG
-            AirCatchLog.info(" Sent handshake: video=\(pendingRequestVideo) preset=\(selectedPreset.displayName)")
+            AirCatchLog.info(" Sent handshake: video=\(pendingRequestVideo)")
             #endif
         }
     }
@@ -889,8 +958,14 @@ final class ClientManager: ObservableObject {
         case .handshakeAck:
             handleHandshakeAck(packet.payload)
         case .videoFrame:
-            // E2EE: Decrypt video frames received via TCP
-            let frameData = crypto.decrypt(packet.payload) ?? packet.payload
+            recordIncomingBytes(packet.payload.count)
+            // SECURITY: Decrypt video frames - reject if decryption fails
+            guard let frameData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: TCP video frame decryption failed - dropping packet", category: .video)
+                #endif
+                return
+            }
             videoFrameSubject.send(frameData)
             if state == .connected {
                 state = .streaming
@@ -931,18 +1006,31 @@ final class ClientManager: ObservableObject {
         
         switch packet.type {
         case .videoFrame:
-            // E2EE: Decrypt UDP complete frame (legacy/fallback)
-            let frameData = crypto.decrypt(packet.payload) ?? packet.payload
+            recordIncomingBytes(packet.payload.count)
+            // SECURITY: Decrypt UDP complete frame - reject if decryption fails
+            guard let frameData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: UDP video frame decryption failed - dropping packet", category: .video)
+                #endif
+                return
+            }
             videoFrameSubject.send(frameData)
             updateStreamingState()
             
         case .videoFrameChunk:
+            recordIncomingBytes(packet.payload.count)
             // Handle fragmented video frame (chunks are already encrypted as a whole frame)
             handleVideoChunk(packet.payload)
             
         case .audioPCM:
-            // E2EE: Decrypt audio packet
-            let audioData = crypto.decrypt(packet.payload) ?? packet.payload
+            recordIncomingBytes(packet.payload.count)
+            // SECURITY: Decrypt audio packet - reject if decryption fails
+            guard let audioData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: UDP audio decryption failed - dropping packet", category: .general)
+                #endif
+                return
+            }
             audioPlayer.playAudioPacket(audioData)
             
         default:
@@ -986,8 +1074,13 @@ final class ClientManager: ObservableObject {
             onComplete: { [weak self] fullFrame in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // E2EE: Decrypt reassembled frame (chunks form the encrypted payload)
-                let decryptedFrame = self.crypto.decrypt(fullFrame) ?? fullFrame
+                // SECURITY: Decrypt reassembled frame - reject if decryption fails
+                guard let decryptedFrame = self.crypto.decrypt(fullFrame) else {
+                    #if DEBUG
+                    AirCatchLog.error("E2EE: Reassembled frame decryption failed - dropping", category: .video)
+                    #endif
+                    return
+                }
                 self.videoFrameSubject.send(decryptedFrame)
                 self.updateStreamingState()
             }
@@ -1005,6 +1098,7 @@ final class ClientManager: ObservableObject {
         
         screenInfo = ack
         state = .connected
+        startTelemetry()
         
         #if DEBUG
         AirCatchLog.info(" Connected! Screen: \(ack.width)x\(ack.height) @ \(ack.frameRate)fps")
@@ -1024,13 +1118,16 @@ final class ClientManager: ObservableObject {
         // NOTE: No throttling for P2P mode - user wants lowest latency possible
         // Throttling would be added here for remote/WAN connections in Phase 3
         
+        // Timestamp is critical for detecting stale events on host side
         let event = TouchEvent(
             normalizedX: normalizedX,
             normalizedY: normalizedY,
-            eventType: eventType
+            eventType: eventType,
+            timestamp: Date().timeIntervalSince1970
         )
         
-        if let data = try? JSONEncoder().encode(event) {
+        // PERFORMANCE: Use cached encoder instead of creating new one per event
+        if let data = try? Self.jsonEncoder.encode(event) {
             switch activeLink {
             case .aircatch:
                 mpcClient.send(type: .touchEvent, payload: data, mode: .reliable)
@@ -1102,6 +1199,10 @@ final class ClientManager: ObservableObject {
                 sendControl(type: .mediaKeyEvent, payload: data)
             }
         }
+    }
+
+    private func recordIncomingBytes(_ count: Int) {
+        receivedBytesSinceLastReport += count
     }
 
 }

@@ -63,7 +63,7 @@ struct HostView: View {
                         .font(.headline)
                         .foregroundColor(.green)
                     
-                    Text("\(hostManager.currentQuality.displayName) • \(hostManager.currentQuality.bitrate / 1_000_000) Mbps")
+                    Text("Adaptive • \(hostManager.currentBitrate / 1_000_000) Mbps")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

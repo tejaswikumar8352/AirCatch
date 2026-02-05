@@ -3,6 +3,7 @@
 //  AirCatchClient
 //
 //  End-to-end encryption using PIN-derived AES-256-GCM.
+//  Implements challenge-response PIN verification to avoid plaintext PIN transmission.
 //
 
 import Foundation
@@ -12,8 +13,30 @@ import CryptoKit
 /// This ensures neither network sniffers nor the relay server can read data.
 final class CryptoManager {
     private var key: SymmetricKey?
-    private static let salt = "AirCatch-E2EE-v1".data(using: .utf8)!
+    
+    // SECURITY: Use unique, version-tagged salts for different derivation purposes
+    private static let encryptionSalt = "AirCatch-E2EE-v2-encryption".data(using: .utf8)!
+    private static let authSalt = "AirCatch-E2EE-v2-auth".data(using: .utf8)!
     private static let info = "AirCatch-Session".data(using: .utf8)!
+    
+    /// Computes a challenge response for PIN verification (client-side).
+    /// The response is HMAC-SHA256(challenge, authKey) where authKey is derived from PIN.
+    func computeChallengeResponse(challenge: Data, pin: String) -> Data? {
+        guard !pin.isEmpty else { return nil }
+        
+        // Derive an authentication key from PIN (separate from encryption key)
+        let pinData = Data(pin.utf8)
+        let authKey = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: pinData),
+            salt: Self.authSalt,
+            info: Self.info,
+            outputByteCount: 32
+        )
+        
+        // HMAC the challenge with the auth key
+        let hmac = HMAC<SHA256>.authenticationCode(for: challenge, using: authKey)
+        return Data(hmac)
+    }
     
     /// Derives a 256-bit AES key from the PIN using HKDF.
     /// Call this when PIN is generated (host) or entered (client).
@@ -30,7 +53,7 @@ final class CryptoManager {
         // Info adds context to the derivation
         key = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: pinData),
-            salt: Self.salt,
+            salt: Self.encryptionSalt,
             info: Self.info,
             outputByteCount: 32  // 256 bits for AES-256
         )

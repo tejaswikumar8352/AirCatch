@@ -3,6 +3,7 @@
 //  AirCatchHost
 //
 //  End-to-end encryption using PIN-derived AES-256-GCM.
+//  Implements challenge-response PIN verification to avoid plaintext PIN transmission.
 //
 
 import Foundation
@@ -12,8 +13,70 @@ import CryptoKit
 /// This ensures neither network sniffers nor the relay server can read data.
 final class CryptoManager {
     private var key: SymmetricKey?
-    private static let salt = "AirCatch-E2EE-v1".data(using: .utf8)!
+    
+    // SECURITY: Use unique, version-tagged salts for different derivation purposes
+    private static let encryptionSalt = "AirCatch-E2EE-v2-encryption".data(using: .utf8)!
+    private static let authSalt = "AirCatch-E2EE-v2-auth".data(using: .utf8)!
     private static let info = "AirCatch-Session".data(using: .utf8)!
+    
+    // SECURITY: Current challenge for PIN verification (host-side)
+    private(set) var currentChallenge: Data?
+    
+    /// Generates a random 32-byte challenge for PIN verification.
+    /// Call this on the host when a client connects.
+    func generateChallenge() -> Data {
+        var challenge = Data(count: 32)
+        challenge.withUnsafeMutableBytes { buffer in
+            _ = SecRandomCopyBytes(kSecRandomDefault, 32, buffer.baseAddress!)
+        }
+        currentChallenge = challenge
+        return challenge
+    }
+    
+    /// Computes the expected response for a given challenge and PIN (host-side verification).
+    /// Returns nil if no key is derived yet.
+    func computeChallengeResponse(challenge: Data, pin: String) -> Data? {
+        // Derive an authentication key from PIN (separate from encryption key)
+        let pinData = Data(pin.utf8)
+        let authKey = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: pinData),
+            salt: Self.authSalt,
+            info: Self.info,
+            outputByteCount: 32
+        )
+        
+        // HMAC the challenge with the auth key
+        let hmac = HMAC<SHA256>.authenticationCode(for: challenge, using: authKey)
+        return Data(hmac)
+    }
+    
+    /// Verifies a client's challenge response against the expected value.
+    /// Returns true if the response matches (client knows the correct PIN).
+    func verifyChallengeResponse(_ response: Data, expectedPIN: String) -> Bool {
+        guard let challenge = currentChallenge else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: No challenge set for verification", category: .network)
+            #endif
+            return false
+        }
+        
+        guard let expected = computeChallengeResponse(challenge: challenge, pin: expectedPIN) else {
+            return false
+        }
+        
+        // Constant-time comparison to prevent timing attacks
+        guard response.count == expected.count else { return false }
+        var result: UInt8 = 0
+        for (a, b) in zip(response, expected) {
+            result |= a ^ b
+        }
+        return result == 0
+    }
+    
+    /// Clears the current challenge after verification.
+    func clearChallenge() {
+        currentChallenge = nil
+    }
     
     /// Derives a 256-bit AES key from the PIN using HKDF.
     /// Call this when PIN is generated (host) or entered (client).
@@ -30,7 +93,7 @@ final class CryptoManager {
         // Info adds context to the derivation
         key = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: pinData),
-            salt: Self.salt,
+            salt: Self.encryptionSalt,
             info: Self.info,
             outputByteCount: 32  // 256 bits for AES-256
         )

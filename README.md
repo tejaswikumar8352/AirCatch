@@ -1,138 +1,254 @@
 # AirCatch
 
-AirCatch is a two‑app system that streams a Mac screen to an iPad with low latency, plus an optional relay server for Internet (remote) sessions. It combines ScreenCaptureKit + VideoToolbox (macOS) with VideoToolbox + Metal (iPad), and sends mouse/keyboard/touch input back to the Mac.
+Turn your iPad into a wireless display for your Mac — with full touch, keyboard, and audio support.
 
-## Components
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iPadOS-blue)
+![Swift](https://img.shields.io/badge/swift-5.9-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-- **AirCatchHost (macOS)**: Menu bar app that captures the Mac display, encodes video (HEVC/H.264), and injects input events. Uses Bonjour + MultipeerConnectivity for local discovery and a WebSocket relay for remote sessions.
-- **AirCatchClient (iPadOS)**: iPad app that discovers hosts, connects with a PIN, decodes video in hardware, renders via Metal, and sends touch/keyboard/scroll input. Optional audio playback.
-- **RemoteRelayServer (Node.js)**: WebSocket relay used only for Remote mode. It pairs a host and client by session ID (PIN) and relays control + media messages.
+AirCatch is a native screen mirroring solution that streams your Mac's display to your iPad over WiFi or the internet. Unlike Apple's Sidecar, it works on any Mac running macOS 13+ and any iPad running iPadOS 16+, with no Apple Silicon requirement on the Mac side.
 
-## Key Features
+---
 
-- **Low‑latency video**: HEVC by default with 60 FPS local presets (Performance/Balanced/Pro). Remote mode uses HEVC Main (8‑bit) with 30 FPS and adaptive bitrate.
-- **Input control**: Touch, right‑click, double‑click, drag, scroll, pinch‑zoom, keyboard input, media keys, and voice typing.
-- **Audio streaming**: Optional host audio capture and playback on the client.
-- **Local discovery**: Bonjour service types `_aircatch._udp.` and `_aircatch._tcp.` with TXT metadata, plus MultipeerConnectivity (`aircatch`) for close‑range P2P.
-- **Remote mode**: WebSocket relay with rate‑limited registration and binary relay for video.
-- **End‑to‑end encryption**: AES‑256‑GCM with HKDF‑derived keys from the session PIN.
+## ✨ Features
 
-## How It Works (High Level)
+### Display Streaming
+- **Hardware-accelerated HEVC (H.265) encoding** via VideoToolbox for buttery smooth 60fps streaming
+- **H.264 fallback** for compatibility when needed (remote mode adaptive codec)
+- **Metal-powered rendering** on iPad with zero-copy texture display for minimal latency
+- **Retina resolution support** with automatic iPad model detection
+- **Virtual display mode** — create an additional display that only exists on your iPad
+- **Three quality presets**: Performance (12 Mbps), Balanced (20 Mbps), Pro (32 Mbps)
 
-### Discovery
+### Input & Control
+- **Full touch support** — tap, drag, scroll, pinch-to-zoom, and right-click (long press)
+- **On-screen Mac keyboard** — draggable, resizable keyboard with all modifier keys (⌘⌥⌃⇧)
+- **iOS keyboard input** — use the native iPad keyboard for quick text entry
+- **Voice typing** — dictate directly to your Mac using iPad's speech recognition
+- **Mouse/trackpad support** — connect a mouse to your iPad and use it naturally
 
-- **Bonjour** advertises and discovers services on `_aircatch._udp.` and `_aircatch._tcp.`.
-- **MultipeerConnectivity** advertises a P2P service named `aircatch` for close‑range discovery.
+### Audio
+- **System audio streaming** — hear your Mac's audio on your iPad
+- **48kHz stereo playback** with low-latency buffering
 
-### Handshake & Transport
+### Connectivity
+- **Auto-discovery via Bonjour** — your Mac appears automatically on your iPad
+- **PIN-based authentication** — 6-digit PIN protects against unauthorized access
+- **End-to-end encryption** — AES-256-GCM encryption derived from the PIN
+- **Remote mode** — connect over the internet via WebSocket relay
+- **Automatic reconnection** with exponential backoff
 
-- The client sends a **handshake** containing device info, resolution, quality preset, requested audio/video, and PIN.
-- The host verifies the PIN and replies with a **handshake ack** (actual capture resolution, FPS, bitrate, etc.).
+---
 
-**Local (LAN/P2P):**
+## 📋 Requirements
 
-- **TCP**: Control + handshake + input events.
-- **UDP**: Video frames, usually chunked; optional retransmit (lossless mode) via `videoFrameChunkNack` requests.
+### Mac (Host)
+- macOS 13.0 Ventura or later
+- Screen Recording permission (System Settings → Privacy & Security)
+- Accessibility permission for input injection (prompted on first launch)
 
-**Remote (Internet):**
+### iPad (Client)
+- iPadOS 16.0 or later
+- iPad only (iPhone not supported)
+- Same WiFi network as Mac, or internet for remote mode
 
-- Uses a **WebSocket relay** (`ws://<YOUR_GCE_IP>:8080/ws` by default).
-- Host sends **full video frames over TCP channel** to reduce relay overhead.
-- Audio is sent over the UDP channel (still via WebSocket relay messages).
+---
 
-### Encryption
+## 🚀 Getting Started
 
-- Both host and client derive a symmetric key from the session PIN using HKDF.
-- Video/audio payloads are encrypted with AES‑256‑GCM before sending and decrypted on receipt.
+### Building from Source
 
-## Configuration Defaults
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/AirCatch.git
+   cd AirCatch
+   ```
 
-From `AirCatchConfig`:
+2. Open `AirCatch.xcodeproj` in Xcode 15+
 
-- UDP port: **5555**
-- TCP port: **5556**
-- Remote relay URL: **ws://<YOUR_GCE_IP>:8080/ws**
-- Default local presets (HEVC): **10/20/30 Mbps @ 60 FPS**
-- Remote defaults: **~6 Mbps @ 30 FPS**, adaptive in **4–10 Mbps** range
-- Max UDP payload size: **1200 bytes**
+3. Build and run:
+   - **AirCatchHost** — Run on your Mac
+   - **AirCatchClient** — Run on your iPad
 
-## Permissions
+### First Connection
 
-### Client (iPad)
+1. Launch **AirCatch Host** on your Mac
+2. Grant Screen Recording and Accessibility permissions when prompted
+3. Note the 6-digit PIN displayed in the app window
+4. Launch **AirCatch** on your iPad
+5. Your Mac should appear in the devices list (or tap "Remote Host" for internet mode)
+6. Tap your Mac, enter the PIN, choose quality preset, and connect
+7. Enjoy your extended display!
 
-- **Local Network** + **Bonjour** (host discovery)
-- **Microphone** + **Speech Recognition** (voice typing)
+---
 
-### Host (macOS)
+## 🎮 Controls
 
-- **Screen Recording** (screen capture)
-- **Accessibility** (mouse/keyboard injection)
+| Action | Gesture |
+|--------|---------|
+| Click | Tap |
+| Right-click | Long press or two-finger tap |
+| Double-click | Double tap |
+| Drag | Tap and drag |
+| Scroll | Two-finger pan |
+| Zoom | Pinch |
+| Show keyboard | Tap keyboard icon in toolbar |
+| Voice typing | Tap microphone icon on keyboard |
 
-The host app prompts for these permissions on first launch.
+---
 
-## Build & Run
+## ⚙️ Quality Presets
 
-### Prerequisites
+| Preset | Bitrate | Best For |
+|--------|---------|----------|
+| **Performance** | 12 Mbps | Crowded networks, battery saving |
+| **Balanced** | 20 Mbps | General use (default) |
+| **Pro** | 32 Mbps | Text-heavy work, design, reading |
 
-- macOS with Xcode installed
-- iPad (or iPad Simulator) for the client
-- Node.js 18+ if running the relay server
+---
 
-### Xcode
+## 🌐 Remote Mode
 
-1. Open **AirCatch.xcodeproj** in Xcode.
-2. Select **AirCatchHost** scheme and run on a Mac.
-3. Select **AirCatchClient** scheme and run on an iPad.
-4. On the iPad, choose a host, enter the 6‑character PIN shown on the Mac, and connect.
+AirCatch supports streaming over the internet using a WebSocket relay server.
 
-### Remote Relay Server (Optional)
+### Using the Public Relay
+By default, AirCatch connects to `wss://aircatch.duckdns.org/ws`. Just tap "Remote Host" on your iPad and enter your Mac's PIN.
 
-The relay server is in `RemoteRelayServer/` and uses the `ws` library.
+### Self-Hosting a Relay
+The relay server is included in `RemoteRelayServer/`. Deploy it to your own server:
 
-1. Install dependencies: `npm install`
-2. Start: `npm start`
-3. Set `AirCatchConfig.remoteRelayURL` in both client and host if you use a custom relay.
+```bash
+cd RemoteRelayServer
+npm install
+node server.js
+```
 
-GCE deployment script is included as `RemoteRelayServer/deploy_gce.sh`.
+Or use Docker:
+```bash
+docker build -t aircatch-relay .
+docker run -p 8080:8080 aircatch-relay
+```
 
-## Project Structure
+See [GCE_DEPLOYMENT_GUIDE.md](RemoteRelayServer/GCE_DEPLOYMENT_GUIDE.md) for Google Cloud deployment instructions.
+
+---
+
+## 🔒 Security
+
+- **PIN-based pairing** — 6-digit PIN must match on host and client
+- **AES-256-GCM encryption** — All data encrypted end-to-end using PIN-derived keys
+- **HKDF key derivation** — Secure key generation from short PINs
+- **Rate limiting** — Relay server blocks IPs after 5 failed attempts
+- **No data stored** — Relay only forwards packets, never stores content
+
+---
+
+## 🏗 Architecture
 
 ```
-AirCatch.xcodeproj/           Xcode project (schemes: AirCatchClient, AirCatchHost)
-AirCatchClient/               iPad client app
-AirCatchHost/                 macOS host app
-RemoteRelayServer/            WebSocket relay server
-ExportOptions.plist           Export configuration (Developer ID)
-LICENSE                       MIT License
+┌─────────────────┐         UDP/TCP          ┌─────────────────┐
+│   AirCatchHost  │◄───────────────────────►│  AirCatchClient │
+│     (macOS)     │                          │    (iPadOS)     │
+├─────────────────┤                          ├─────────────────┤
+│ ScreenCaptureKit│  ← Screen Capture        │ VideoDecoder    │ ← HEVC/H.264 decode
+│ VideoToolbox    │  ← HEVC (H.265) encode   │ MetalVideoView  │ ← GPU render
+│ CGEvent         │  ← Input injection       │ TouchInput      │ ← Touch capture
+│ AVAudioEngine   │  ← Audio capture         │ AudioPlayer     │ ← Audio playback
+│ CGVirtualDisplay│  ← Virtual monitor       │ SpeechManager   │ ← Voice typing
+└─────────────────┘                          └─────────────────┘
+         │                                            │
+         │         ┌───────────────────┐              │
+         └────────►│   Relay Server    │◄─────────────┘
+                   │   (WebSocket)     │
+                   │   Remote Mode     │
+                   └───────────────────┘
 ```
 
-### AirCatchClient Highlights
+### Key Components
 
-- `ClientManager.swift`: connection orchestration, handshake, stream handling
-- `NetworkManager.swift`: UDP/TCP client transport
-- `RemoteTransport.swift`: WebSocket relay transport for remote mode
-- `VideoDecoder.swift` + `MetalVideoView.swift`: hardware decode + Metal rendering
-- `VideoStreamOverlay.swift`: video display + input overlay
-- `MouseInputView.swift`, `KeyboardInputView.swift`, `MacKeyboardView.swift`: input capture
-- `SpeechManager.swift`: voice typing
-- `CryptoManager.swift`: AES‑GCM encryption/decryption
+| Component | Purpose |
+|-----------|---------|
+| `ScreenStreamer` | Captures screen via ScreenCaptureKit, encodes to HEVC (H.265) |
+| `VideoDecoder` | Hardware-accelerated HEVC/H.264 decode using VideoToolbox |
+| `MetalVideoView` | Zero-copy Metal rendering with CVMetalTextureCache |
+| `InputInjector` | Translates touch events to CGEvent mouse/keyboard events |
+| `VirtualDisplayManager` | Creates virtual displays matching iPad resolution |
+| `NetworkManager` | UDP video streaming, TCP control channel |
+| `CryptoManager` | AES-256-GCM encryption/decryption |
+| `BonjourAdvertiser/Browser` | mDNS service discovery |
 
-### AirCatchHost Highlights
+---
 
-- `HostManager.swift`: main host lifecycle + handshake + streaming control
-- `ScreenStreamer.swift`: ScreenCaptureKit capture + VideoToolbox encoding + audio capture
-- `NetworkManager.swift`: UDP/TCP server transport
-- `RemoteTransportHost.swift`: relay transport for remote mode
-- `InputInjector.swift`: mouse/keyboard/media‑key injection
-- `BonjourAdvertiser.swift` + `MPCAirCatchHost.swift`: discovery + P2P
-- `CryptoManager.swift`: AES‑GCM encryption
+## 📁 Project Structure
 
-### RemoteRelayServer Highlights
+```
+AirCatch/
+├── AirCatchHost/          # macOS host app
+│   ├── HostManager.swift         # Main coordinator
+│   ├── ScreenStreamer.swift      # Screen capture & encode
+│   ├── InputInjector.swift       # Mouse/keyboard injection
+│   ├── VirtualDisplayManager.swift
+│   └── NetworkManager.swift
+│
+├── AirCatchClient/        # iPadOS client app
+│   ├── ClientManager.swift       # Main coordinator
+│   ├── VideoDecoder.swift        # Hardware decode
+│   ├── MetalVideoView.swift      # Metal renderer
+│   ├── MouseInputView.swift      # Touch handling
+│   ├── MacKeyboardView.swift     # On-screen keyboard
+│   └── SpeechManager.swift       # Voice typing
+│
+└── RemoteRelayServer/     # WebSocket relay for internet mode
+    ├── server.js
+    ├── Dockerfile
+    └── GCE_DEPLOYMENT_GUIDE.md
+```
 
-- `server.js`: WebSocket relay with session pairing and rate limiting
-- `Dockerfile`: container build
-- `deploy_gce.sh`: GCE deployment script
+---
 
-## License
+## 🐛 Troubleshooting
 
-MIT License. See `LICENSE`.
+### Mac not appearing on iPad
+- Ensure both devices are on the same WiFi network
+- Check that your router allows mDNS/Bonjour traffic
+- Try using the IP address directly or Remote mode
+
+### "Screen Recording permission required"
+- Go to System Settings → Privacy & Security → Screen Recording
+- Enable AirCatch Host (or add it if not listed)
+- Restart AirCatch Host
+
+### Touch input not working
+- Go to System Settings → Privacy & Security → Accessibility
+- Enable AirCatch Host
+- You may need to restart the app
+
+### High latency or stuttering
+- Try switching to "Performance" quality preset
+- Move closer to your WiFi router
+- Ensure no other apps are heavily using the network
+
+### Audio not playing
+- Enable audio in the connection settings before connecting
+- Check that iPad volume is up and not in silent mode
+
+---
+
+## 📝 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+Built with:
+- [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) — Apple's modern screen capture framework
+- [VideoToolbox](https://developer.apple.com/documentation/videotoolbox) — Hardware video encoding/decoding
+- [Metal](https://developer.apple.com/metal/) — GPU-accelerated rendering
+- [Network.framework](https://developer.apple.com/documentation/network) — Modern networking with UDP/TCP
+- [CryptoKit](https://developer.apple.com/documentation/cryptokit) — End-to-end encryption
+
+---
+
+Made with ❤️ for the iPad + Mac workflow

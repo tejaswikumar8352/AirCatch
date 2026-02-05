@@ -17,7 +17,8 @@ final class ScreenStreamer: NSObject {
     
     // MARK: - Configuration
     
-    private var currentPreset: QualityPreset
+    private var targetFrameRate: Int
+    private var targetBitrate: Int
     private var clientWidth: Int?
     private var clientHeight: Int?
     private var targetDisplayID: CGDirectDisplayID?
@@ -58,7 +59,8 @@ final class ScreenStreamer: NSObject {
     private(set) var encodedFrameCount: Int = 0
     private var lastFrameCountReset: Date = Date()
     
-    init(preset: QualityPreset = .balanced,
+    init(targetFrameRate: Int = AirCatchConfig.defaultFrameRate,
+         targetBitrate: Int = AirCatchConfig.defaultBitrate,
          maxClientWidth: Int? = nil,
          maxClientHeight: Int? = nil,
          targetDisplayID: CGDirectDisplayID? = nil,
@@ -67,7 +69,8 @@ final class ScreenStreamer: NSObject {
          optimizeForHostDisplay: Bool = false,
          onFrame: @escaping (Data) -> Void,
          onAudio: ((Data) -> Void)? = nil) {
-        self.currentPreset = preset
+        self.targetFrameRate = targetFrameRate
+        self.targetBitrate = targetBitrate
         self.clientWidth = maxClientWidth
         self.clientHeight = maxClientHeight
         self.targetDisplayID = targetDisplayID
@@ -123,7 +126,7 @@ final class ScreenStreamer: NSObject {
         let config = SCStreamConfiguration()
         config.width = width
         config.height = height
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(currentPreset.frameRate))
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(targetFrameRate))
         config.queueDepth = 5 // Allow buffer for compression pipeline
         
         // Use compatible pixel format - BGRA works with both H.264 and HEVC
@@ -175,7 +178,7 @@ final class ScreenStreamer: NSObject {
         self.stream = stream
         isRunning = true
         
-        AirCatchLog.info(" Started capturing at \(currentPreset.frameRate)fps (\(width)x\(height)) - Preset: \(currentPreset.displayName)")
+        AirCatchLog.info(" Started capturing at \(targetFrameRate)fps (\(width)x\(height))")
     }
     
     func stop() {
@@ -209,7 +212,7 @@ final class ScreenStreamer: NSObject {
         if let codecOverride {
             useHEVC = codecOverride != .h264
         } else {
-            useHEVC = currentPreset.useHEVC
+            useHEVC = true
         }
         let codecType = useHEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
         
@@ -291,21 +294,20 @@ final class ScreenStreamer: NSObject {
         // Local Mode: 1s GOP for better compression efficiency
         let isRemoteMode = (codecOverride == .hevc)  // Remote always uses HEVC override
         let gopDuration = isRemoteMode ? AirCatchConfig.remoteGOPDuration : 1.0
-        let keyframeInterval = Int(Double(currentPreset.frameRate) * gopDuration)
+        let keyframeInterval = Int(Double(targetFrameRate) * gopDuration)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: gopDuration as CFNumber)
         
         // Frame rate configuration
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: currentPreset.frameRate as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: targetFrameRate as CFNumber)
         
-        // DYNAMIC BITRATE: Respect the selected high-bandwidth QualityPreset
-        // Performance (10Mbps) | Balanced (20Mbps) | Pro (30Mbps)
-        let targetBitrate = currentPreset.bitrate
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: targetBitrate as CFNumber)
+        // DYNAMIC BITRATE: Adaptive target set by HostManager
+        let initialBitrate = targetBitrate
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: initialBitrate as CFNumber)
         
         // Bitrate Cap: 2.5x target (VBR headroom)
         // High burst allowance eliminates scrolling stutter by allowing VBR spikes
-        let bytesPerSecondCap = Int(Double(targetBitrate) / 8.0 * 2.5)
+        let bytesPerSecondCap = Int(Double(initialBitrate) / 8.0 * 2.5)
         let dataRateLimits = [bytesPerSecondCap as CFNumber, 1 as CFNumber] as CFArray
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
         
@@ -335,7 +337,7 @@ final class ScreenStreamer: NSObject {
         
         let codecName = useHEVC ? "HEVC" : "H.264"
         let profileDesc = useHEVC ? (codecOverride == nil ? "Main10 4:2:0" : "Main 4:2:0") : "High"
-        AirCatchLog.info(" ✅ \(codecName) \(profileDesc) compression session created: \(targetBitrate / 1_000_000)Mbps @ \(currentPreset.frameRate)fps - P3/Rec.709 color space")
+        AirCatchLog.info(" ✅ \(codecName) \(profileDesc) compression session created: \(initialBitrate / 1_000_000)Mbps @ \(targetFrameRate)fps - P3/Rec.709 color space")
         self.compressionSession = session
     }
 
@@ -386,6 +388,7 @@ final class ScreenStreamer: NSObject {
     /// Dynamically updates the bitrate during an active session.
     func setBitrate(_ bps: Int) {
         guard let session = compressionSession else { return }
+        targetBitrate = bps
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bps as CFNumber)
         
         // Also update data rate limits to match the new target (2.5x cap)
@@ -401,6 +404,7 @@ final class ScreenStreamer: NSObject {
     /// but helps the encoder allocate bits more effectively.
     func setFrameRate(_ fps: Int) {
         guard let session = compressionSession else { return }
+        targetFrameRate = fps
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
         // Also update keyframe interval to match 1 second
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)

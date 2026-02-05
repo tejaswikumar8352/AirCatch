@@ -19,13 +19,21 @@ final class HostManager: ObservableObject {
     static let shared = HostManager()
     static let statusDidChange = Notification.Name("StreamingStatusChanged")
     
+    // PERFORMANCE: Cached JSON coders to avoid allocation per touch event
+    private static let jsonEncoder = JSONEncoder()
+    private static let jsonDecoder = JSONDecoder()
+    
+    // Touch event timing: max age before event is considered stale (200ms)
+    private static let maxTouchEventAge: TimeInterval = 0.2
+    
     // MARK: - Published State
     
     @Published private(set) var isRunning = false
     @Published private(set) var isStreaming = false
     @Published private(set) var connectedClients = 0
     @Published private(set) var currentPIN: String = "------"
-    @Published var currentQuality: QualityPreset = .balanced
+    @Published private(set) var currentBitrate: Int = AirCatchConfig.defaultBitrate
+    @Published private(set) var currentFrameRate: Int = AirCatchConfig.defaultFrameRate
     @Published var audioStreamingEnabled: Bool = false
     @Published private(set) var availableDisplays: [String] = []
     
@@ -64,6 +72,8 @@ final class HostManager: ObservableObject {
     
     private var screenStreamer: ScreenStreamer?
     private var currentClientDimensions: (width: Int, height: Int)?
+    private var currentClientNativeBounds: (width: Int, height: Int)?
+    private var currentClientNativeScale: Double?
     private var currentFrameId: UInt32 = 0
     private let maxUDPPayloadSize = AirCatchConfig.maxUDPPayloadSize // Safe UDP payload size (below MTU)
 
@@ -76,6 +86,8 @@ final class HostManager: ObservableObject {
     /// Whether the active session is a Remote (Internet) session.
     private var remoteSessionActive: Bool = false
     private var remoteCodecPreference: CodecPreference? = nil
+
+    private var lastEstimatedBandwidthBps: Int?
     
     /// When true, stream at host's native resolution. When false, scale to client resolution.
     private var optimizeForHostDisplay: Bool = false
@@ -283,7 +295,7 @@ final class HostManager: ObservableObject {
         case .ping:
             handleRemotePingPacket(packet.payload)
         case .qualityReport:
-            handleRemoteQualityReport(packet.payload)
+            handleQualityReport(packet.payload)
         case .disconnect:
             handleRemoteDisconnect()
         default:
@@ -305,6 +317,11 @@ final class HostManager: ObservableObject {
 
     private func setupMPCHostCallbacksIfNeeded() {
         // Safe to assign multiple times; closures are idempotent.
+        mpcHost.onPeerConnected = { [weak self] peer in
+            guard let self else { return }
+            // SECURITY: Send auth challenge to client for PIN verification
+            self.sendAuthChallenge(to: peer)
+        }
         mpcHost.onPacketReceived = { [weak self] packet, peer in
             guard let self else { return }
             self.handleMPCPacket(packet, from: peer)
@@ -318,6 +335,19 @@ final class HostManager: ObservableObject {
             if self.connectedClients == 0 {
                 self.stopStreamingAndRestore()
             }
+        }
+    }
+    
+    /// SECURITY: Sends an auth challenge to a newly connected peer.
+    private func sendAuthChallenge(to peer: MCPeerID) {
+        let challenge = crypto.generateChallenge()
+        let authChallenge = AuthChallenge(challenge: challenge)
+        
+        if let payload = try? JSONEncoder().encode(authChallenge) {
+            mpcHost.send(to: peer, type: .authChallenge, payload: payload, mode: .reliable)
+            #if DEBUG
+            AirCatchLog.info("E2EE: Sent auth challenge to \(peer.displayName)", category: .network)
+            #endif
         }
     }
     
@@ -370,9 +400,29 @@ final class HostManager: ObservableObject {
             #endif
             handshakeRequest = nil
         }
-        let receivedPIN = handshakeRequest?.pin ?? ""
-
-        if receivedPIN != currentPIN {
+        
+        // SECURITY: Verify PIN using challenge-response (preferred) or legacy plaintext (backward compat)
+        let isAuthenticated: Bool
+        if let authResponse = handshakeRequest?.authResponse {
+            // New secure path: verify HMAC response
+            isAuthenticated = crypto.verifyChallengeResponse(authResponse, expectedPIN: currentPIN)
+            crypto.clearChallenge()
+            #if DEBUG
+            let authStatus = isAuthenticated ? "succeeded" : "failed"
+            AirCatchLog.info("E2EE: Challenge-response auth \(authStatus)", category: .network)
+            #endif
+        } else {
+            // Legacy path: plaintext PIN comparison (for old clients)
+            let receivedPIN = handshakeRequest?.pin ?? ""
+            isAuthenticated = (receivedPIN == currentPIN)
+            #if DEBUG
+            if isAuthenticated {
+                AirCatchLog.info("E2EE: Legacy plaintext PIN auth (consider updating client)", category: .network)
+            }
+            #endif
+        }
+        
+        if !isAuthenticated {
             mpcHost.send(to: peer, type: .pairingFailed, payload: Data(), mode: .reliable)
             return
         }
@@ -383,21 +433,24 @@ final class HostManager: ObservableObject {
 
         connectedClients += 1
 
-        let previousQuality = currentQuality
-        if let preferredQuality = handshakeRequest?.preferredQuality {
-            currentQuality = preferredQuality
-        }
+        currentFrameRate = AirCatchConfig.defaultFrameRate
+        currentBitrate = AirCatchConfig.defaultBitrate
 
         self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
         self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
         
         // Resolution optimization: use client's preference or preset's default
-        self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? currentQuality.defaultOptimizeForHostDisplay
+        self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? false
 
-        // Local TCP "Virtual Display" Logic: Switch Resolution to match client (HiDPI)
         if let w = handshakeRequest?.screenWidth, let h = handshakeRequest?.screenHeight, w > 0, h > 0 {
-             // Apply resolution match for better full-screen experience
-             DisplayManager.shared.matchClientResolution(clientWidth: w, clientHeight: h)
+            currentClientNativeBounds = (w, h)
+        } else {
+            currentClientNativeBounds = nil
+        }
+        if let nativeScale = handshakeRequest?.nativeScale {
+            currentClientNativeScale = nativeScale
+        } else {
+            currentClientNativeScale = handshakeRequest?.screenScale
         }
 
 
@@ -419,13 +472,6 @@ final class HostManager: ObservableObject {
                         clientMaxHeight: handshakeRequest?.screenHeight,
                         deviceModel: handshakeRequest?.deviceModel
                     )
-                } else if previousQuality != currentQuality {
-                    stopStreaming()
-                    await startStreaming(
-                        clientMaxWidth: handshakeRequest?.screenWidth,
-                        clientMaxHeight: handshakeRequest?.screenHeight,
-                        deviceModel: handshakeRequest?.deviceModel
-                    )
                 }
             }
 
@@ -435,10 +481,9 @@ final class HostManager: ObservableObject {
             let ack = HandshakeAck(
                 width: ackWidth,
                 height: ackHeight,
-                frameRate: currentQuality.frameRate,
+                frameRate: currentFrameRate,
                 hostName: Host.current().localizedName ?? "Mac",
-                qualityPreset: currentQuality,
-                bitrate: currentQuality.bitrate,
+                bitrate: currentBitrate,
                 isVirtualDisplay: false,
                 displayMode: .mirror,
                 displayPosition: nil
@@ -486,25 +531,26 @@ final class HostManager: ObservableObject {
             #endif
             connectedClients += 1
             
-            // Apply client's preferred quality if specified
-            let previousQuality = currentQuality
-            if let preferredQuality = handshakeRequest?.preferredQuality {
-                currentQuality = preferredQuality
-                AirCatchLog.info("Using client's preferred quality: \(preferredQuality.displayName)", category: .video)
-                
-                // Apply new bitrate/FPS immediately if streaming
-                if let streamer = self.screenStreamer {
-                    streamer.setBitrate(currentQuality.bitrate)
-                    streamer.setFrameRate(currentQuality.frameRate)
-                }
-            }
+            currentFrameRate = AirCatchConfig.defaultFrameRate
+            currentBitrate = AirCatchConfig.defaultBitrate
 
             // Client transport preference
             self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
             self.losslessVideoEnabled = handshakeRequest?.losslessVideo ?? false
             
             // Resolution optimization: use client's preference or preset's default
-            self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? currentQuality.defaultOptimizeForHostDisplay
+            self.optimizeForHostDisplay = handshakeRequest?.optimizeForHostDisplay ?? false
+
+            if let w = handshakeRequest?.screenWidth, let h = handshakeRequest?.screenHeight, w > 0, h > 0 {
+                currentClientNativeBounds = (w, h)
+            } else {
+                currentClientNativeBounds = nil
+            }
+            if let nativeScale = handshakeRequest?.nativeScale {
+                currentClientNativeScale = nativeScale
+            } else {
+                currentClientNativeScale = handshakeRequest?.screenScale
+            }
             
             // Always use main display (mirror mode)
             let mainID = CGMainDisplayID()
@@ -526,8 +572,8 @@ final class HostManager: ObservableObject {
                         deviceModel: handshakeRequest?.deviceModel,
                         audioEnabled: wantsAudio
                     )
-                } else if previousQuality != currentQuality || self.audioStreamingEnabled != wantsAudio {
-                    // Apply quality/audio change for an already-running stream
+                } else if self.audioStreamingEnabled != wantsAudio {
+                    // Apply audio change for an already-running stream
                     stopStreaming()
                     await startStreaming(
                         clientMaxWidth: handshakeRequest?.screenWidth,
@@ -545,10 +591,9 @@ final class HostManager: ObservableObject {
             let ack = HandshakeAck(
                 width: ackWidth,
                 height: ackHeight,
-                frameRate: currentQuality.frameRate,
+                frameRate: currentFrameRate,
                 hostName: Host.current().localizedName ?? "Mac",
-                qualityPreset: currentQuality,
-                bitrate: currentQuality.bitrate,
+                bitrate: currentBitrate,
                 isVirtualDisplay: false,
                 displayMode: .mirror,
                 displayPosition: nil
@@ -611,9 +656,8 @@ final class HostManager: ObservableObject {
         postStatusChange()
 
         if wantsVideo {
-            // Apply Remote Settings explicitly
-            currentQuality = .balanced // Placeholder, will be overridden by direct calls below
-            
+            currentFrameRate = AirCatchConfig.remoteMaxFPS
+
             if !isStreaming {
                 await startStreaming(
                     clientMaxWidth: clientW,
@@ -633,12 +677,13 @@ final class HostManager: ObservableObject {
             
 
             
-            // INITIAL Remote Bitrate & FPS (Target 6-8 Mbps, 30 FPS)
+            // INITIAL Remote Bitrate (Target 4-10 Mbps, 30 FPS)
             if let streamer = self.screenStreamer {
-                // Start conservatively at 6 Mbps
-                streamer.setBitrate(6_000_000)
-                streamer.setFrameRate(30)
-                AirCatchLog.info("Remote mode started: 6Mbps @ 30fps (Adaptive 4-10Mbps)", category: .video)
+                let initialBitrate = min(AirCatchConfig.remoteMaxBitrate, max(AirCatchConfig.remoteMinBitrate, currentBitrate))
+                currentBitrate = initialBitrate
+                streamer.setBitrate(initialBitrate)
+                streamer.setFrameRate(currentFrameRate)
+                AirCatchLog.info("Remote mode started: \(initialBitrate / 1_000_000)Mbps @ \(currentFrameRate)fps (Adaptive)", category: .video)
             }
         }
 
@@ -650,10 +695,9 @@ final class HostManager: ObservableObject {
         let ack = HandshakeAck(
             width: ackWidth,
             height: ackHeight,
-            frameRate: 30, // Target FPS
+            frameRate: currentFrameRate,
             hostName: Host.current().localizedName ?? "Mac",
-            qualityPreset: nil, // Indicates custom/enforced quality
-            bitrate: 6_000_000, // Initial bitrate
+            bitrate: currentBitrate,
             isVirtualDisplay: false,
             displayMode: .mirror,
             displayPosition: nil
@@ -676,72 +720,7 @@ final class HostManager: ObservableObject {
     
     // MARK: - Adaptive Bitrate Logic
     
-    private var currentRemoteBitrate: Int = 6_000_000
-    private var currentRemoteFPS: Int = 30
     private var qualityStableCount = 0
-    
-    @MainActor
-    private func handleRemoteQualityReport(_ payload: Data) {
-        guard remoteSessionActive else { return }
-        guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
-        
-        // Thresholds
-        let latencyThreshold = 150.0 // ms
-        let droppedFrameThreshold = 0
-        
-        var newBitrate = currentRemoteBitrate
-        var newFPS = currentRemoteFPS
-        var changed = false
-        
-        // Congestion Detected?
-        if report.droppedFrames > droppedFrameThreshold || report.latencyMs > latencyThreshold {
-            qualityStableCount = 0
-            
-            // Back off aggressively
-            newBitrate = max(AirCatchConfig.remoteMinBitrate, currentRemoteBitrate - 1_000_000)
-            
-            // If already at minimum bitrate, drop FPS
-            if newBitrate == AirCatchConfig.remoteMinBitrate {
-                newFPS = AirCatchConfig.remoteMinFPS
-            }
-            
-            if newBitrate != currentRemoteBitrate || newFPS != currentRemoteFPS {
-                AirCatchLog.info("⚠️ Network congestion (Drop: \(report.droppedFrames), Latency: \(Int(report.latencyMs))ms). Reducing to \(newBitrate/1_000_000)Mbps @ \(newFPS)fps")
-                changed = true
-            }
-            
-        } else {
-            // Stable - Attempt Recovery
-            qualityStableCount += 1
-            
-            // Only increase after 5 seconds of stability (assuming 1 report/sec)
-            if qualityStableCount > 5 {
-                qualityStableCount = 0 // Reset counter to pace increases
-                
-                // Recover FPS first
-                if currentRemoteFPS < AirCatchConfig.remoteMaxFPS {
-                    newFPS = AirCatchConfig.remoteMaxFPS
-                    AirCatchLog.info("✅ Stability recovered. Restoring \(AirCatchConfig.remoteMaxFPS) FPS.")
-                    changed = true
-                } 
-                // Then recover Bitrate
-                else if currentRemoteBitrate < AirCatchConfig.remoteMaxBitrate {
-                    newBitrate = min(AirCatchConfig.remoteMaxBitrate, currentRemoteBitrate + 500_000)
-                    AirCatchLog.info("✅ Network stable. Increasing to \(newBitrate/1_000_000)Mbps")
-                    changed = true
-                }
-            }
-        }
-        
-        if changed {
-            currentRemoteBitrate = newBitrate
-            currentRemoteFPS = newFPS
-            if let streamer = self.screenStreamer {
-                streamer.setBitrate(newBitrate)
-                streamer.setFrameRate(newFPS)
-            }
-        }
-    }
 
     @MainActor
     private func handlePingPacket(_ payload: Data, from connection: NWConnection) {
@@ -763,16 +742,63 @@ final class HostManager: ObservableObject {
 
     @MainActor
     private func handleQualityReport(_ payload: Data) {
-        guard remoteSessionActive else { return }
-        guard let _ = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
+        guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
 
-        // For remote mode, use fixed 5Mbps bitrate and HEVC codec
-        // No adaptive switching - keeps stream stable without restarts
-        let remoteBitrate = 5_000_000  // 5 Mbps fixed for remote
-        if let streamer = self.screenStreamer {
-            streamer.setBitrate(remoteBitrate)
+        if let estimated = report.estimatedBandwidthBps, estimated > 0 {
+            lastEstimatedBandwidthBps = estimated
         }
-        // Always use HEVC for remote - no codec switching to avoid decoder mismatch
+
+        let isRemote = remoteSessionActive
+        let minBitrate = isRemote ? AirCatchConfig.remoteMinBitrate : BitrateCalculator.minimumBitrate
+        let maxBitrate = isRemote ? AirCatchConfig.remoteMaxBitrate : BitrateCalculator.maximumBitrate
+        let targetFPS = isRemote ? AirCatchConfig.remoteMaxFPS : AirCatchConfig.defaultFrameRate
+
+        if currentFrameRate != targetFPS {
+            currentFrameRate = targetFPS
+            screenStreamer?.setFrameRate(targetFPS)
+        }
+
+        let refWidth = currentClientDimensions?.width ?? screenStreamer?.captureWidth ?? 1920
+        let refHeight = currentClientDimensions?.height ?? screenStreamer?.captureHeight ?? 1080
+        let baseBitrate = BitrateCalculator.calculateOptimal(
+            width: refWidth,
+            height: refHeight,
+            fps: targetFPS,
+            measuredBandwidth: lastEstimatedBandwidthBps
+        )
+
+        let latencyThreshold = isRemote ? 150.0 : 80.0
+        let droppedFrameThreshold = 0
+        let decreaseStep = isRemote ? 1_000_000 : 2_000_000
+        let increaseStep = isRemote ? 500_000 : 1_000_000
+
+        var newBitrate = currentBitrate
+        var changed = false
+
+        if report.droppedFrames > droppedFrameThreshold || report.latencyMs > latencyThreshold {
+            qualityStableCount = 0
+            newBitrate = max(minBitrate, currentBitrate - decreaseStep)
+            if newBitrate != currentBitrate {
+                AirCatchLog.info("⚠️ Network congestion (Drop: \(report.droppedFrames), Latency: \(Int(report.latencyMs))ms). Reducing to \(newBitrate/1_000_000)Mbps")
+                changed = true
+            }
+        } else {
+            qualityStableCount += 1
+            if qualityStableCount > 3 {
+                qualityStableCount = 0
+                let targetBitrate = min(maxBitrate, baseBitrate)
+                if currentBitrate < targetBitrate {
+                    newBitrate = min(targetBitrate, currentBitrate + increaseStep)
+                    AirCatchLog.info("✅ Network stable. Increasing to \(newBitrate/1_000_000)Mbps")
+                    changed = true
+                }
+            }
+        }
+
+        if changed {
+            currentBitrate = newBitrate
+            screenStreamer?.setBitrate(newBitrate)
+        }
     }
 
     @MainActor
@@ -784,60 +810,70 @@ final class HostManager: ObservableObject {
     }
     
     private func handleTouchEvent(_ payload: Data) {
-        guard let touch = try? JSONDecoder().decode(TouchEvent.self, from: payload) else {
+        // PERFORMANCE: Use cached decoder instead of creating new one per event
+        guard let touch = try? Self.jsonDecoder.decode(TouchEvent.self, from: payload) else {
             #if DEBUG
             AirCatchLog.error("Failed to decode touch event", category: .input)
             #endif
             return
         }
         
+        // PERFORMANCE: Discard stale touch events to prevent accumulated delay
+        // from causing taps to become long presses
+        let eventAge = Date().timeIntervalSince1970 - touch.timestamp
+        if eventAge > Self.maxTouchEventAge {
+            #if DEBUG
+            AirCatchLog.debug("Discarding stale touch event (age: \(String(format: "%.0f", eventAge * 1000))ms)", category: .input)
+            #endif
+            return
+        }
+        
         #if DEBUG
-        AirCatchLog.debug("Received touch: type=\(touch.eventType)", category: .input)
+        AirCatchLog.debug("Received touch: type=\(touch.eventType) age=\(String(format: "%.0f", eventAge * 1000))ms", category: .input)
         #endif
         
-        Task { @MainActor in
-            // Get the target display frame (virtual display if active, otherwise main)
-            let screenFrame = self.targetDisplayFrame()
+        // PERFORMANCE: Removed nested Task - already running on MainActor via caller
+        // Get the target display frame (virtual display if active, otherwise main)
+        let screenFrame = self.targetDisplayFrame()
 
-            // With virtual display, touch mapping is direct (1:1 pixel-perfect)
-            // No letterboxing adjustment needed as the virtual display matches iPad exactly
-            var finalNormX = touch.normalizedX
-            var finalNormY = touch.normalizedY
+        // With virtual display, touch mapping is direct (1:1 pixel-perfect)
+        // No letterboxing adjustment needed as the virtual display matches iPad exactly
+        var finalNormX = touch.normalizedX
+        var finalNormY = touch.normalizedY
 
-            // Only adjust for letterboxing if NOT using virtual display
-            // (i.e., when streaming main display with different aspect ratio)
-            if !virtualDisplayManager.isVirtualDisplayActive {
-                if let (clientW, clientH) = self.currentClientDimensions, clientW > 0, clientH > 0 {
-                    let hostW = screenFrame.width
-                    let hostH = screenFrame.height
+        // Only adjust for letterboxing if NOT using virtual display
+        // (i.e., when streaming main display with different aspect ratio)
+        if !virtualDisplayManager.isVirtualDisplayActive {
+            if let (clientW, clientH) = self.currentClientDimensions, clientW > 0, clientH > 0 {
+                let hostW = screenFrame.width
+                let hostH = screenFrame.height
 
-                    if hostW > 0 && hostH > 0 {
-                        let hostAspect = hostW / hostH
-                        let clientAspect = Double(clientW) / Double(clientH)
+                if hostW > 0 && hostH > 0 {
+                    let hostAspect = hostW / hostH
+                    let clientAspect = Double(clientW) / Double(clientH)
 
-                        if hostAspect > clientAspect {
-                            let coverageH = clientAspect / hostAspect
-                            let barH = (1.0 - coverageH) / 2.0
-                            finalNormY = (touch.normalizedY - barH) / coverageH
-                        } else {
-                            let coverageW = hostAspect / clientAspect
-                            let barW = (1.0 - coverageW) / 2.0
-                            finalNormX = (touch.normalizedX - barW) / coverageW
-                        }
+                    if hostAspect > clientAspect {
+                        let coverageH = clientAspect / hostAspect
+                        let barH = (1.0 - coverageH) / 2.0
+                        finalNormY = (touch.normalizedY - barH) / coverageH
+                    } else {
+                        let coverageW = hostAspect / clientAspect
+                        let barW = (1.0 - coverageW) / 2.0
+                        finalNormX = (touch.normalizedX - barW) / coverageW
                     }
                 }
             }
-
-            finalNormX = max(0, min(1, finalNormX))
-            finalNormY = max(0, min(1, finalNormY))
-
-            InputInjector.shared.injectClick(
-                xPercent: finalNormX,
-                yPercent: finalNormY,
-                eventType: touch.eventType,
-                in: screenFrame
-            )
         }
+
+        finalNormX = max(0, min(1, finalNormX))
+        finalNormY = max(0, min(1, finalNormY))
+
+        InputInjector.shared.injectClick(
+            xPercent: finalNormX,
+            yPercent: finalNormY,
+            eventType: touch.eventType,
+            in: screenFrame
+        )
     }
     
     /// Returns the frame of the target display (virtual or main)
@@ -860,7 +896,8 @@ final class HostManager: ObservableObject {
     }
     
     private func handleScrollEvent(_ payload: Data) {
-        guard let scroll = try? JSONDecoder().decode(ScrollEvent.self, from: payload) else {
+        // PERFORMANCE: Use cached decoder
+        guard let scroll = try? Self.jsonDecoder.decode(ScrollEvent.self, from: payload) else {
             #if DEBUG
             AirCatchLog.error("Failed to decode scroll event", category: .input)
             #endif
@@ -871,23 +908,23 @@ final class HostManager: ObservableObject {
         AirCatchLog.debug("Received scroll event: deltaX=\(scroll.deltaX), deltaY=\(scroll.deltaY)", category: .input)
         #endif
         
-        Task { @MainActor in
-            // Get current mouse position for scroll location
-            let mouseLocation = NSEvent.mouseLocation
-            // Convert to screen coordinates (flip Y for CoreGraphics)
-            if let screen = NSScreen.main {
-                let cgPoint = CGPoint(x: mouseLocation.x, y: screen.frame.height - mouseLocation.y)
-                InputInjector.shared.injectScroll(
-                    deltaX: Int32(scroll.deltaX),
-                    deltaY: Int32(scroll.deltaY),
-                    at: cgPoint
-                )
-            }
+        // PERFORMANCE: Removed nested Task - already on MainActor
+        // Get current mouse position for scroll location
+        let mouseLocation = NSEvent.mouseLocation
+        // Convert to screen coordinates (flip Y for CoreGraphics)
+        if let screen = NSScreen.main {
+            let cgPoint = CGPoint(x: mouseLocation.x, y: screen.frame.height - mouseLocation.y)
+            InputInjector.shared.injectScroll(
+                deltaX: Int32(scroll.deltaX),
+                deltaY: Int32(scroll.deltaY),
+                at: cgPoint
+            )
         }
     }
     
     private func handleKeyEvent(_ payload: Data) {
-        guard let keyEvent = try? JSONDecoder().decode(KeyEvent.self, from: payload) else {
+        // PERFORMANCE: Use cached decoder
+        guard let keyEvent = try? Self.jsonDecoder.decode(KeyEvent.self, from: payload) else {
             #if DEBUG
             AirCatchLog.error("Failed to decode key event", category: .input)
             #endif
@@ -901,9 +938,8 @@ final class HostManager: ObservableObject {
         // Check if this is a text injection event (Voice Typing)
         if let character = keyEvent.character, !character.isEmpty, keyEvent.keyCode == 0 {
             // KeyCode 0 with a character string is our signal for "Injection"
-            Task { @MainActor in
-                InputInjector.shared.injectText(character)
-            }
+            // PERFORMANCE: Removed nested Task - already on MainActor
+            InputInjector.shared.injectText(character)
             return
         }
         
@@ -990,14 +1026,46 @@ final class HostManager: ObservableObject {
                 AirCatchLog.info("Virtual display unavailable, using main display", category: .video)
             }
         }
+
+        // If no virtual display is available, switch the main display to a HiDPI mirror mode
+        // when the client requested "Optimize for Client" (optimizeForHostDisplay == false).
+        if !remoteSessionActive, !optimizeForHostDisplay, virtualDisplayID == nil,
+           let nativeBounds = currentClientNativeBounds,
+           let nativeScale = currentClientNativeScale {
+            DisplayManager.shared.applyHiDPIMirroring(
+                clientNativeWidth: nativeBounds.width,
+                clientNativeHeight: nativeBounds.height,
+                nativeScale: nativeScale
+            )
+        }
         
         // Use virtual display if available, otherwise main display
         let captureDisplayID = virtualDisplayID ?? CGMainDisplayID()
         self.targetDisplayID = captureDisplayID
+
+        let targetFPS = remoteSessionActive ? AirCatchConfig.remoteMaxFPS : AirCatchConfig.defaultFrameRate
+        currentFrameRate = targetFPS
+        if let clientW = clientMaxWidth, let clientH = clientMaxHeight, clientW > 0, clientH > 0 {
+            var initialBitrate = BitrateCalculator.calculateOptimal(
+                width: clientW,
+                height: clientH,
+                fps: targetFPS,
+                measuredBandwidth: lastEstimatedBandwidthBps
+            )
+
+            if remoteSessionActive {
+                initialBitrate = min(AirCatchConfig.remoteMaxBitrate, max(AirCatchConfig.remoteMinBitrate, initialBitrate))
+            }
+
+            currentBitrate = initialBitrate
+        } else {
+            currentBitrate = remoteSessionActive ? AirCatchConfig.remoteBitrate : AirCatchConfig.defaultBitrate
+        }
         
-        AirCatchLog.info("Starting stream with preset: \(currentQuality.displayName), audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay), displayID: \(captureDisplayID)", category: .video)
+        AirCatchLog.info("Starting stream: \(currentBitrate / 1_000_000)Mbps @ \(currentFrameRate)fps, audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay), displayID: \(captureDisplayID)", category: .video)
         screenStreamer = ScreenStreamer(
-            preset: currentQuality,
+            targetFrameRate: currentFrameRate,
+            targetBitrate: currentBitrate,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
             targetDisplayID: captureDisplayID,
@@ -1071,10 +1139,17 @@ final class HostManager: ObservableObject {
     private nonisolated func cacheFrameForRetransmit(frameId: UInt32, totalChunks: Int, chunksByIndex: [Int: Data]) {
         // Must be called on cachedFramesQueue
         // Note: losslessVideoEnabled is checked before calling this from broadcastVideoFrame
-        // Prune only every 60 frames (once per second at 60fps) for performance
+        
+        // PERFORMANCE: Prune asynchronously to avoid blocking the frame caching path
+        // Check every 60 frames (once per second at 60fps)
         if frameId % UInt32(AirCatchConfig.cachePruneInterval) == 0 {
-            pruneCachedFramesIfNeeded()
+            // Dispatch pruning to happen after current frame is cached
+            let now = Date().timeIntervalSinceReferenceDate
+            cachedFramesQueue.async { [weak self] in
+                self?.pruneCachedFramesIfNeeded(now: now)
+            }
         }
+        
         cachedFrames[frameId] = CachedFrame(
             createdAt: Date().timeIntervalSinceReferenceDate,
             totalChunks: totalChunks,
@@ -1084,12 +1159,18 @@ final class HostManager: ObservableObject {
     
     // Changed per instructions:
     private func broadcastVideoFrame(_ data: Data) {
-        // E2EE: Encrypt video data if crypto is ready
-        let frameData: Data
-        if crypto.isReady, let encrypted = crypto.encrypt(data) {
-            frameData = encrypted
-        } else {
-            frameData = data  // Fallback to unencrypted (shouldn't happen after handshake)
+        // SECURITY: Encrypt video data - refuse to send unencrypted
+        guard crypto.isReady else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: Cannot broadcast - encryption not ready", category: .video)
+            #endif
+            return
+        }
+        guard let frameData = crypto.encrypt(data) else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: Video frame encryption failed - dropping frame", category: .video)
+            #endif
+            return
         }
         
         // Remote mode: always send complete frames via TCP (WebSocket is already TCP-based)

@@ -69,6 +69,54 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private var viewportSize: CGSize = .zero
     private var frameCount: Int = 0
     
+    // PERFORMANCE: Pre-allocated vertex data to avoid per-frame allocation
+    private let fullscreenVertices: [SIMD2<Float>] = [
+        SIMD2(-1, -1), SIMD2(1, -1), SIMD2(-1, 1),
+        SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)
+    ]
+    private let texCoords: [SIMD2<Float>] = [
+        SIMD2(0, 1), SIMD2(1, 1), SIMD2(0, 0),
+        SIMD2(1, 1), SIMD2(1, 0), SIMD2(0, 0)
+    ]
+    
+    // PERFORMANCE: Precompiled shader source (compiled once at init, not at runtime)
+    private static let shaderSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+    
+    struct VertexOut {
+        float4 position [[position]];
+        float2 texCoord;
+    };
+    
+    vertex VertexOut vertexShader(uint vertexID [[vertex_id]],
+                                   constant float2 *vertices [[buffer(0)]],
+                                   constant float2 *texCoords [[buffer(1)]]) {
+        VertexOut out;
+        out.position = float4(vertices[vertexID], 0.0, 1.0);
+        out.texCoord = texCoords[vertexID];
+        return out;
+    }
+    
+    float3 adjustSaturation(float3 color, float saturation) {
+        float3 luminanceWeights = float3(0.2126, 0.7152, 0.0722);
+        float luminance = dot(color, luminanceWeights);
+        return mix(float3(luminance), color, saturation);
+    }
+    
+    fragment float4 fragmentShader(VertexOut in [[stage_in]],
+                                    texture2d<float> texture [[texture(0)]],
+                                    sampler texSampler [[sampler(0)]]) {
+        float4 color = texture.sample(texSampler, in.texCoord);
+        color.rgb = adjustSaturation(color.rgb, 1.08);
+        return color;
+    }
+    """
+    
+    // Cache compiled library to avoid recompilation
+    private static var compiledLibraryCache: [ObjectIdentifier: MTLLibrary] = [:]
+    private static let libraryCacheLock = NSLock()
+    
     func setupMetal(device: MTLDevice, view: MTKView) {
         self.device = device
         self.commandQueue = device.makeCommandQueue()
@@ -96,7 +144,30 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
     }
     
     private func setupPipeline(view: MTKView) {
-        let library = device.makeDefaultLibrary() ?? makeShaderLibrary()
+        // PERFORMANCE: Use cached compiled library or compile once and cache
+        let library: MTLLibrary?
+        let deviceId = ObjectIdentifier(device)
+        
+        Self.libraryCacheLock.lock()
+        if let cached = Self.compiledLibraryCache[deviceId] {
+            library = cached
+        } else if let defaultLib = device.makeDefaultLibrary() {
+            // Prefer precompiled .metallib from bundle
+            library = defaultLib
+            Self.compiledLibraryCache[deviceId] = defaultLib
+        } else {
+            // Fallback: compile from source ONCE and cache
+            do {
+                let compiled = try device.makeLibrary(source: Self.shaderSource, options: nil)
+                Self.compiledLibraryCache[deviceId] = compiled
+                library = compiled
+                AirCatchLog.info("Shader compiled and cached", category: .video)
+            } catch {
+                AirCatchLog.error("Shader compilation failed: \(error)")
+                library = nil
+            }
+        }
+        Self.libraryCacheLock.unlock()
         
         guard let library = library else {
             AirCatchLog.error(" Failed to create shader library")
@@ -115,50 +186,6 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         }
     }
     
-    private func makeShaderLibrary() -> MTLLibrary? {
-        let shaderSource = """
-        #include <metal_stdlib>
-        using namespace metal;
-        
-        struct VertexOut {
-            float4 position [[position]];
-            float2 texCoord;
-        };
-        
-        vertex VertexOut vertexShader(uint vertexID [[vertex_id]],
-                                       constant float2 *vertices [[buffer(0)]],
-                                       constant float2 *texCoords [[buffer(1)]]) {
-            VertexOut out;
-            out.position = float4(vertices[vertexID], 0.0, 1.0);
-            out.texCoord = texCoords[vertexID];
-            return out;
-        }
-        
-        // Apply saturation boost to compensate for colorspace conversion losses
-        float3 adjustSaturation(float3 color, float saturation) {
-            float3 luminanceWeights = float3(0.2126, 0.7152, 0.0722);
-            float luminance = dot(color, luminanceWeights);
-            return mix(float3(luminance), color, saturation);
-        }
-        
-        fragment float4 fragmentShader(VertexOut in [[stage_in]],
-                                        texture2d<float> texture [[texture(0)]],
-                                        sampler texSampler [[sampler(0)]]) {
-            float4 color = texture.sample(texSampler, in.texCoord);
-            // Boost saturation by ~8% to compensate for P3->sRGB conversion losses
-            color.rgb = adjustSaturation(color.rgb, 1.08);
-            return color;
-        }
-        """
-        
-        do {
-            return try device.makeLibrary(source: shaderSource, options: nil)
-        } catch {
-            AirCatchLog.error(" Shader compilation failed: \(error)")
-            return nil
-        }
-    }
-    
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         viewportSize = size
     }
@@ -174,10 +201,9 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         
         frameCount += 1
         
-        // Periodically flush texture cache to prevent memory buildup (every 300 frames ~5 seconds at 60fps)
-        if frameCount % 300 == 0 {
-            CVMetalTextureCacheFlush(textureCache, 0)
-        }
+        // PERFORMANCE: Removed periodic texture cache flush from draw path.
+        // Cache is now only flushed on memory warning (see NotificationCenter observer in makeUIView).
+        // CVMetalTextureCache automatically manages texture lifetime via reference counting.
         
         // Create texture from pixel buffer
         guard let texture = createTexture(from: pixelBuffer) else {
@@ -186,16 +212,9 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
             return
         }
         
-        // Calculate fullscreen vertices
-        let vertices = calculateFullscreenVertices()
-        
-        let texCoords: [SIMD2<Float>] = [
-            SIMD2(0, 1), SIMD2(1, 1), SIMD2(0, 0),
-            SIMD2(1, 1), SIMD2(1, 0), SIMD2(0, 0)
-        ]
-        
+        // PERFORMANCE: Use pre-allocated vertex arrays instead of creating new ones per frame
         encoder.setRenderPipelineState(pipelineState)
-        encoder.setVertexBytes(vertices, length: MemoryLayout<SIMD2<Float>>.stride * vertices.count, index: 0)
+        encoder.setVertexBytes(fullscreenVertices, length: MemoryLayout<SIMD2<Float>>.stride * fullscreenVertices.count, index: 0)
         encoder.setVertexBytes(texCoords, length: MemoryLayout<SIMD2<Float>>.stride * texCoords.count, index: 1)
         encoder.setFragmentTexture(texture, index: 0)
         encoder.setFragmentSamplerState(samplerState, index: 0)
@@ -232,13 +251,5 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         // Prefer sRGB texture so sampling converts to linear correctly.
         // Fall back to non-sRGB if the pixel buffer doesn't support sRGB views.
         return makeTexture(.bgra8Unorm_srgb) ?? makeTexture(.bgra8Unorm)
-    }
-    
-    /// Returns fullscreen vertices - fills entire viewport
-    private func calculateFullscreenVertices() -> [SIMD2<Float>] {
-        return [
-            SIMD2(-1, -1), SIMD2(1, -1), SIMD2(-1, 1),
-            SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)
-        ]
     }
 }

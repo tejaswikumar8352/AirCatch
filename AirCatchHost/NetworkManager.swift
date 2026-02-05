@@ -24,6 +24,12 @@ final class NetworkManager {
     // Best-effort mapping from client IP -> last seen UDP endpoint (for retransmits)
     private var udpEndpointByHost: [String: NWEndpoint] = [:]
     
+    // PERFORMANCE: Cached connection snapshots to avoid synchronous queue access on every broadcast
+    // Updated atomically when connections change
+    private var cachedUDPConnections: [NWConnection] = []
+    private var cachedRegisteredClients: [NWConnection] = []
+    private let connectionCacheLock = NSLock()
+    
     // MARK: - TCP Components
     private var tcpListener: NWListener?
     private var tcpConnections: [NWConnection] = []
@@ -76,6 +82,9 @@ final class NetworkManager {
             }
             self.prepareUDPConnection(connection)
             connection.start(queue: self.queue)  // Must start the connection to transition to .ready
+            
+            // PERFORMANCE: Update cached connection list
+            self.updateConnectionCache()
         }
 
         listener.start(queue: queue)
@@ -173,26 +182,64 @@ final class NetworkManager {
     }
 
     /// Sends a UDP packet back to a specific endpoint (host reply path).
+    /// PERFORMANCE: Reuses existing connection if available, creates new one only if needed.
     func sendUDP(to endpoint: NWEndpoint, type: PacketType, payload: Data) {
-        let connection = NWConnection(to: endpoint, using: .udp)
-        prepareUDPConnection(connection)
-        connection.start(queue: queue)
+        // Check if we already have a connection to this endpoint in registered clients
+        connectionCacheLock.lock()
+        let existingConnection = cachedRegisteredClients.first { conn in
+            conn.endpoint == endpoint && conn.state == .ready
+        }
+        connectionCacheLock.unlock()
+        
         let datagram = buildDatagram(type: type, payload: payload)
-        connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ error in
-            if let error {
-                AirCatchLog.info("UDP send error: \(error)")
+        
+        if let connection = existingConnection {
+            // Reuse existing connection
+            connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ error in
+                if let error {
+                    AirCatchLog.info("UDP send error: \(error)")
+                }
+            }))
+        } else {
+            // No existing connection - create one but keep it for reuse
+            queue.async { [weak self] in
+                guard let self else { return }
+                
+                let connection = NWConnection(to: endpoint, using: .udp)
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .failed(let error):
+                        AirCatchLog.info("UDP reply connection failed: \(error)")
+                    default:
+                        break
+                    }
+                }
+                connection.start(queue: self.queue)
+                
+                // Send once ready
+                connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ error in
+                    if let error {
+                        AirCatchLog.info("UDP send error: \(error)")
+                    }
+                }))
+                
+                // Add to registered clients for reuse (don't cancel)
+                self.registeredUDPClients.append(connection)
+                self.updateConnectionCache()
             }
-            connection.cancel()
-        }))
+        }
     }
     
     /// Broadcasts a UDP packet to all connected clients.
     func broadcastUDP(type: PacketType, payload: Data) {
         let datagram = buildDatagram(type: type, payload: payload)
         
-        // Thread-safe copy of connections to avoid race conditions
-        let connections = queue.sync { Array(udpConnections) }
-        let registeredClients = queue.sync { Array(registeredUDPClients) }
+        // PERFORMANCE: Use cached connection snapshots instead of synchronous queue access
+        // This avoids blocking the caller (encoder thread) on every frame
+        connectionCacheLock.lock()
+        let connections = cachedUDPConnections
+        let registeredClients = cachedRegisteredClients
+        connectionCacheLock.unlock()
         
         // Log occasionally to debug connection tracking
         if type == .videoFrameChunk && Int.random(in: 0...1000) == 0 {
@@ -209,6 +256,14 @@ final class NetworkManager {
         for connection in registeredClients where connection.state == .ready {
             connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ _ in }))
         }
+    }
+    
+    /// PERFORMANCE: Updates the cached connection snapshots. Call this when connections change.
+    private func updateConnectionCache() {
+        connectionCacheLock.lock()
+        cachedUDPConnections = Array(udpConnections)
+        cachedRegisteredClients = Array(registeredUDPClients)
+        connectionCacheLock.unlock()
     }
     
     /// Registers a client endpoint for UDP broadcasting (called when receiving UDP packets from clients)
@@ -238,6 +293,9 @@ final class NetworkManager {
             }
             connection.start(queue: self.queue)
             self.registeredUDPClients.append(connection)
+            
+            // PERFORMANCE: Update cached connection list
+            self.updateConnectionCache()
             
             #if DEBUG
             AirCatchLog.info(" Registered UDP client: \(endpoint)")
@@ -323,6 +381,9 @@ final class NetworkManager {
         
         registeredUDPClients.forEach { $0.cancel() }
         registeredUDPClients.removeAll()
+        
+        // PERFORMANCE: Clear cached connection lists
+        updateConnectionCache()
         
         udpReceiveHandler = nil
     }
