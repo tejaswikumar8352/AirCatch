@@ -3,6 +3,8 @@
 //  AirCatchClient
 //
 //  WebSocket client for connecting to remote relay server.
+//  Supports dual-channel mode: separate sockets for video and control/audio
+//  to prevent head-of-line blocking.
 //
 
 import Foundation
@@ -13,9 +15,16 @@ final class RelayClient: NSObject, ObservableObject {
     
     // MARK: - Properties
     
-    private var webSocketTask: URLSessionWebSocketTask?
+    // Dual-channel WebSocket connections
+    private var videoSocketTask: URLSessionWebSocketTask?
+    private var controlSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession!
     private let delegateQueue = OperationQueue()
+    private var serverURL: URL?
+    
+    // Track which channels are connected
+    private var videoConnected = false
+    private var controlConnected = false
     
     @Published private(set) var isConnected = false
     @Published private(set) var hostConnected = false
@@ -26,7 +35,8 @@ final class RelayClient: NSObject, ObservableObject {
     var onDisconnected: ((Error?) -> Void)?
     var onHostConnected: (() -> Void)?
     var onHostDisconnected: (() -> Void)?
-    var onDataReceived: ((Data) -> Void)?
+    var onDataReceived: ((Data) -> Void)?       // Video data from video channel
+    var onControlReceived: ((Data) -> Void)?    // Control/audio data from control channel
     var onError: ((String) -> Void)?
     
     // MARK: - Initialization
@@ -40,6 +50,7 @@ final class RelayClient: NSObject, ObservableObject {
     // MARK: - Connection
     
     /// Connect to relay server and join a room as client
+    /// Uses single combined socket for compatibility with older servers
     /// - Parameters:
     ///   - serverURL: WebSocket URL (e.g., "ws://1.2.3.4:8080")
     ///   - roomCode: Room code from host
@@ -54,25 +65,33 @@ final class RelayClient: NSObject, ObservableObject {
             return
         }
         
+        self.serverURL = url
         self.roomCode = roomCode.uppercased()
         
-        // Cancel existing connection
+        // Cancel existing connections
         disconnect()
         
-        // Create WebSocket connection
+        // Use single combined socket for compatibility
+        // (Dual-channel mode requires updated server)
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         
-        webSocketTask = urlSession.webSocketTask(with: request)
-        webSocketTask?.resume()
+        controlSocketTask = urlSession.webSocketTask(with: request)
+        videoSocketTask = controlSocketTask  // Share same socket
+        
+        controlSocketTask?.resume()
         
         AirCatchLog.info("🔗 Connecting to relay server: \(serverURL) with room: \(self.roomCode)")
     }
     
     /// Disconnect from relay server
     func disconnect() {
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
+        videoSocketTask?.cancel(with: .goingAway, reason: nil)
+        controlSocketTask?.cancel(with: .goingAway, reason: nil)
+        videoSocketTask = nil
+        controlSocketTask = nil
+        videoConnected = false
+        controlConnected = false
         DispatchQueue.main.async {
             self.isConnected = false
             self.hostConnected = false
@@ -81,19 +100,19 @@ final class RelayClient: NSObject, ObservableObject {
     
     // MARK: - Data Transmission
     
-    /// Send binary data to host through relay
+    /// Send binary data to host through control channel
     func send(data: Data) {
         guard isConnected else { return }
         
-        webSocketTask?.send(.data(data)) { [weak self] error in
+        controlSocketTask?.send(.data(data)) { [weak self] error in
             if let error = error {
                 AirCatchLog.error("Relay send error: \(error)")
-                self?.handleDisconnect(error: error)
+                self?.handleDisconnect(error: error, channel: "control")
             }
         }
     }
     
-    /// Send a packet (type + payload) through relay
+    /// Send a packet (type + payload) through relay - routes to appropriate channel
     func send(type: PacketType, payload: Data) {
         var packet = Data()
         packet.append(type.rawValue)
@@ -106,17 +125,25 @@ final class RelayClient: NSObject, ObservableObject {
         packet.append(UInt8(length & 0xFF))
         
         packet.append(payload)
+        
+        // All client sends go to control channel (input events, handshakes, etc.)
         send(data: packet)
     }
     
     // MARK: - Private Methods
     
-    private func registerAsClient() {
-        let registration: [String: Any] = [
+    private func registerAsClient(task: URLSessionWebSocketTask, channel: String) {
+        // Only include channel if using dual-channel mode (separate sockets)
+        var registration: [String: Any] = [
             "type": "register",
             "role": "client",
             "roomCode": roomCode
         ]
+        
+        // For backward compatibility, only include channel if not combined mode
+        if channel != "combined" && videoSocketTask !== controlSocketTask {
+            registration["channel"] = channel
+        }
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: registration),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
@@ -124,9 +151,9 @@ final class RelayClient: NSObject, ObservableObject {
             return
         }
         
-        webSocketTask?.send(.string(jsonString)) { [weak self] error in
+        task.send(.string(jsonString)) { [weak self] error in
             if let error = error {
-                AirCatchLog.error("Registration send error: \(error)")
+                AirCatchLog.error("Registration send error (\(channel)): \(error)")
                 self?.onError?("Failed to register with relay server")
             }
         }
@@ -134,39 +161,45 @@ final class RelayClient: NSObject, ObservableObject {
         AirCatchLog.info("📤 Sent client registration for room: \(roomCode)")
     }
     
-    private func receiveMessages() {
-        webSocketTask?.receive { [weak self] result in
+    private func receiveMessages(from task: URLSessionWebSocketTask, channel: String) {
+        task.receive { [weak self] result in
             guard let self = self else { return }
             
             switch result {
             case .success(let message):
-                self.handleMessage(message)
+                self.handleMessage(message, channel: channel)
                 // Continue receiving
-                self.receiveMessages()
+                self.receiveMessages(from: task, channel: channel)
                 
             case .failure(let error):
-                AirCatchLog.error("WebSocket receive error: \(error)")
-                self.handleDisconnect(error: error)
+                AirCatchLog.error("WebSocket receive error (\(channel)): \(error)")
+                self.handleDisconnect(error: error, channel: channel)
             }
         }
     }
     
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
+    private func handleMessage(_ message: URLSessionWebSocketTask.Message, channel: String) {
         switch message {
         case .string(let text):
             // JSON control message from server
-            handleControlMessage(text)
+            handleControlMessage(text, channel: channel)
             
         case .data(let data):
-            // Binary data from host (video, audio, etc.)
-            onDataReceived?(data)
+            // Binary data from host
+            // Route to appropriate callback based on channel
+            if channel == "video" {
+                onDataReceived?(data)  // Video data
+            } else {
+                // Control channel receives audio/handshakes - use same callback for backwards compatibility
+                onDataReceived?(data)
+            }
             
         @unknown default:
             break
         }
     }
     
-    private func handleControlMessage(_ text: String) {
+    private func handleControlMessage(_ text: String, channel: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else {
@@ -175,42 +208,65 @@ final class RelayClient: NSObject, ObservableObject {
         
         switch type {
         case "registered":
-            DispatchQueue.main.async {
-                self.isConnected = true
-            }
             let peerConnected = json["peerConnected"] as? Bool ?? false
-            DispatchQueue.main.async {
-                self.hostConnected = peerConnected
+            let registeredChannel = json["channel"] as? String ?? "combined"
+            let isCombinedMode = videoSocketTask === controlSocketTask
+            
+            // Track which channels are connected
+            if isCombinedMode || registeredChannel == "combined" {
+                videoConnected = true
+                controlConnected = true
+            } else if registeredChannel == "video" {
+                videoConnected = true
+            } else if registeredChannel == "control" {
+                controlConnected = true
             }
-            AirCatchLog.info("✅ Registered as client in room \(roomCode), host connected: \(peerConnected)")
-            DispatchQueue.main.async { [weak self] in
-                self?.onConnected?()
-                if peerConnected {
-                    self?.onHostConnected?()
+            
+            AirCatchLog.info("✅ Registered as client in room \(roomCode), host: \(peerConnected)")
+            
+            // Fire callbacks when both channels are connected (or combined mode)
+            if videoConnected && controlConnected {
+                DispatchQueue.main.async { [weak self] in
+                    self?.isConnected = true
+                    if peerConnected && self?.hostConnected == false {
+                        self?.hostConnected = true
+                        self?.onHostConnected?()
+                    } else {
+                        self?.hostConnected = peerConnected
+                    }
+                    self?.onConnected?()
                 }
             }
             
         case "peer_connected":
-            DispatchQueue.main.async {
-                self.hostConnected = true
-            }
-            AirCatchLog.info("🖥️ Host connected to relay")
-            DispatchQueue.main.async { [weak self] in
-                self?.onHostConnected?()
+            let peerChannel = json["channel"] as? String ?? "combined"
+            AirCatchLog.info("🖥️ Host connected (\(peerChannel))")
+            
+            // Fire callback on control channel connection (triggers once)
+            if peerChannel == "control" || peerChannel == "combined" {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if !self.hostConnected {
+                        self.hostConnected = true
+                        self.onHostConnected?()
+                    }
+                }
             }
             
         case "peer_disconnected":
-            DispatchQueue.main.async {
-                self.hostConnected = false
-            }
-            AirCatchLog.info("📴 Host disconnected from relay")
-            DispatchQueue.main.async { [weak self] in
-                self?.onHostDisconnected?()
+            let peerChannel = json["channel"] as? String ?? "combined"
+            AirCatchLog.info("📴 Host disconnected (\(peerChannel))")
+            
+            if peerChannel == "control" || peerChannel == "combined" {
+                DispatchQueue.main.async { [weak self] in
+                    self?.hostConnected = false
+                    self?.onHostDisconnected?()
+                }
             }
             
         case "error":
             let errorMessage = json["message"] as? String ?? "Unknown error"
-            AirCatchLog.error("Relay error: \(errorMessage)")
+            AirCatchLog.error("Relay error (\(channel)): \(errorMessage)")
             DispatchQueue.main.async { [weak self] in
                 self?.onError?(errorMessage)
             }
@@ -220,13 +276,24 @@ final class RelayClient: NSObject, ObservableObject {
         }
     }
     
-    private func handleDisconnect(error: Error?) {
-        DispatchQueue.main.async {
-            self.isConnected = false
-            self.hostConnected = false
+    private func handleDisconnect(error: Error?, channel: String = "combined") {
+        // Track which channel disconnected
+        if channel == "video" {
+            videoConnected = false
+        } else if channel == "control" {
+            controlConnected = false
+        } else {
+            videoConnected = false
+            controlConnected = false
         }
-        DispatchQueue.main.async { [weak self] in
-            self?.onDisconnected?(error)
+        
+        // If both channels are disconnected, notify
+        if !videoConnected && !controlConnected {
+            DispatchQueue.main.async { [weak self] in
+                self?.isConnected = false
+                self?.hostConnected = false
+                self?.onDisconnected?(error)
+            }
         }
     }
 }
@@ -237,23 +304,41 @@ extension RelayClient: URLSessionWebSocketDelegate {
     
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, 
                     didOpenWithProtocol protocol: String?) {
-        AirCatchLog.info("🔌 WebSocket connected to relay server")
-        registerAsClient()
-        receiveMessages()
+        // Determine channel - combined mode if both sockets are the same
+        let isCombinedMode = videoSocketTask === controlSocketTask
+        let channel: String
+        
+        if isCombinedMode {
+            channel = "combined"
+            videoConnected = true
+            controlConnected = true
+        } else if webSocketTask === videoSocketTask {
+            channel = "video"
+        } else {
+            channel = "control"
+        }
+        
+        AirCatchLog.info("🔌 WebSocket connected (\(channel) channel)")
+        registerAsClient(task: webSocketTask, channel: channel)
+        receiveMessages(from: webSocketTask, channel: channel)
     }
     
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, 
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let isCombinedMode = videoSocketTask === controlSocketTask
+        let channel = isCombinedMode ? "combined" : (webSocketTask === videoSocketTask ? "video" : "control")
         let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "unknown"
-        AirCatchLog.info("WebSocket closed: \(closeCode), reason: \(reasonString)")
-        handleDisconnect(error: nil)
+        AirCatchLog.info("WebSocket closed (\(channel)): \(closeCode), reason: \(reasonString)")
+        handleDisconnect(error: nil, channel: channel)
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, 
                     didCompleteWithError error: Error?) {
         if let error = error {
-            AirCatchLog.error("WebSocket task error: \(error)")
-            handleDisconnect(error: error)
+            let isCombinedMode = videoSocketTask === controlSocketTask
+            let channel = isCombinedMode ? "combined" : ((task as? URLSessionWebSocketTask) === videoSocketTask ? "video" : "control")
+            AirCatchLog.error("WebSocket task error (\(channel)): \(error)")
+            handleDisconnect(error: error, channel: channel)
         }
     }
 }

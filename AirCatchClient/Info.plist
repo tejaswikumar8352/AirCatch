@@ -32,10 +32,7 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AirCatch needs local network access to discover and connect to your Mac.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>AirCatch uses your microphone for voice typing directly to your Mac.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>AirCatch converts your speech to text to type on your Mac.</string>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

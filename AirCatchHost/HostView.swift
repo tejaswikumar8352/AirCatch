@@ -7,14 +7,14 @@ struct HostView: View {
     
     // Relay mode settings
     @AppStorage("useRelayMode") private var useRelayMode = false
-    @AppStorage("relayServerURL") private var relayServerURL = "ws://"
+    @AppStorage("relayServerURL") private var relayServerURL = "ws://3.84.120.156:8080"
     @State private var relayRoomCode = ""
     @State private var isRelayConnected = false
     @State private var isClientConnected = false
     @State private var relayError: String?
     
-    // Relay client instance
-    @StateObject private var relayClient = RelayClient()
+    // Relay client instance (not ObservableObject - state managed via callbacks)
+    @State private var relayClient = RelayClient()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -153,7 +153,7 @@ struct HostView: View {
                 Text("Relay Server")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                TextField("ws://your-ec2-ip:8080", text: $relayServerURL)
+                TextField("ws://3.84.120.156:8080", text: $relayServerURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isRelayConnected)
@@ -270,7 +270,7 @@ struct HostView: View {
     
     private func connectToRelay() {
         relayError = nil
-        relayClient.connect(to: relayServerURL, roomCode: nil)
+        relayClient.connect(to: relayServerURL, roomCode: hostManager.currentPIN)
     }
     
     private func setupRelayCallbacks() {
@@ -309,20 +309,30 @@ struct HostView: View {
         relayClient.onDataReceived = { data in
             // Parse packet and handle via HostManager
             // This will be the input events from client
-            guard data.count >= 5 else { return }
+            AirCatchLog.info("📥 Host received \(data.count) bytes from relay")
+            guard data.count >= 5 else { 
+                AirCatchLog.error("📥 Packet too small: \(data.count) bytes")
+                return 
+            }
             let type = data[0]
             let length = Int(UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4]))
             let payloadStart = 5
             let payloadEnd = min(data.count, payloadStart + length)
-            guard payloadEnd >= payloadStart else { return }
+            guard payloadEnd >= payloadStart else { 
+                AirCatchLog.error("📥 Invalid payload bounds")
+                return 
+            }
             let payload = data[payloadStart..<payloadEnd]
             
             if let packetType = PacketType(rawValue: type) {
+                AirCatchLog.info("📥 Parsed packet type: \(packetType)")
                 let packet = Packet(type: packetType, payload: Data(payload))
                 // Process packet through HostManager (touch, scroll, key events)
                 Task { @MainActor in
                     HostManager.shared.handleRelayPacket(packet)
                 }
+            } else {
+                AirCatchLog.error("📥 Unknown packet type: \(type)")
             }
         }
     }

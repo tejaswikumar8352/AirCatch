@@ -361,10 +361,10 @@ final class InputInjector {
     }
 
     /// Injects a text string directly as keyboard input.
-    /// This is useful for paste operations or speech-to-text where constructing individual key events is inefficient.
+    /// This is useful for paste operations where constructing individual key events is inefficient.
     /// - Parameter text: The string to inject.
     func injectText(_ text: String) {
-        // We support control characters used by incremental speech corrections.
+        // We support control characters used by incremental text corrections.
         // - U+0008 BACKSPACE => deleteBackward (keyCode 51)
         // - U+007F DELETE    => deleteBackward (common in some streams)
         // Normal text is still injected via keyboardSetUnicodeString (chunked).

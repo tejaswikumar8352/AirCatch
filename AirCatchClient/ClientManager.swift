@@ -7,9 +7,10 @@
 
 import Foundation
 import Network
-import Combine
+@preconcurrency import Combine
 import UIKit
 import MultipeerConnectivity
+@preconcurrency import WebRTC
 
 /// Connection state machine
 enum ConnectionState: Equatable {
@@ -103,11 +104,23 @@ final class ClientManager: ObservableObject {
     // REMOVED: @Published var latestFrameData: Data? - Causes SwiftUI thrashing
     
     // High-performance video path (Direct to Metal)
-    let videoFrameSubject = PassthroughSubject<Data, Never>()
+    nonisolated(unsafe) let videoFrameSubject = PassthroughSubject<Data, Never>()
+
+    private nonisolated let udpProcessingQueue = DispatchQueue(
+        label: "com.aircatch.udp.processing",
+        qos: .userInitiated
+    )
+    private nonisolated let videoFrameQueue = DispatchQueue(
+        label: "com.aircatch.video.frames",
+        qos: .userInitiated
+    )
+    private nonisolated let streamingFlag: AtomicBool = .init(false)
+    private nonisolated let audioEnabledFlag: AtomicBool = .init(false)
     
     @Published var discoveredHosts: [DiscoveredHost] = []
     @Published private(set) var connectedHost: DiscoveredHost?
     @Published var screenInfo: HandshakeAck?
+    @Published var webRTCVideoTrack: RTCVideoTrack?
     
     /// Debug: Distance to detected surface
     @Published var debugDistance: Float?
@@ -117,9 +130,53 @@ final class ClientManager: ObservableObject {
     
     /// PIN entered by user for pairing
     @Published var enteredPIN: String = ""
+    @Published var relayPINOverride: String = ""
     
     /// SECURITY: Challenge received from host for PIN verification
     private var pendingAuthChallenge: Data?
+    
+    /// Session token from host for reconnection without PIN (Keychain-backed)
+    private var savedSessionToken: String? {
+        get { Self.loadTokenFromKeychain() }
+        set { Self.saveTokenToKeychain(newValue) }
+    }
+    
+    // MARK: - Keychain Token Storage
+    private static let keychainService = "com.aircatch.sessiontoken"
+    private static let keychainAccount = "sessionToken"
+    
+    private static func saveTokenToKeychain(_ token: String?) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount
+        ]
+        SecItemDelete(query as CFDictionary)
+        
+        guard let token = token, let data = token.data(using: .utf8) else { return }
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+    
+    private static func loadTokenFromKeychain() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
     
     /// Connection mode for video/control.
     @Published var connectionOption: ConnectionOption = .udpPeerToPeerAWDL
@@ -128,7 +185,11 @@ final class ClientManager: ObservableObject {
     @Published private(set) var videoRequested: Bool = false
     
     /// User preference: Stream audio from host
-    @Published var audioEnabled: Bool = false
+    @Published var audioEnabled: Bool = false {
+        didSet {
+            audioEnabledFlag.set(audioEnabled)
+        }
+    }
     
     /// User preference: Optimize streaming for host display resolution
     /// When true, streams at host's native resolution (may require letterboxing on client).
@@ -143,25 +204,32 @@ final class ClientManager: ObservableObject {
     private let bonjourBrowser = BonjourBrowser()
     private let mpcClient = MPCAirCatchClient()
     private let audioPlayer = AudioPlayer()
+
     private let crypto = CryptoManager()  // E2EE decryption
     private var relayClient: RelayClient?
+    private var webRTCSession: WebRTCClientSession?
+    private var webRTCActive: Bool = false
+    private var relayHandshakeSent = false
+    private var lastRelayHandshakeAt: TimeInterval = 0
     private var cancellables = Set<AnyCancellable>()
 
     
     // Video Reassembly
     private let reassembler = VideoReassembler()
+    private lazy var udpStreamProcessor = makeUDPStreamProcessor()
 
     // Telemetry
     private var telemetryTimer: Timer?
     private var lastPingTimestamp: TimeInterval?
     private var lastRttMs: Double = 0
     private var lastReportTimestamp: TimeInterval?
-    private var receivedBytesSinceLastReport: Int = 0
+    private nonisolated let receivedBytesCounter: AtomicInt = .init(0)
     
     private init() {
         setupBonjourCallbacks()
         setupMPCCallbacks()
         setupAutoConnectLogic()
+        audioEnabledFlag.set(audioEnabled)
         // Do not start discovery immediately on init
     }
     
@@ -192,8 +260,10 @@ final class ClientManager: ObservableObject {
         networkManager.stopAll()
         stopTelemetry()
         audioPlayer.stop()
+        streamingFlag.set(false)
         screenInfo = nil
         relayClient = nil
+        stopWebRTCSession()
         
         if shouldRetry {
              attemptReconnect()
@@ -212,9 +282,13 @@ final class ClientManager: ObservableObject {
 
     func startRelaySession(with relayClient: RelayClient) {
         stopDiscovery()
+        stopWebRTCSession()
         self.relayClient = relayClient
+        relayHandshakeSent = false
+        lastRelayHandshakeAt = 0
         pendingRequestVideo = true
         videoRequested = true
+        streamingFlag.set(false)
         state = .connected
         debugConnectionStatus = "Connected (Relay)"
         if audioEnabled {
@@ -226,6 +300,10 @@ final class ClientManager: ObservableObject {
     func stopRelaySession(shouldRestartDiscovery: Bool = true) {
         relayClient = nil
         audioPlayer.stop()
+        streamingFlag.set(false)
+        stopWebRTCSession()
+        relayHandshakeSent = false
+        lastRelayHandshakeAt = 0
         videoRequested = false
         state = .disconnected
         debugConnectionStatus = "Disconnected (Relay)"
@@ -235,12 +313,110 @@ final class ClientManager: ObservableObject {
     }
 
     private func sendRelayHandshake() {
+        let now = Date().timeIntervalSince1970
+        if relayHandshakeSent, now - lastRelayHandshakeAt < 1.0 {
+            #if DEBUG
+            AirCatchLog.info("Skipping duplicate relay handshake", category: .network)
+            #endif
+            return
+        }
+        relayHandshakeSent = true
+        lastRelayHandshakeAt = now
+        AirCatchLog.info("📤 Sending relay handshake to host", category: .network)
         let request = makeHandshakeRequest(authResponse: nil, connectionMode: nil)
         if let data = try? JSONEncoder().encode(request) {
+            AirCatchLog.info("📤 Handshake data size: \(data.count) bytes", category: .network)
             sendControl(type: .handshake, payload: data)
         }
     }
-    
+
+    // MARK: - WebRTC (Relay Video)
+
+    private func ensureWebRTCSession() -> WebRTCClientSession {
+        if let session = webRTCSession {
+            return session
+        }
+
+        let session = WebRTCClientSession(iceServerURLs: AirCatchConfig.webrtcIceServerURLs)
+        session.onSignal = { [weak self] message in
+            self?.sendWebRTCSignal(message)
+        }
+        session.onRemoteVideoTrack = { [weak self] track in
+            Task { @MainActor in
+                self?.webRTCVideoTrack = track
+                self?.setStreamingStateIfNeeded(debugStatus: "Streaming (WebRTC)")
+            }
+        }
+        session.onConnectionStateChange = { [weak self] state in
+            Task { @MainActor in
+                self?.handleWebRTCStateChange(state)
+            }
+        }
+        
+        session.onDataReceived = { [weak self] data in
+            guard let self else { return }
+             // PERFORMANCE: Received audio/control via WebRTC Data Channel (UDP)
+             // Parsing manual packet format: [Type: 1] [Length: 4] [Payload: N]
+             guard data.count >= 5 else { return }
+             
+             let typeVal = data[0]
+             guard let type = PacketType(rawValue: typeVal) else { return }
+             
+             // Parse BigEndian length
+             // Parse BigEndian length
+             let b1 = UInt32(data[1])
+             let b2 = UInt32(data[2])
+             let b3 = UInt32(data[3])
+             let b4 = UInt32(data[4])
+             let length = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4
+             
+             guard data.count >= 5 + Int(length) else { return }
+             let payload = data.subdata(in: 5..<5+Int(length))
+             
+             // Process exactly like a TCP/UDP packet
+             let packet = Packet(type: type, payload: payload)
+             self.udpStreamProcessor.handle(packet)
+        }
+
+        webRTCSession = session
+        return session
+    }
+
+    private func handleWebRTCSignal(_ payload: Data) {
+        guard let message = try? JSONDecoder().decode(WebRTCSignalMessage.self, from: payload) else {
+            AirCatchLog.error("WebRTC: Failed to decode signal", category: .network)
+            return
+        }
+        let session = ensureWebRTCSession()
+        session.handleRemoteSignal(message)
+    }
+
+    private func sendWebRTCSignal(_ message: WebRTCSignalMessage) {
+        guard let relay = relayClient, relay.isConnected else { return }
+        guard let data = try? JSONEncoder().encode(message) else { return }
+        relay.send(type: .webrtcSignal, payload: data)
+    }
+
+    private func handleWebRTCStateChange(_ state: RTCPeerConnectionState) {
+        switch state {
+        case .connected:
+            webRTCActive = true
+        case .failed, .disconnected, .closed:
+            webRTCActive = false
+            webRTCVideoTrack = nil
+        default:
+            break
+        }
+    }
+
+    private func stopWebRTCSession() {
+        webRTCSession?.close()
+        webRTCSession = nil
+        webRTCVideoTrack = nil
+        webRTCActive = false
+    }
+
+
     // MARK: - Bonjour Setup
     
     private func setupBonjourCallbacks() {
@@ -506,6 +682,9 @@ final class ClientManager: ObservableObject {
         AirCatchLog.info("   Scale: \(scale)x", category: .video)
         #endif
 
+        let relayPIN = isRelay ? relayPINOverride.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let pinValue = relayPIN.isEmpty ? nil : relayPIN
+
         return HandshakeRequest(
             clientName: UIDevice.current.name,
             clientVersion: "2.0",
@@ -523,8 +702,9 @@ final class ClientManager: ObservableObject {
             requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: !isRelay,
-            pin: nil,
+            pin: pinValue,
             authResponse: authResponse,
+            sessionToken: savedSessionToken,  // Send saved token for reconnection
             optimizeForHostDisplay: optimizeForHostDisplay
         )
     }
@@ -542,10 +722,14 @@ final class ClientManager: ObservableObject {
     private func handlePongPacket(_ payload: Data) {
         guard let pong = try? JSONDecoder().decode(PongPacket.self, from: payload) else { return }
         let now = Date().timeIntervalSince1970
-        if let lastPing = lastPingTimestamp {
-            lastRttMs = max(0, (now - lastPing) * 1000.0)
-        } else {
-            lastRttMs = max(0, (now - pong.pingTimestamp) * 1000.0)
+        
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let lastPing = self.lastPingTimestamp {
+                self.lastRttMs = max(0, (now - lastPing) * 1000.0)
+            } else {
+                self.lastRttMs = max(0, (now - pong.pingTimestamp) * 1000.0)
+            }
         }
     }
 
@@ -567,10 +751,11 @@ final class ClientManager: ObservableObject {
         lastPingTimestamp = nil
         lastRttMs = 0
         lastReportTimestamp = nil
-        receivedBytesSinceLastReport = 0
+        _ = receivedBytesCounter.swap(0)
     }
 
     private func sendPingAndReport() {
+        let usingWebRTC = webRTCActive || webRTCVideoTrack != nil
         let now = Date().timeIntervalSince1970
         lastPingTimestamp = now
         let ping = PingPacket(timestamp: now)
@@ -578,17 +763,21 @@ final class ClientManager: ObservableObject {
             sendControl(type: .ping, payload: data)
         }
 
+        let bytesSinceLastReport = receivedBytesCounter.swap(0)
         let estimatedBandwidth: Int?
         if let lastReportTimestamp {
             let elapsed = max(0.001, now - lastReportTimestamp)
-            let bps = Int(Double(receivedBytesSinceLastReport * 8) / elapsed)
+            let bps = Int(Double(bytesSinceLastReport * 8) / elapsed)
             estimatedBandwidth = bps
         } else {
             estimatedBandwidth = nil
         }
 
         lastReportTimestamp = now
-        receivedBytesSinceLastReport = 0
+
+        if usingWebRTC {
+            return
+        }
 
         let report = QualityReport(
             droppedFrames: 0,
@@ -699,13 +888,17 @@ final class ClientManager: ObservableObject {
         }
         
         // Connect UDP for video frames
+        let udpProcessor = udpStreamProcessor
+        let udpProcessingQueue = udpProcessingQueue
         networkManager.connectUDP(
             to: hostIP,
             port: udpPort,
             includePeerToPeer: connectionOption.includePeerToPeer,
             requiredInterfaceType: nil
         ) { packet, _ in
-            ClientManager.shared.handleUDPPacket(packet)
+            udpProcessingQueue.async {
+                udpProcessor.handle(packet)
+            }
         }
         
         // Send a dummy UDP packet to "punch a hole" / register the connection with the Host listener
@@ -745,6 +938,22 @@ final class ClientManager: ObservableObject {
     }
 
     private func sendControl(type: PacketType, payload: Data) {
+        // PERFORMANCE: Prefer WebRTC Data Channel (UDP) for lowest latency
+        if let webrtc = webRTCSession, webrtc.isDataChannelOpen {
+            // Reconstruct packet with headers (Type + Length) to match Host's expected format
+            var packet = Data()
+            packet.append(type.rawValue)
+            let length = UInt32(payload.count)
+            packet.append(UInt8((length >> 24) & 0xFF))
+            packet.append(UInt8((length >> 16) & 0xFF))
+            packet.append(UInt8((length >> 8) & 0xFF))
+            packet.append(UInt8(length & 0xFF))
+            packet.append(payload)
+            
+            webrtc.sendData(packet)
+            return
+        }
+
         if let relay = relayClient, relay.isConnected {
             relay.send(type: type, payload: payload)
             return
@@ -794,7 +1003,10 @@ final class ClientManager: ObservableObject {
                 #endif
                 return
             }
-            videoFrameSubject.send(frameData)
+            let subject = UncheckedSendable(videoFrameSubject)
+            videoFrameQueue.async {
+                subject.value.send(frameData)
+            }
             setStreamingStateIfNeeded(debugStatus: "Streaming (TCP)")
         case .pairingFailed:
             // Wrong PIN - disconnect and show error
@@ -828,17 +1040,24 @@ final class ClientManager: ObservableObject {
     /// Handle packets received from the relay server (video/audio from Host)
     /// Note: Relay packets are NOT encrypted since there's no PIN-based key exchange in relay mode
     func handleRelayPacket(_ packet: Packet) {
+        let videoFrameQueue = videoFrameQueue
+        let videoFrameSubject = UncheckedSendable(videoFrameSubject)
+        let usingWebRTC = webRTCVideoTrack != nil || webRTCActive
         switch packet.type {
         case .videoFrame:
+            if usingWebRTC { return }
             recordIncomingBytes(packet.payload.count)
             // Relay mode: no encryption, use payload directly
-            videoFrameSubject.send(packet.payload)
+            videoFrameQueue.async {
+                videoFrameSubject.value.send(packet.payload)
+            }
             setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
         case .pong:
             handlePongPacket(packet.payload)
         case .ping:
             handlePingPacket(packet.payload)
         case .videoFrameChunk:
+            if usingWebRTC { return }
             recordIncomingBytes(packet.payload.count)
             // Handle chunked video via reassembler (no decryption needed for relay)
             reassembler.process(
@@ -854,7 +1073,9 @@ final class ClientManager: ObservableObject {
                 onComplete: { [weak self] frameData in
                     guard let self = self else { return }
                     // Relay mode: no encryption, use frame directly
-                    self.videoFrameSubject.send(frameData)
+                    videoFrameQueue.async {
+                        videoFrameSubject.value.send(frameData)
+                    }
                     self.setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
                 }
             )
@@ -865,6 +1086,15 @@ final class ClientManager: ObservableObject {
             }
         case .handshakeAck:
             handleHandshakeAck(packet.payload)
+        case .webrtcSignal:
+            handleWebRTCSignal(packet.payload)
+        case .pairingFailed:
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.state = .error("Wrong PIN")
+                self.enteredPIN = ""
+                self.stopRelaySession(shouldRestartDiscovery: false)
+            }
         case .disconnect:
             // Host disconnected from relay
             DispatchQueue.main.async { [weak self] in
@@ -877,96 +1107,61 @@ final class ClientManager: ObservableObject {
         }
     }
     
-    private var udpPacketCount = 0
-    
-    private func handleUDPPacket(_ packet: Packet) {
-        udpPacketCount += 1
-        #if DEBUG
-        if udpPacketCount <= 5 {
-            AirCatchLog.info(" Received UDP packet #\(udpPacketCount): type=\(packet.type)")
+    private func startStreamingIfNeeded() {
+        guard state == .connected else {
+            streamingFlag.set(false)
+            return
         }
-        #endif
-        
-        switch packet.type {
-        case .videoFrame:
-            recordIncomingBytes(packet.payload.count)
-            // SECURITY: Decrypt UDP complete frame - reject if decryption fails
-            guard let frameData = crypto.decrypt(packet.payload) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: UDP video frame decryption failed - dropping packet", category: .video)
-                #endif
-                return
-            }
-            videoFrameSubject.send(frameData)
-            updateStreamingState()
-            
-        case .videoFrameChunk:
-            recordIncomingBytes(packet.payload.count)
-            // Handle fragmented video frame (chunks are already encrypted as a whole frame)
-            handleVideoChunk(packet.payload)
-            
-        case .audioPCM:
-            recordIncomingBytes(packet.payload.count)
-            // SECURITY: Decrypt audio packet - reject if decryption fails
-            guard let audioData = crypto.decrypt(packet.payload) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: UDP audio decryption failed - dropping packet", category: .general)
-                #endif
-                return
-            }
-            audioPlayer.playAudioPacket(audioData)
-            
-        default:
-            break
+        state = .streaming
+        reconnectAttempts = 0 // Reset success
+        debugConnectionStatus = "Streaming (UDP)"
+        if audioEnabled {
+            audioPlayer.start()
         }
     }
     
-    private func updateStreamingState() {
-        if state == .connected {
+    private func makeUDPStreamProcessor() -> UDPStreamProcessor {
+        let videoFrameQueue = videoFrameQueue
+        let videoFrameSubject = UncheckedSendable(videoFrameSubject)
+        let audioEnabledFlag = audioEnabledFlag
+        let streamingFlag = streamingFlag
+        let crypto = crypto
+        let reassembler = reassembler
+        let audioPlayer = audioPlayer
+        let recordBytes: (Int) -> Void = { [receivedBytesCounter] count in
+            receivedBytesCounter.add(count)
+        }
+        let onFrame: (Data) -> Void = { data in
+            videoFrameQueue.async {
+                videoFrameSubject.value.send(data)
+            }
+        }
+        let onStreamingStart: () -> Void = { [weak self] in
             Task { @MainActor in
-                state = .streaming
-                reconnectAttempts = 0 // Reset success
-                debugConnectionStatus = "Streaming (UDP)"
-                audioPlayer.start()
+                self?.startStreamingIfNeeded()
             }
         }
-    }
-    
-    private func handleVideoChunk(_ data: Data) {
-        guard data.count > 8 else { return }
-        // Safe byte-by-byte parsing to avoid unaligned memory access crashes
-        let frameId = UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3])
-        let chunkIdx = Int(UInt16(data[4]) << 8 | UInt16(data[5]))
-        
-        if frameId % 60 == 0 && chunkIdx == 0 {
-             // AirCatchLog.info(" Rx Chunk: F\(frameId) C\(chunkIdx)") -- Removed for performance
-        }
-        
-        reassembler.process(
-            chunk: data,
-            losslessEnabled: true,
-            onNack: { [weak self] frameId, missingChunkIndices in
-                guard let self else { return }
-                guard !missingChunkIndices.isEmpty else { return }
-                let request = VideoChunkNackRequest(frameId: frameId, missingChunkIndices: missingChunkIndices)
-                if let payload = try? JSONEncoder().encode(request) {
+        let onNack: (UInt32, [UInt16]) -> Void = { [weak self] frameId, missingChunkIndices in
+            guard let self else { return }
+            guard !missingChunkIndices.isEmpty else { return }
+            let request = VideoChunkNackRequest(frameId: frameId, missingChunkIndices: missingChunkIndices)
+            if let payload = try? JSONEncoder().encode(request) {
+                Task { @MainActor in
                     self.sendControl(type: .videoFrameChunkNack, payload: payload)
                 }
-            },
-            onComplete: { [weak self] fullFrame in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                // SECURITY: Decrypt reassembled frame - reject if decryption fails
-                guard let decryptedFrame = self.crypto.decrypt(fullFrame) else {
-                    #if DEBUG
-                    AirCatchLog.error("E2EE: Reassembled frame decryption failed - dropping", category: .video)
-                    #endif
-                    return
-                }
-                self.videoFrameSubject.send(decryptedFrame)
-                self.updateStreamingState()
             }
-        })
+        }
+        return UDPStreamProcessor(
+            crypto: crypto,
+            reassembler: reassembler,
+            audioPlayer: audioPlayer,
+            audioEnabled: audioEnabledFlag,
+            streamingState: streamingFlag,
+            recordIncomingBytes: recordBytes,
+            onFrame: onFrame,
+            onStreamingStart: onStreamingStart,
+            onNack: onNack
+        )
     }
 
     
@@ -978,9 +1173,18 @@ final class ClientManager: ObservableObject {
             return
         }
         
+        // Save session token for future reconnections without PIN
+        if let token = ack.sessionToken {
+            savedSessionToken = token
+            #if DEBUG
+            AirCatchLog.info("🔐 Saved session token for reconnection")
+            #endif
+        }
+        
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.screenInfo = ack
+            self.streamingFlag.set(false)
             self.state = .connected
             self.startTelemetry()
         }
@@ -1023,7 +1227,8 @@ final class ClientManager: ObservableObject {
         // macOS interprets cmd+scroll as zoom in many apps
         let zoomDelta = (scale - 1.0) * 10.0  // Convert scale to scroll-like delta
         let event = ScrollEvent(deltaX: 0, deltaY: zoomDelta)
-        if let data = try? JSONEncoder().encode(event) {
+        // PERFORMANCE: Use cached encoder
+        if let data = try? Self.jsonEncoder.encode(event) {
             sendControl(type: .scrollEvent, payload: data)
         }
     }
@@ -1032,7 +1237,8 @@ final class ClientManager: ObservableObject {
     func sendScrollEvent(deltaX: Double, deltaY: Double) {
         guard state == .connected || state == .streaming else { return }
         let event = ScrollEvent(deltaX: deltaX, deltaY: deltaY)
-        if let data = try? JSONEncoder().encode(event) {
+        // PERFORMANCE: Use cached encoder
+        if let data = try? Self.jsonEncoder.encode(event) {
             sendControl(type: .scrollEvent, payload: data)
         }
     }
@@ -1046,7 +1252,25 @@ final class ClientManager: ObservableObject {
             modifiers: modifiers,
             isKeyDown: isKeyDown
         )
-        if let data = try? JSONEncoder().encode(event) {
+        // PERFORMANCE: Use cached encoder
+        if let data = try? Self.jsonEncoder.encode(event) {
+            sendControl(type: .keyEvent, payload: data)
+        }
+    }
+    
+    /// Sends a text injection event for multi-character input (paste).
+    /// PERFORMANCE: Sends entire string in one event instead of per-character key events.
+    func sendTextInjection(_ text: String) {
+        guard state == .connected || state == .streaming else { return }
+        guard !text.isEmpty else { return }
+        // KeyCode 0 + character string signals text injection on host
+        let event = KeyEvent(
+            keyCode: 0,
+            character: text,
+            modifiers: [],
+            isKeyDown: true
+        )
+        if let data = try? Self.jsonEncoder.encode(event) {
             sendControl(type: .keyEvent, payload: data)
         }
     }
@@ -1055,13 +1279,16 @@ final class ClientManager: ObservableObject {
     func sendMediaKeyEvent(mediaKey: Int32, keyCode: UInt16) {
         guard state == .connected || state == .streaming else { return }
         let event = MediaKeyEvent(mediaKey: mediaKey, keyCode: keyCode)
-        if let data = try? JSONEncoder().encode(event) {
+        // PERFORMANCE: Use cached encoder
+        if let data = try? Self.jsonEncoder.encode(event) {
             sendControl(type: .mediaKeyEvent, payload: data)
         }
     }
 
-    private func recordIncomingBytes(_ count: Int) {
-        receivedBytesSinceLastReport += count
+    private nonisolated func recordIncomingBytes(_ count: Int) {
+        Task { @MainActor in
+            receivedBytesCounter.add(count)
+        }
     }
 
     private nonisolated func setStreamingStateIfNeeded(debugStatus: String) {
@@ -1077,12 +1304,187 @@ final class ClientManager: ObservableObject {
 
 }
 
+private struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
+private final class AtomicBool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool
+
+    nonisolated init(_ value: Bool) {
+        self.value = value
+    }
+
+    func get() -> Bool {
+        lock.lock()
+        let current = value
+        lock.unlock()
+        return current
+    }
+
+    func set(_ newValue: Bool) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func compareAndSet(expected: Bool, newValue: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if value == expected {
+            value = newValue
+            return true
+        }
+        return false
+    }
+}
+
+private final class AtomicInt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Int
+
+    nonisolated init(_ value: Int) {
+        self.value = value
+    }
+
+    func add(_ delta: Int) {
+        lock.lock()
+        value += delta
+        lock.unlock()
+    }
+
+    func swap(_ newValue: Int) -> Int {
+        lock.lock()
+        let oldValue = value
+        value = newValue
+        lock.unlock()
+        return oldValue
+    }
+}
+
+private final class UDPStreamProcessor {
+    private let crypto: CryptoManager
+    private let reassembler: VideoReassembler
+    private let audioPlayer: AudioPlayer
+    private let audioEnabled: AtomicBool
+    private let streamingState: AtomicBool
+    private let recordIncomingBytes: (Int) -> Void
+    private let onFrame: (Data) -> Void
+    private let onStreamingStart: () -> Void
+    private let onNack: (UInt32, [UInt16]) -> Void
+    private var udpPacketCount = 0
+
+    init(
+        crypto: CryptoManager,
+        reassembler: VideoReassembler,
+        audioPlayer: AudioPlayer,
+        audioEnabled: AtomicBool,
+        streamingState: AtomicBool,
+        recordIncomingBytes: @escaping (Int) -> Void,
+        onFrame: @escaping (Data) -> Void,
+        onStreamingStart: @escaping () -> Void,
+        onNack: @escaping (UInt32, [UInt16]) -> Void
+    ) {
+        self.crypto = crypto
+        self.reassembler = reassembler
+        self.audioPlayer = audioPlayer
+        self.audioEnabled = audioEnabled
+        self.streamingState = streamingState
+        self.recordIncomingBytes = recordIncomingBytes
+        self.onFrame = onFrame
+        self.onStreamingStart = onStreamingStart
+        self.onNack = onNack
+    }
+
+    func handle(_ packet: Packet) {
+        udpPacketCount += 1
+        #if DEBUG
+        if udpPacketCount <= 5 {
+            AirCatchLog.info(" Received UDP packet #\(udpPacketCount): type=\(packet.type)")
+        }
+        #endif
+
+        switch packet.type {
+        case .videoFrame:
+            recordIncomingBytes(packet.payload.count)
+            guard let frameData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: UDP video frame decryption failed - dropping packet", category: .video)
+                #endif
+                return
+            }
+            onFrame(frameData)
+            markStreamingIfNeeded()
+
+        case .videoFrameChunk:
+            recordIncomingBytes(packet.payload.count)
+            handleVideoChunk(packet.payload)
+
+        case .audioPCM:
+            recordIncomingBytes(packet.payload.count)
+            guard audioEnabled.get() else { return }
+            guard let audioData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: UDP audio decryption failed - dropping packet", category: .general)
+                #endif
+                return
+            }
+            audioPlayer.playAudioPacket(audioData)
+
+        default:
+            break
+        }
+    }
+
+    private func markStreamingIfNeeded() {
+        if streamingState.compareAndSet(expected: false, newValue: true) {
+            onStreamingStart()
+        }
+    }
+
+    private func handleVideoChunk(_ data: Data) {
+        guard data.count > 8 else { return }
+        let frameId = UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3])
+        let chunkIdx = Int(UInt16(data[4]) << 8 | UInt16(data[5]))
+
+        if frameId % 60 == 0 && chunkIdx == 0 {
+            // AirCatchLog.info(" Rx Chunk: F\(frameId) C\(chunkIdx)") -- Removed for performance
+        }
+
+        reassembler.process(
+            chunk: data,
+            losslessEnabled: true,
+            onNack: { [weak self] frameId, missingChunkIndices in
+                self?.onNack(frameId, missingChunkIndices)
+            },
+            onComplete: { [weak self] fullFrame in
+                guard let self else { return }
+                guard let decryptedFrame = self.crypto.decrypt(fullFrame) else {
+                    #if DEBUG
+                    AirCatchLog.error("E2EE: Reassembled frame decryption failed - dropping", category: .video)
+                    #endif
+                    return
+                }
+                self.onFrame(decryptedFrame)
+                self.markStreamingIfNeeded()
+            }
+        )
+    }
+}
+
 // MARK: - Video Reassembler (Thread-Safe)
 
 private final class VideoReassembler {
+    private struct ChunkSlice {
+        let data: Data
+        let payloadRange: Range<Data.Index>
+    }
+
     private struct FrameAssembly {
         var totalChunks: Int
-        var chunks: [Int: Data]
+        var chunks: [Int: ChunkSlice]
         var firstSeenAt: TimeInterval
         var lastNackSentAt: TimeInterval
         var nackedIndices: Set<Int>
@@ -1106,12 +1508,13 @@ private final class VideoReassembler {
         let frameId = UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3])
         let chunkIdx = Int(UInt16(data[4]) << 8 | UInt16(data[5]))
         let totalChunks = Int(UInt16(data[6]) << 8 | UInt16(data[7]))
-        let chunkData = data.subdata(in: 8..<data.count)
+        let payloadRange = 8..<data.count
+        let payloadSize = payloadRange.count
         
         chunkCount += 1
         #if DEBUG
         if chunkCount <= 10 {
-            AirCatchLog.debug(" Chunk \(chunkCount): F\(frameId) C\(chunkIdx)/\(totalChunks) size=\(chunkData.count)")
+            AirCatchLog.debug(" Chunk \(chunkCount): F\(frameId) C\(chunkIdx)/\(totalChunks) size=\(payloadSize)")
         }
         #endif
         
@@ -1134,7 +1537,7 @@ private final class VideoReassembler {
             // Store chunk
             if self.reassemblyBuffer[frameId] == nil {
                 // Pre-allocate dictionary with expected capacity to reduce memory churn
-                var chunksDict = [Int: Data]()
+                var chunksDict = [Int: ChunkSlice]()
                 chunksDict.reserveCapacity(totalChunks)
                 self.reassemblyBuffer[frameId] = FrameAssembly(
                     totalChunks: totalChunks,
@@ -1146,20 +1549,45 @@ private final class VideoReassembler {
             }
             // If totalChunks changes (shouldn't), trust the latest header.
             self.reassemblyBuffer[frameId]?.totalChunks = totalChunks
-            self.reassemblyBuffer[frameId]?.chunks[chunkIdx] = chunkData
+            self.reassemblyBuffer[frameId]?.chunks[chunkIdx] = ChunkSlice(
+                data: data,
+                payloadRange: payloadRange
+            )
             
             // Check completion
             if let assembly = self.reassemblyBuffer[frameId], assembly.chunks.count == totalChunks {
                 // Reassemble
-                var fullFrame = Data()
-                fullFrame.reserveCapacity(assembly.chunks.values.reduce(0) { $0 + $1.count })
-                for i in 0..<totalChunks {
-                    if let part = assembly.chunks[i] {
-                        fullFrame.append(part)
-                    } else {
-                        AirCatchLog.debug(" Missing chunk \(i) for frame \(frameId)")
+                let totalSize = assembly.chunks.values.reduce(0) { $0 + $1.payloadRange.count }
+                var fullFrame = Data(count: totalSize)
+                var success = true
+                fullFrame.withUnsafeMutableBytes { destBuffer in
+                    guard let destBase = destBuffer.baseAddress else {
+                        success = false
                         return
                     }
+                    var offset = 0
+                    for i in 0..<totalChunks {
+                        guard let slice = assembly.chunks[i] else {
+                            AirCatchLog.debug(" Missing chunk \(i) for frame \(frameId)")
+                            success = false
+                            return
+                        }
+                        slice.data.withUnsafeBytes { srcBuffer in
+                            guard let srcBase = srcBuffer.baseAddress else {
+                                success = false
+                                return
+                            }
+                            let start = srcBase.advanced(by: slice.payloadRange.lowerBound)
+                            memcpy(destBase.advanced(by: offset), start, slice.payloadRange.count)
+                        }
+                        if !success {
+                            return
+                        }
+                        offset += slice.payloadRange.count
+                    }
+                }
+                if !success {
+                    return
                 }
                 
                 // Success

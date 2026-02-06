@@ -19,7 +19,7 @@ struct ContentView: View {
     
     // Relay connection state
     @State private var showRelayOverlay = false
-    @AppStorage("relayServerURL") private var relayServerURL = "ws://"
+    @AppStorage("relayServerURL") private var relayServerURL = "ws://3.84.120.156:8080"
     @State private var relayRoomCode = ""
     @StateObject private var relayClient = RelayClient()
     @State private var relayError: String?
@@ -103,6 +103,7 @@ struct ContentView: View {
                     isConnecting: relayClient.isConnected && !relayClient.hostConnected,
                     onConnect: {
                         relayError = nil
+                        clientManager.relayPINOverride = relayRoomCode
                         relayClient.connect(to: relayServerURL, roomCode: relayRoomCode)
                     },
                     onCancel: {
@@ -144,19 +145,29 @@ struct ContentView: View {
         
         relayClient.onDataReceived = { data in
             // Forward received data to ClientManager for video/audio processing
-            guard data.count >= 5 else { return }
+            AirCatchLog.info("📥 Client received \(data.count) bytes from relay")
+            guard data.count >= 5 else { 
+                AirCatchLog.error("📥 Packet too small: \(data.count) bytes")
+                return 
+            }
             let type = data[0]
             let length = Int(UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4]))
             let payloadStart = 5
             let payloadEnd = min(data.count, payloadStart + length)
-            guard payloadEnd >= payloadStart else { return }
+            guard payloadEnd >= payloadStart else { 
+                AirCatchLog.error("📥 Invalid payload bounds")
+                return 
+            }
             let payload = data[payloadStart..<payloadEnd]
             
             if let packetType = PacketType(rawValue: type) {
+                AirCatchLog.info("📥 Client received packet type: \(packetType)")
                 let packet = Packet(type: packetType, payload: Data(payload))
                 Task { @MainActor in
                     ClientManager.shared.handleRelayPacket(packet)
                 }
+            } else {
+                AirCatchLog.error("📥 Unknown packet type: \(type)")
             }
         }
     }
@@ -535,7 +546,7 @@ private struct RelayConnectOverlay: View {
                         Text("Relay Server")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("ws://your-ec2-ip:8080", text: $serverURL)
+                        TextField("ws://3.84.120.156:8080", text: $serverURL)
                             .textFieldStyle(.roundedBorder)
                             .keyboardType(.URL)
                             .autocorrectionDisabled()
@@ -544,7 +555,7 @@ private struct RelayConnectOverlay: View {
                     }
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Room Code (from Host)")
+                        Text("Room Code / Master Code")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TextField("XXXXXX", text: $roomCode)
@@ -583,10 +594,11 @@ private struct RelayConnectOverlay: View {
                     Button("Cancel", action: onCancel)
                         .buttonStyle(.bordered)
                     
+                    let hasRoomCode = roomCode.count == 6
                     Button("Connect", action: onConnect)
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
-                        .disabled(serverURL.count < 10 || roomCode.count != 6 || isConnecting)
+                        .disabled(serverURL.count < 10 || !hasRoomCode || isConnecting)
                 }
             }
             .padding(24)

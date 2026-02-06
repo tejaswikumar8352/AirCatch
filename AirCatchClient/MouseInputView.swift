@@ -29,6 +29,12 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     private var twoFingerPanGesture: UIPanGestureRecognizer?
     private var activeTouchCount: Int = 0
     
+    // PERFORMANCE: Throttle continuous events to 60Hz (16.67ms)
+    private var lastMoveTime: CFTimeInterval = 0
+    private var lastPanTime: CFTimeInterval = 0
+    private var lastPinchTime: CFTimeInterval = 0
+    private let throttleInterval: CFTimeInterval = 1.0 / 60.0  // 60Hz
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupGestures()
@@ -92,8 +98,13 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
         super.touchesMoved(touches, with: event)
         activeTouchCount = event?.allTouches?.count ?? touches.count
         // Only forward single-finger touches for drag
+        // PERFORMANCE: Throttle to 60Hz to reduce event flood on ProMotion displays
         if activeTouchCount == 1 {
-            forwardTouch(touches, phase: .moved)
+            let now = CACurrentMediaTime()
+            if now - lastMoveTime >= throttleInterval {
+                lastMoveTime = now
+                forwardTouch(touches, phase: .moved)
+            }
         }
     }
     
@@ -144,6 +155,14 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     @objc private func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
         case .began, .changed:
+            // PERFORMANCE: Throttle to 60Hz
+            let now = CACurrentMediaTime()
+            guard now - lastPanTime >= throttleInterval else {
+                gesture.setTranslation(.zero, in: self)  // Still reset to get cumulative delta
+                return
+            }
+            lastPanTime = now
+            
             let translation = gesture.translation(in: self)
             // Reset translation so we get delta each time
             gesture.setTranslation(.zero, in: self)
@@ -164,6 +183,13 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         switch gesture.state {
         case .began, .changed:
+            // PERFORMANCE: Throttle to 60Hz
+            let now = CACurrentMediaTime()
+            guard now - lastPinchTime >= throttleInterval else {
+                return
+            }
+            lastPinchTime = now
+            
             let scale = gesture.scale
             let velocity = gesture.velocity
             

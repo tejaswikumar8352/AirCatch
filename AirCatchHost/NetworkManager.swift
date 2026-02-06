@@ -28,6 +28,7 @@ final class NetworkManager {
     // Updated atomically when connections change
     private var cachedUDPConnections: [NWConnection] = []
     private var cachedRegisteredClients: [NWConnection] = []
+    private var cachedTCPConnections: [NWConnection] = []
     private let connectionCacheLock = NSLock()
     
     // MARK: - TCP Components
@@ -268,6 +269,7 @@ final class NetworkManager {
         connectionCacheLock.lock()
         cachedUDPConnections = Array(udpConnections)
         cachedRegisteredClients = Array(registeredUDPClients)
+        cachedTCPConnections = Array(tcpConnections)
         connectionCacheLock.unlock()
     }
     
@@ -316,8 +318,11 @@ final class NetworkManager {
     func broadcastTCP(type: PacketType, payload: Data) {
         let datagram = buildTCPPacket(type: type, payload: payload)
         
-        // Thread-safe copy then send
-        let connections = queue.sync { Array(tcpConnections) }
+        // PERFORMANCE: Use cached snapshot to avoid blocking queue.sync
+        connectionCacheLock.lock()
+        let connections = cachedTCPConnections
+        connectionCacheLock.unlock()
+        
         for connection in connections where connection.state == .ready {
             connection.send(content: datagram, completion: NWConnection.SendCompletion.contentProcessed({ _ in }))
         }

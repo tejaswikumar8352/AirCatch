@@ -5,8 +5,14 @@
  * when they're on different networks.
  * 
  * Protocol:
- * - First message from client is JSON: { "type": "register", "role": "host"|"client", "roomCode": "XXXXXX" }
- * - After registration, all messages are binary data relayed to the paired peer
+ * - First message is JSON: { "type": "register", "role": "host"|"client", "roomCode": "XXXXXX", "channel": "video"|"control" }
+ * - channel is optional for backwards compatibility (defaults to combined video+control)
+ * - After registration, all messages are binary data relayed to the paired peer on same channel
+ * 
+ * Multi-channel support:
+ * - "video" channel: High-bandwidth video frames (can drop under backpressure)
+ * - "control" channel: Low-latency control/audio (never dropped, priority)
+ * - Legacy (no channel): Combined mode, both video and control on same socket
  */
 
 const WebSocket = require('ws');
@@ -14,10 +20,18 @@ const http = require('http');
 
 const PORT = process.env.PORT || 8080;
 
-// Room storage: roomCode -> { host: WebSocket, client: WebSocket }
+// Room storage: roomCode -> { 
+//   host: WebSocket,           // Legacy combined socket
+//   client: WebSocket,         // Legacy combined socket
+//   hostVideo: WebSocket,      // Video-only socket (new)
+//   clientVideo: WebSocket,    // Video-only socket (new)
+//   hostControl: WebSocket,    // Control/audio socket (new)
+//   clientControl: WebSocket   // Control/audio socket (new)
+// }
 const rooms = new Map();
 
 // WebSocket to room mapping for cleanup
+// { roomCode, role, channel } where channel is 'combined'|'video'|'control'
 const wsToRoom = new Map();
 
 const server = http.createServer((req, res) => {
@@ -47,6 +61,7 @@ wss.on('connection', (ws, req) => {
     let registered = false;
     let role = null;
     let roomCode = null;
+    let channel = null; // 'combined', 'video', or 'control'
     
     ws.on('message', (message) => {
         // Handle registration (first message must be JSON)
@@ -74,41 +89,62 @@ wss.on('connection', (ws, req) => {
                 
                 role = data.role;
                 roomCode = data.roomCode.toUpperCase();
+                // Channel defaults to 'combined' for backwards compatibility
+                channel = data.channel || 'combined';
+                if (!['combined', 'video', 'control'].includes(channel)) {
+                    channel = 'combined';
+                }
                 
-                // Get or create room
+                // Get or create room with multi-channel support
                 if (!rooms.has(roomCode)) {
-                    rooms.set(roomCode, { host: null, client: null });
+                    rooms.set(roomCode, { 
+                        host: null, client: null,           // Legacy combined
+                        hostVideo: null, clientVideo: null, // Video channel
+                        hostControl: null, clientControl: null // Control channel
+                    });
                 }
                 
                 const room = rooms.get(roomCode);
                 
-                // Check if role is already taken
-                if (room[role] !== null) {
-                    ws.send(JSON.stringify({ type: 'error', message: `Room ${roomCode} already has a ${role}` }));
+                // Determine socket key based on role and channel
+                const socketKey = channel === 'combined' ? role : `${role}${channel.charAt(0).toUpperCase() + channel.slice(1)}`;
+                
+                // Check if slot is already taken
+                if (room[socketKey] !== null) {
+                    ws.send(JSON.stringify({ type: 'error', message: `Room ${roomCode} already has a ${role} (${channel})` }));
                     ws.close();
                     return;
                 }
                 
                 // Register in room
-                room[role] = ws;
-                wsToRoom.set(ws, { roomCode, role });
+                room[socketKey] = ws;
+                wsToRoom.set(ws, { roomCode, role, channel });
                 registered = true;
                 
-                console.log(`✅ ${role.toUpperCase()} registered in room ${roomCode}`);
+                console.log(`✅ ${role.toUpperCase()} (${channel}) registered in room ${roomCode}`);
+                
+                // Check peer connectivity based on channel
+                const isPeerConnected = channel === 'combined' 
+                    ? room[role === 'host' ? 'client' : 'host'] !== null
+                    : room[role === 'host' ? `client${channel.charAt(0).toUpperCase() + channel.slice(1)}` : `host${channel.charAt(0).toUpperCase() + channel.slice(1)}`] !== null;
                 
                 // Send success response
                 ws.send(JSON.stringify({ 
                     type: 'registered', 
                     role: role,
                     roomCode: roomCode,
-                    peerConnected: room[role === 'host' ? 'client' : 'host'] !== null
+                    channel: channel,
+                    peerConnected: isPeerConnected
                 }));
                 
-                // Notify peer if already connected
-                const peer = room[role === 'host' ? 'client' : 'host'];
+                // Notify peer if already connected (same channel)
+                const peerKey = channel === 'combined'
+                    ? (role === 'host' ? 'client' : 'host')
+                    : (role === 'host' ? `client${channel.charAt(0).toUpperCase() + channel.slice(1)}` : `host${channel.charAt(0).toUpperCase() + channel.slice(1)}`);
+                const peer = room[peerKey];
                 if (peer && peer.readyState === WebSocket.OPEN) {
-                    peer.send(JSON.stringify({ type: 'peer_connected', peerRole: role }));
-                    ws.send(JSON.stringify({ type: 'peer_connected', peerRole: role === 'host' ? 'client' : 'host' }));
+                    peer.send(JSON.stringify({ type: 'peer_connected', peerRole: role, channel: channel }));
+                    ws.send(JSON.stringify({ type: 'peer_connected', peerRole: role === 'host' ? 'client' : 'host', channel: channel }));
                 }
                 
             } catch (e) {
@@ -118,17 +154,34 @@ wss.on('connection', (ws, req) => {
             return;
         }
         
-        // After registration, relay binary data to peer
+        // After registration, relay binary data to peer on same channel
         const roomInfo = wsToRoom.get(ws);
         if (!roomInfo) return;
         
         const room = rooms.get(roomInfo.roomCode);
         if (!room) return;
         
-        const peerRole = roomInfo.role === 'host' ? 'client' : 'host';
-        const peer = room[peerRole];
+        // Determine peer socket key based on channel
+        const peerKey = roomInfo.channel === 'combined'
+            ? (roomInfo.role === 'host' ? 'client' : 'host')
+            : (roomInfo.role === 'host' 
+                ? `client${roomInfo.channel.charAt(0).toUpperCase() + roomInfo.channel.slice(1)}` 
+                : `host${roomInfo.channel.charAt(0).toUpperCase() + roomInfo.channel.slice(1)}`);
+        const peer = room[peerKey];
         
         if (peer && peer.readyState === WebSocket.OPEN) {
+            // BACKPRESSURE: Only apply to video channel
+            // Control channel is always prioritized (never dropped)
+            if (roomInfo.channel === 'video' || roomInfo.channel === 'combined') {
+                const BACKPRESSURE_THRESHOLD = 64 * 1024;
+                const isVideoFrame = message.length > 5 && (message[0] === 0x0C || message[0] === 0x01); // videoFrameChunk or videoFrame
+                
+                if (peer.bufferedAmount > BACKPRESSURE_THRESHOLD && isVideoFrame) {
+                    // Drop video frame to prevent buffer bloat
+                    return;
+                }
+            }
+            
             // Relay the message (binary data) to peer
             peer.send(message);
         }
@@ -141,18 +194,30 @@ wss.on('connection', (ws, req) => {
         if (roomInfo) {
             const room = rooms.get(roomInfo.roomCode);
             if (room) {
-                // Clear this connection from room
-                room[roomInfo.role] = null;
+                // Determine socket key for cleanup
+                const socketKey = roomInfo.channel === 'combined' 
+                    ? roomInfo.role 
+                    : `${roomInfo.role}${roomInfo.channel.charAt(0).toUpperCase() + roomInfo.channel.slice(1)}`;
                 
-                // Notify peer of disconnect
-                const peerRole = roomInfo.role === 'host' ? 'client' : 'host';
-                const peer = room[peerRole];
+                // Clear this connection from room
+                room[socketKey] = null;
+                
+                // Notify peer of disconnect (on same channel)
+                const peerKey = roomInfo.channel === 'combined'
+                    ? (roomInfo.role === 'host' ? 'client' : 'host')
+                    : (roomInfo.role === 'host' 
+                        ? `client${roomInfo.channel.charAt(0).toUpperCase() + roomInfo.channel.slice(1)}` 
+                        : `host${roomInfo.channel.charAt(0).toUpperCase() + roomInfo.channel.slice(1)}`);
+                const peer = room[peerKey];
                 if (peer && peer.readyState === WebSocket.OPEN) {
-                    peer.send(JSON.stringify({ type: 'peer_disconnected', peerRole: roomInfo.role }));
+                    peer.send(JSON.stringify({ type: 'peer_disconnected', peerRole: roomInfo.role, channel: roomInfo.channel }));
                 }
                 
-                // Clean up empty rooms
-                if (room.host === null && room.client === null) {
+                // Clean up empty rooms (all sockets must be null)
+                const allEmpty = !room.host && !room.client && 
+                                 !room.hostVideo && !room.clientVideo && 
+                                 !room.hostControl && !room.clientControl;
+                if (allEmpty) {
                     rooms.delete(roomInfo.roomCode);
                     console.log(`🗑️  Room ${roomInfo.roomCode} deleted (empty)`);
                 }

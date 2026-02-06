@@ -13,6 +13,7 @@ import CryptoKit
 /// This ensures neither network sniffers nor intermediaries can read data.
 final class CryptoManager {
     private var key: SymmetricKey?
+    private let lock = NSLock()
     
     // SECURITY: Use unique, version-tagged salts for different derivation purposes
     private static let encryptionSalt = "AirCatch-E2EE-v2-encryption".data(using: .utf8)!
@@ -42,7 +43,9 @@ final class CryptoManager {
     /// Call this when PIN is generated (host) or entered (client).
     func deriveKey(from pin: String) {
         guard !pin.isEmpty else {
+            lock.lock()
             key = nil
+            lock.unlock()
             return
         }
         
@@ -51,12 +54,15 @@ final class CryptoManager {
         // Use HKDF to derive a strong key from the short PIN
         // Salt ensures different apps with same PIN get different keys
         // Info adds context to the derivation
-        key = HKDF<SHA256>.deriveKey(
+        let derivedKey = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: pinData),
             salt: Self.encryptionSalt,
             info: Self.info,
             outputByteCount: 32  // 256 bits for AES-256
         )
+        lock.lock()
+        key = derivedKey
+        lock.unlock()
         
         #if DEBUG
         AirCatchLog.info("E2EE: Key derived from PIN", category: .network)
@@ -65,18 +71,26 @@ final class CryptoManager {
     
     /// Clears the encryption key (call on disconnect).
     func clearKey() {
+        lock.lock()
         key = nil
+        lock.unlock()
     }
     
     /// Returns true if encryption is ready.
     var isReady: Bool {
-        key != nil
+        lock.lock()
+        let ready = key != nil
+        lock.unlock()
+        return ready
     }
     
     /// Encrypts plaintext data using AES-256-GCM.
     /// Returns: nonce (12) + ciphertext + tag (16), or nil on failure.
     func encrypt(_ plaintext: Data) -> Data? {
-        guard let key = key else {
+        lock.lock()
+        let key = key
+        lock.unlock()
+        guard let key else {
             #if DEBUG
             AirCatchLog.error("E2EE: Encrypt failed - no key", category: .network)
             #endif
@@ -97,7 +111,10 @@ final class CryptoManager {
     /// Decrypts ciphertext (nonce + ciphertext + tag) using AES-256-GCM.
     /// Returns plaintext or nil if decryption fails (wrong key, tampered data).
     func decrypt(_ ciphertext: Data) -> Data? {
-        guard let key = key else {
+        lock.lock()
+        let key = key
+        lock.unlock()
+        guard let key else {
             #if DEBUG
             AirCatchLog.error("E2EE: Decrypt failed - no key", category: .network)
             #endif

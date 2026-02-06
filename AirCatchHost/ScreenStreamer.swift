@@ -11,6 +11,7 @@ import VideoToolbox
 import CoreMedia
 import AppKit
 import IOSurface
+import Accelerate  // PERFORMANCE: SIMD-optimized audio interleaving
 
 /// Captures the screen using ScreenCaptureKit and compresses frames to HEVC.
 final class ScreenStreamer: NSObject {
@@ -39,11 +40,13 @@ final class ScreenStreamer: NSObject {
     
     private var compressionSession: VTCompressionSession?
     private var frameCallback: ((Data) -> Void)?
+    private var rawFrameCallback: ((CVPixelBuffer, CMTime) -> Void)?
+    private var encodeVideo: Bool
     private var audioCallback: ((Data) -> Void)?
     private var cachedVPS: Data?  // HEVC only
     private var cachedSPS: Data?
     private var cachedPPS: Data?
-    private var codecOverride: CodecPreference?
+    private let encodeStateLock = NSLock()
     
     // MARK: - Audio
     
@@ -64,20 +67,22 @@ final class ScreenStreamer: NSObject {
          maxClientWidth: Int? = nil,
          maxClientHeight: Int? = nil,
          targetDisplayID: CGDirectDisplayID? = nil,
-         codecOverride: CodecPreference? = nil,
          audioEnabled: Bool = false,
          optimizeForHostDisplay: Bool = false,
+         encodeVideo: Bool = true,
          onFrame: @escaping (Data) -> Void,
+         onRawFrame: ((CVPixelBuffer, CMTime) -> Void)? = nil,
          onAudio: ((Data) -> Void)? = nil) {
         self.targetFrameRate = targetFrameRate
         self.targetBitrate = targetBitrate
         self.clientWidth = maxClientWidth
         self.clientHeight = maxClientHeight
         self.targetDisplayID = targetDisplayID
-        self.codecOverride = codecOverride
         self.audioEnabled = audioEnabled
         self.optimizeForHostDisplay = optimizeForHostDisplay
+        self.encodeVideo = encodeVideo
         self.frameCallback = onFrame
+        self.rawFrameCallback = onRawFrame
         self.audioCallback = onAudio
         super.init()
     }
@@ -144,8 +149,10 @@ final class ScreenStreamer: NSObject {
 
 
         
-        // 5. Setup compression session
-        try setupCompressionSession(width: width, height: height)
+        // 5. Setup compression session (optional, can be disabled for WebRTC-only)
+        if encodeVideo {
+            try setupCompressionSession(width: width, height: height)
+        }
         
         // 6. Create and start the stream
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
@@ -200,6 +207,20 @@ final class ScreenStreamer: NSObject {
         AirCatchLog.info(" Stopped")
     }
 
+    /// Enable/disable video encoding while keeping capture running.
+    func setEncodingEnabled(_ enabled: Bool) {
+        encodeStateLock.lock()
+        encodeVideo = enabled
+        encodeStateLock.unlock()
+    }
+
+    private func isEncodingEnabled() -> Bool {
+        encodeStateLock.lock()
+        let enabled = encodeVideo
+        encodeStateLock.unlock()
+        return enabled
+    }
+
 
     
     // MARK: - VideoToolbox Compression
@@ -207,14 +228,8 @@ final class ScreenStreamer: NSObject {
     private func setupCompressionSession(width: Int, height: Int) throws {
         var session: VTCompressionSession?
         
-        // Choose codec based on quality preset or override
-        let useHEVC: Bool
-        if let codecOverride {
-            useHEVC = codecOverride != .h264
-        } else {
-            useHEVC = true
-        }
-        let codecType = useHEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
+        // Choose codec: Always HEVC (all iOS 17+ and macOS 14+ devices have hardware support)
+        let codecType = kCMVideoCodecType_HEVC
         
         // Force hardware encoding for best quality and performance
         let encoderSpec: [String: Any] = [
@@ -255,37 +270,18 @@ final class ScreenStreamer: NSObject {
         // Ultra-low latency: process frames immediately
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         
-        if useHEVC {
-            // ----------------------------------------------------------------------
-            // HEVC Main (8-bit) 4:2:0 - Low Latency & Compatibility
-            // ----------------------------------------------------------------------
-            
-            let statusMain = VTSessionSetProperty(session, 
-                                                 key: kVTCompressionPropertyKey_ProfileLevel, 
-                                                 value: kVTProfileLevel_HEVC_Main_AutoLevel)
-            
-            if statusMain == noErr {
-                AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main (8-bit) 4:2:0")
-            } else {
-                AirCatchLog.info(" ⚠️ HEVC Main (8-bit) unavailable (Error: \(statusMain)).")
-            }
-            
+        // HEVC Profile: Main10 (10-bit) for best quality, fallback to Main (8-bit)
+        let statusMain10 = VTSessionSetProperty(session, 
+                                                key: kVTCompressionPropertyKey_ProfileLevel, 
+                                                value: kVTProfileLevel_HEVC_Main10_AutoLevel)
+        
+        if statusMain10 == noErr {
+            AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main10 (10-bit) 4:2:0")
         } else {
-            // Local Mode: Use HEVC Main 10 (4:2:0) as requested for high quality
-            // Replaced 4:2:2 logic with standard Main10 4:2:0
-            
-            let statusMain10 = VTSessionSetProperty(session, 
-                                                    key: kVTCompressionPropertyKey_ProfileLevel, 
-                                                    value: kVTProfileLevel_HEVC_Main10_AutoLevel)
-            
-            if statusMain10 == noErr {
-                AirCatchLog.info(" 🚀 SUCCESS: Encoder configured for HEVC Main 10 (4:2:0) 10-bit")
-            } else {
-                AirCatchLog.info(" ⚠️ HEVC Main 10 unavailable (Error: \(statusMain10)). Falling back to Main (8-bit).")
-                VTSessionSetProperty(session, 
-                                     key: kVTCompressionPropertyKey_ProfileLevel, 
-                                     value: kVTProfileLevel_HEVC_Main_AutoLevel)
-            }
+            AirCatchLog.info(" ⚠️ HEVC Main10 unavailable (Error: \(statusMain10)). Falling back to Main (8-bit).")
+            VTSessionSetProperty(session, 
+                                 key: kVTCompressionPropertyKey_ProfileLevel, 
+                                 value: kVTProfileLevel_HEVC_Main_AutoLevel)
         }
         
         // GOP Configuration (1s) for balanced recovery and compression efficiency
@@ -331,9 +327,7 @@ final class ScreenStreamer: NSObject {
             AirCatchLog.info(" ⚠️ Warning: PrepareToEncodeFrames returned status \(prepareStatus)")
         }
         
-        let codecName = useHEVC ? "HEVC" : "H.264"
-        let profileDesc = useHEVC ? (codecOverride == nil ? "Main10 4:2:0" : "Main 4:2:0") : "High"
-        AirCatchLog.info(" ✅ \(codecName) \(profileDesc) compression session created: \(initialBitrate / 1_000_000)Mbps @ \(targetFrameRate)fps - P3/Rec.709 color space")
+        AirCatchLog.info(" ✅ HEVC Main10 compression session created: \(initialBitrate / 1_000_000)Mbps @ \(targetFrameRate)fps - P3/Rec.709 color space")
         self.compressionSession = session
     }
 
@@ -413,15 +407,6 @@ final class ScreenStreamer: NSObject {
     private func compressFrame(_ sampleBuffer: CMSampleBuffer) {
         compressCount += 1
         
-        guard let session = compressionSession else {
-            #if DEBUG
-            if compressCount <= 3 {
-                AirCatchLog.info(" compressFrame: No compressionSession!")
-            }
-            #endif
-            return
-        }
-        
         // ScreenCaptureKit provides sample buffers with CVPixelBuffers
         // Some callbacks may not have imageBuffer - just skip them silently
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
@@ -437,6 +422,22 @@ final class ScreenStreamer: NSObject {
             return
         }
         
+        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        
+        // Forward raw frames for WebRTC or external consumers
+        if let rawFrameCallback {
+            rawFrameCallback(imageBuffer, presentationTime)
+        }
+        
+        guard isEncodingEnabled(), let session = compressionSession else {
+            #if DEBUG
+            if compressCount <= 3 {
+                AirCatchLog.info(" compressFrame: Encoding disabled or no compressionSession")
+            }
+            #endif
+            return
+        }
+        
         #if DEBUG
         // Log pixel buffer details for first successful frame only
         if compressCount - skippedFrameCount == 1 {
@@ -445,8 +446,6 @@ final class ScreenStreamer: NSObject {
             AirCatchLog.debug("First imageBuffer: \(pbWidth)x\(pbHeight)", category: .video)
         }
         #endif
-        
-        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let duration = CMSampleBufferGetDuration(sampleBuffer)
         
         var flags = VTEncodeInfoFlags()
@@ -558,110 +557,69 @@ final class ScreenStreamer: NSObject {
         return !notSync
     }
 
-    /// Caches SPS/PPS (H.264) or VPS/SPS/PPS (HEVC) from the format description.
+    /// Caches VPS/SPS/PPS from the HEVC format description.
     private func cacheParameterSetsIfNeeded(from sampleBuffer: CMSampleBuffer) {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
             return
         }
         
-        let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
+        // HEVC: Extract VPS, SPS, PPS (3 parameter sets)
+        guard cachedVPS == nil || cachedSPS == nil || cachedPPS == nil else { return }
         
-        if codecType == kCMVideoCodecType_HEVC {
-            // HEVC: Extract VPS, SPS, PPS (3 parameter sets)
-            guard cachedVPS == nil || cachedSPS == nil || cachedPPS == nil else { return }
-            
-            var vpsPointer: UnsafePointer<UInt8>?
-            var vpsSize: Int = 0
-            var spsPointer: UnsafePointer<UInt8>?
-            var spsSize: Int = 0
-            var ppsPointer: UnsafePointer<UInt8>?
-            var ppsSize: Int = 0
-            
-            // VPS (index 0)
-            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 0,
-                parameterSetPointerOut: &vpsPointer,
-                parameterSetSizeOut: &vpsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-            
-            // SPS (index 1)
-            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 1,
-                parameterSetPointerOut: &spsPointer,
-                parameterSetSizeOut: &spsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-            
-            // PPS (index 2)
-            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 2,
-                parameterSetPointerOut: &ppsPointer,
-                parameterSetSizeOut: &ppsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-            
-            if let vpsPointer, vpsSize > 0 {
-                cachedVPS = Data(bytes: vpsPointer, count: vpsSize)
-            }
-            if let spsPointer, spsSize > 0 {
-                cachedSPS = Data(bytes: spsPointer, count: spsSize)
-            }
-            if let ppsPointer, ppsSize > 0 {
-                cachedPPS = Data(bytes: ppsPointer, count: ppsSize)
-            }
-            
-            if cachedVPS != nil && cachedSPS != nil && cachedPPS != nil {
-                AirCatchLog.info(" HEVC parameter sets cached (VPS: \(cachedVPS?.count ?? 0)B, SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
-            }
-        } else {
-            // H.264: Extract SPS, PPS (2 parameter sets)
-            guard cachedSPS == nil || cachedPPS == nil else { return }
-            
-            var spsPointer: UnsafePointer<UInt8>?
-            var spsSize: Int = 0
-            var ppsPointer: UnsafePointer<UInt8>?
-            var ppsSize: Int = 0
-
-            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 0,
-                parameterSetPointerOut: &spsPointer,
-                parameterSetSizeOut: &spsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-
-            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 1,
-                parameterSetPointerOut: &ppsPointer,
-                parameterSetSizeOut: &ppsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-
-            if let spsPointer, spsSize > 0 {
-                cachedSPS = Data(bytes: spsPointer, count: spsSize)
-            }
-            if let ppsPointer, ppsSize > 0 {
-                cachedPPS = Data(bytes: ppsPointer, count: ppsSize)
-            }
-            
-            if cachedSPS != nil && cachedPPS != nil {
-                AirCatchLog.info(" H.264 parameter sets cached (SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
-            }
+        var vpsPointer: UnsafePointer<UInt8>?
+        var vpsSize: Int = 0
+        var spsPointer: UnsafePointer<UInt8>?
+        var spsSize: Int = 0
+        var ppsPointer: UnsafePointer<UInt8>?
+        var ppsSize: Int = 0
+        
+        // VPS (index 0)
+        CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: 0,
+            parameterSetPointerOut: &vpsPointer,
+            parameterSetSizeOut: &vpsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: nil
+        )
+        
+        // SPS (index 1)
+        CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: 1,
+            parameterSetPointerOut: &spsPointer,
+            parameterSetSizeOut: &spsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: nil
+        )
+        
+        // PPS (index 2)
+        CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: 2,
+            parameterSetPointerOut: &ppsPointer,
+            parameterSetSizeOut: &ppsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: nil
+        )
+        
+        if let vpsPointer, vpsSize > 0 {
+            cachedVPS = Data(bytes: vpsPointer, count: vpsSize)
+        }
+        if let spsPointer, spsSize > 0 {
+            cachedSPS = Data(bytes: spsPointer, count: spsSize)
+        }
+        if let ppsPointer, ppsSize > 0 {
+            cachedPPS = Data(bytes: ppsPointer, count: ppsSize)
+        }
+        
+        if cachedVPS != nil && cachedSPS != nil && cachedPPS != nil {
+            AirCatchLog.info(" HEVC parameter sets cached (VPS: \(cachedVPS?.count ?? 0)B, SPS: \(cachedSPS?.count ?? 0)B, PPS: \(cachedPPS?.count ?? 0)B)")
         }
     }
 
-    /// Converts the compressed block buffer into an Annex B elementary stream, optionally
-    /// prefixing with parameter sets for keyframes (SPS/PPS for H.264, VPS/SPS/PPS for HEVC).
+    /// Converts the compressed HEVC block buffer into an Annex B elementary stream,
+    /// optionally prefixing with VPS/SPS/PPS for keyframes.
     private func makeAnnexBStream(from dataBuffer: CMBlockBuffer, includeParameterSets: Bool) -> Data? {
         var length: Int = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
@@ -677,27 +635,25 @@ final class ScreenStreamer: NSObject {
         guard status == kCMBlockBufferNoErr, let pointer = dataPointer else { return nil }
 
         let startCode: [UInt8] = [0, 0, 0, 1]
+        
+        // PERFORMANCE: Estimate capacity upfront to avoid reallocations
+        // Each NAL needs 4 start code bytes + data. Parameter sets add ~100 bytes.
+        let estimatedCapacity = length + (length / 1200) * 4 + 200
         var stream = Data()
+        stream.reserveCapacity(estimatedCapacity)
 
         if includeParameterSets {
-            if let vps = cachedVPS {
-                // HEVC: Include VPS, SPS, PPS
-                guard let sps = cachedSPS, let pps = cachedPPS else { return nil }
-                stream.append(contentsOf: startCode)
-                stream.append(vps)
-                stream.append(contentsOf: startCode)
-                stream.append(sps)
-                stream.append(contentsOf: startCode)
-                stream.append(pps)
-            } else if let sps = cachedSPS, let pps = cachedPPS {
-                // H.264: Include SPS, PPS
-                stream.append(contentsOf: startCode)
-                stream.append(sps)
-                stream.append(contentsOf: startCode)
-                stream.append(pps)
-            }
+            // HEVC: Include VPS, SPS, PPS
+            guard let vps = cachedVPS, let sps = cachedSPS, let pps = cachedPPS else { return nil }
+            stream.append(contentsOf: startCode)
+            stream.append(vps)
+            stream.append(contentsOf: startCode)
+            stream.append(sps)
+            stream.append(contentsOf: startCode)
+            stream.append(pps)
         }
 
+        // PERFORMANCE: Use raw pointer append to reduce overhead
         var offset = 0
         while offset + 4 <= length {
             // Read the NAL length (big endian) safely to avoid alignment crashes
@@ -710,7 +666,7 @@ final class ScreenStreamer: NSObject {
             guard nalLength > 0, offset + Int(nalLength) <= length else { break }
 
             stream.append(contentsOf: startCode)
-            stream.append(Data(bytes: pointer.advanced(by: offset), count: Int(nalLength)))
+            stream.append(UnsafeBufferPointer(start: pointer.advanced(by: offset), count: Int(nalLength)))
 
             offset += Int(nalLength)
         }
@@ -776,19 +732,20 @@ final class ScreenStreamer: NSObject {
             // Planar Stereo: Interleave L and R (L0 R0 L1 R1...)
             // Both buffers should be same size and format (Float32)
             let sampleCount = size0 / 4
-            let interleavedData = Data(count: size0 * 2)
+            var interleaved = Data(count: size0 * 2)
             
-            // "Unsafe" copy is clean here as we own the data
-            // Copy into new Data buffer
-            var interleaved = interleavedData // Mutable copy
+            // PERFORMANCE: Use CBLAS strided copy for SIMD-optimized interleaving
             interleaved.withUnsafeMutableBytes { dst in
                 guard let dstPtr = dst.bindMemory(to: Float.self).baseAddress else { return }
                 let src0 = buf0.assumingMemoryBound(to: Float.self)
                 let src1 = buf1.assumingMemoryBound(to: Float.self)
                 
+                // Manual interleaving loop (cblas_scopy is deprecated)
+                // Copy left channel to even indices (0, 2, 4...)
+                // Copy right channel to odd indices (1, 3, 5...)
                 for i in 0..<sampleCount {
                     dstPtr[i*2] = src0[i]
-                    dstPtr[i*2+1] = src1[i]
+                    dstPtr[i*2 + 1] = src1[i]
                 }
             }
             audioData.append(interleaved)

@@ -47,6 +47,7 @@ enum AirCatchConfig {
     // Port aliases for clarity
     nonisolated static let defaultUDPPort: UInt16 = 5555
     nonisolated static let defaultTCPPort: UInt16 = 5556
+    // Master PIN removed - using session tokens for authentication
     
     // Network constants
     static let maxUDPPayloadSize: Int = 1200  // Safe UDP payload size (below MTU)
@@ -62,6 +63,15 @@ enum AirCatchConfig {
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
 
+    // WebRTC ICE servers (STUN). For best remote reliability, add a TURN server.
+    static let webrtcIceServerURLs: [String] = [
+        "stun:stun.l.google.com:19302",
+        "stun:stun1.l.google.com:19302"
+    ]
+    static let webrtcMinBitrate: Int = 4_000_000  // 4 Mbps floor
+    static let webrtcMaxBitrate: Int = 16_000_000 // 16 Mbps ceiling
+    static let webrtcMaxFrameRate: Int = 30       // Prefer 30 fps for stability
+    
     
     // Resolution limits
     static let maxRenderPixels: Double = 8_000_000  // ~8MP cap for render resolution
@@ -92,6 +102,7 @@ enum PacketType: UInt8 {
     case audioPCM = 0x0F
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
     case authResponse = 0x11   // SECURITY: Client responds with HMAC proof of PIN
+    case webrtcSignal = 0x12   // WebRTC offer/answer/ICE candidate exchange
 }
 
 // MARK: - Connection/Codec Preferences
@@ -110,6 +121,34 @@ enum CodecPreference: String, Codable {
 struct Packet {
     let type: PacketType
     let payload: Data
+}
+
+// MARK: - WebRTC Signaling
+
+enum WebRTCSignalType: String, Codable {
+    case offer
+    case answer
+    case candidate
+}
+
+struct WebRTCSignalMessage: Codable {
+    let type: WebRTCSignalType
+    let sdp: String?
+    let candidate: String?
+    let sdpMid: String?
+    let sdpMLineIndex: Int32?
+    
+    init(type: WebRTCSignalType,
+         sdp: String? = nil,
+         candidate: String? = nil,
+         sdpMid: String? = nil,
+         sdpMLineIndex: Int32? = nil) {
+        self.type = type
+        self.sdp = sdp
+        self.candidate = candidate
+        self.sdpMid = sdpMid
+        self.sdpMLineIndex = sdpMLineIndex
+    }
 }
 
 // MARK: - Authentication (Challenge-Response)
@@ -177,6 +216,8 @@ struct HandshakeRequest: Codable {
     let pin: String?
     /// SECURITY: HMAC response to host's AuthChallenge - proves PIN knowledge without revealing it.
     let authResponse: Data?
+    /// Session token for reconnection without PIN - granted by host on first successful auth.
+    let sessionToken: String?
     /// When true, stream at host's native resolution instead of scaling to client resolution.
     /// This provides higher quality but may require letterboxing on the client.
     let optimizeForHostDisplay: Bool?
@@ -200,6 +241,7 @@ struct HandshakeRequest: Codable {
          deviceId: String? = nil,
          pin: String? = nil,
          authResponse: Data? = nil,
+         sessionToken: String? = nil,
          optimizeForHostDisplay: Bool? = nil) {
         self.clientName = clientName
         self.clientVersion = clientVersion
@@ -220,6 +262,7 @@ struct HandshakeRequest: Codable {
         self.deviceId = deviceId
         self.pin = pin
         self.authResponse = authResponse
+        self.sessionToken = sessionToken
         self.optimizeForHostDisplay = optimizeForHostDisplay
     }
 }
@@ -237,11 +280,15 @@ struct HandshakeAck: Codable {
     let displayMode: StreamDisplayMode?
     /// Position of extended display (if virtual display is active)
     let displayPosition: ExtendedDisplayPosition?
+    /// Session token granted to client for reconnection without PIN
+    let sessionToken: String?
     
-        init(width: Int, height: Int, frameRate: Int, hostName: String,
-            bitrate: Int? = nil,
-            isVirtualDisplay: Bool? = nil, displayMode: StreamDisplayMode? = nil,
-         displayPosition: ExtendedDisplayPosition? = nil) {
+    init(width: Int, height: Int, frameRate: Int, hostName: String,
+         bitrate: Int? = nil,
+         isVirtualDisplay: Bool? = nil,
+         displayMode: StreamDisplayMode? = nil,
+         displayPosition: ExtendedDisplayPosition? = nil,
+         sessionToken: String? = nil) {
         self.width = width
         self.height = height
         self.frameRate = frameRate
@@ -250,6 +297,7 @@ struct HandshakeAck: Codable {
         self.isVirtualDisplay = isVirtualDisplay
         self.displayMode = displayMode
         self.displayPosition = displayPosition
+        self.sessionToken = sessionToken
     }
 }
 

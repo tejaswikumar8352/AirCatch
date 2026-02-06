@@ -13,6 +13,7 @@ import Combine
 import MultipeerConnectivity
 import CoreGraphics
 import Security
+import WebRTC
 
 /// Central manager for the AirCatch host functionality.
 @MainActor
@@ -70,6 +71,9 @@ final class HostManager: ObservableObject {
     /// Relay client for remote connections (set by HostView when in relay mode)
     var relayClient: RelayClient?
 
+    /// Session tokens granted to clients for reconnection without PIN (cleared on app quit)
+    private var trustedSessionTokens: Set<String> = []
+
     private var tcpAuthChallenges: [ObjectIdentifier: Data] = [:]
     
     // MARK: - Screen Capture
@@ -95,10 +99,47 @@ final class HostManager: ObservableObject {
     /// Track whether the active session is relay-based for lower default caps.
     private var isRelaySession: Bool = false
 
+    // MARK: - WebRTC (Relay Video)
+    private var webRTCSession: WebRTCHostSession?
+    private var webRTCActive: Bool = false
+    private var lastRelayHandshakePayload: Data?
+    private var lastRelayHandshakeAt: TimeInterval = 0
+
+    // PERFORMANCE: Store frame data once instead of duplicating for each chunk
     private struct CachedFrame {
         let createdAt: TimeInterval
+        let frameId: UInt32
         let totalChunks: Int
-        let chunksByIndex: [Int: Data]
+        let maxPayloadSize: Int
+        let frameData: Data  // Original frame data, not duplicated per chunk
+        
+        /// Lazily reconstruct a chunk packet for retransmission
+        func chunkPacket(at index: Int) -> Data? {
+            guard index >= 0 && index < totalChunks else { return nil }
+            
+            let start = index * maxPayloadSize
+            let end = min(start + maxPayloadSize, frameData.count)
+            guard start < frameData.count else { return nil }
+            
+            var packet = Data()
+            packet.reserveCapacity(8 + (end - start))
+            
+            // Header: [FrameId: 4][ChunkIdx: 2][TotalChunks: 2]
+            var fId = frameId.bigEndian
+            var idx = UInt16(index).bigEndian
+            var total = UInt16(totalChunks).bigEndian
+            
+            withUnsafeBytes(of: &fId) { packet.append(contentsOf: $0) }
+            withUnsafeBytes(of: &idx) { packet.append(contentsOf: $0) }
+            withUnsafeBytes(of: &total) { packet.append(contentsOf: $0) }
+            
+            // Use withUnsafeBytes for zero-copy slice access
+            frameData.withUnsafeBytes { rawBuffer in
+                packet.append(contentsOf: rawBuffer[start..<end])
+            }
+            
+            return packet
+        }
     }
 
     // FrameID -> cached chunks for retransmit (lossless mode)
@@ -194,6 +235,7 @@ final class HostManager: ObservableObject {
     }
     
     func stop() {
+        stopWebRTCSession()
         screenStreamer?.stop()
         screenStreamer = nil
         
@@ -214,8 +256,10 @@ final class HostManager: ObservableObject {
     
     /// Handle packets received from the relay server (from the iPad client)
     func handleRelayPacket(_ packet: Packet) {
+        AirCatchLog.info("📥 Host received relay packet: \(packet.type)", category: .network)
         switch packet.type {
         case .handshake:
+            AirCatchLog.info("📥 Processing handshake from relay client", category: .network)
             Task { @MainActor in
                 self.handleRelayHandshake(payload: packet.payload)
             }
@@ -239,6 +283,10 @@ final class HostManager: ObservableObject {
             Task { @MainActor in
                 self.handleRelayVideoChunkNack(packet.payload)
             }
+        case .webrtcSignal:
+            Task { @MainActor in
+                self.handleWebRTCSignal(packet.payload)
+            }
         case .disconnect:
             // Client disconnected via relay
             if connectedClients > 0 {
@@ -246,6 +294,7 @@ final class HostManager: ObservableObject {
             }
             postStatusChange()
             if connectedClients == 0 {
+                stopWebRTCSession()
                 stopStreamingAndRestore()
             }
         default:
@@ -355,11 +404,11 @@ final class HostManager: ObservableObject {
         tcpAuthChallenges.removeValue(forKey: ObjectIdentifier(connection))
     }
 
-    private func verifyTCPAuthResponse(_ response: Data, for connection: NWConnection) -> Bool {
+    private func verifyTCPAuthResponse(_ response: Data, for connection: NWConnection, expectedPIN: String) -> Bool {
         guard let challenge = tcpAuthChallenges[ObjectIdentifier(connection)] else {
             return false
         }
-        guard let expected = crypto.computeChallengeResponse(challenge: challenge, pin: currentPIN) else {
+        guard let expected = crypto.computeChallengeResponse(challenge: challenge, pin: expectedPIN) else {
             return false
         }
 
@@ -386,6 +435,7 @@ final class HostManager: ObservableObject {
     
     // Helper to stop streaming and restore resolution
     private func stopStreamingAndRestore() {
+        stopWebRTCSession()
         stopStreaming()
         // Only restore if we are the last client disconnecting
         if connectedClients == 0 {
@@ -434,23 +484,41 @@ final class HostManager: ObservableObject {
             handshakeRequest = nil
         }
         
-        // SECURITY: Verify PIN using challenge-response (preferred) or legacy plaintext (backward compat)
+        // SECURITY: Check session token first (for reconnection), then PIN authentication
         let isAuthenticated: Bool
-        if let authResponse = handshakeRequest?.authResponse {
-            // New secure path: verify HMAC response
-            isAuthenticated = crypto.verifyChallengeResponse(authResponse, expectedPIN: currentPIN)
+        var authenticatedPIN: String?
+        var grantedSessionToken: String?
+        
+        // Token-based auth: client sends saved token for instant reconnection
+        if let token = handshakeRequest?.sessionToken, trustedSessionTokens.contains(token) {
+            isAuthenticated = true
+            grantedSessionToken = token  // Reuse existing token
+            #if DEBUG
+            AirCatchLog.info("🔐 Session token auth succeeded (reconnection)", category: .network)
+            #endif
+        } else if let authResponse = handshakeRequest?.authResponse {
+            // Challenge-response PIN auth
+            if crypto.verifyChallengeResponse(authResponse, expectedPIN: currentPIN) {
+                isAuthenticated = true
+                authenticatedPIN = currentPIN
+            } else {
+                isAuthenticated = false
+            }
             crypto.clearChallenge()
             #if DEBUG
             let authStatus = isAuthenticated ? "succeeded" : "failed"
             AirCatchLog.info("E2EE: Challenge-response auth \(authStatus)", category: .network)
             #endif
         } else {
-            // Legacy path: plaintext PIN comparison (for old clients)
+            // Legacy plaintext PIN (backward compatibility)
             let receivedPIN = handshakeRequest?.pin ?? ""
             isAuthenticated = (receivedPIN == currentPIN)
+            if isAuthenticated {
+                authenticatedPIN = receivedPIN
+            }
             #if DEBUG
             if isAuthenticated {
-                AirCatchLog.info("E2EE: Legacy plaintext PIN auth (consider updating client)", category: .network)
+                AirCatchLog.info("E2EE: Legacy plaintext PIN auth", category: .network)
             }
             #endif
         }
@@ -460,6 +528,18 @@ final class HostManager: ObservableObject {
             return
         }
 
+        // Generate new session token if authenticated via PIN (not token)
+        if grantedSessionToken == nil {
+            grantedSessionToken = UUID().uuidString
+            trustedSessionTokens.insert(grantedSessionToken!)
+            #if DEBUG
+            AirCatchLog.info("🔐 Generated new session token for client", category: .network)
+            #endif
+        }
+
+        if let pin = authenticatedPIN {
+            crypto.deriveKey(from: pin)
+        }
         connectedClients += 1
 
         isRelaySession = false
@@ -516,7 +596,8 @@ final class HostManager: ObservableObject {
                 bitrate: currentBitrate,
                 isVirtualDisplay: false,
                 displayMode: .mirror,
-                displayPosition: nil
+                displayPosition: nil,
+                sessionToken: grantedSessionToken
             )
 
             if let data = try? JSONEncoder().encode(ack) {
@@ -527,9 +608,21 @@ final class HostManager: ObservableObject {
 
     @MainActor
     private func handleRelayHandshake(payload: Data) {
+        let now = Date().timeIntervalSince1970
+        if let lastPayload = lastRelayHandshakePayload,
+           lastPayload == payload,
+           now - lastRelayHandshakeAt < 1.0 {
+            AirCatchLog.info("Relay handshake duplicate ignored", category: .network)
+            return
+        }
+        lastRelayHandshakePayload = payload
+        lastRelayHandshakeAt = now
+
+        AirCatchLog.info("🤝 Decoding relay handshake (\(payload.count) bytes)", category: .network)
         let handshakeRequest: HandshakeRequest?
         do {
             handshakeRequest = try JSONDecoder().decode(HandshakeRequest.self, from: payload)
+            AirCatchLog.info("🤝 Handshake decoded: device=\(handshakeRequest?.deviceModel ?? "unknown"), video=\(handshakeRequest?.requestVideo ?? true)", category: .network)
         } catch {
             #if DEBUG
             AirCatchLog.error("Failed to decode relay handshake request: \(error)", category: .network)
@@ -537,7 +630,36 @@ final class HostManager: ObservableObject {
             return
         }
 
+        // SECURITY: Check session token first (for reconnection), then PIN authentication
+        var grantedSessionToken: String?
+        
+        if let token = handshakeRequest?.sessionToken, trustedSessionTokens.contains(token) {
+            grantedSessionToken = token
+            #if DEBUG
+            AirCatchLog.info("🔐 Relay: Session token auth succeeded (reconnection)", category: .network)
+            #endif
+        } else if let receivedPIN = handshakeRequest?.pin, !receivedPIN.isEmpty {
+            let isAuthenticated = (receivedPIN == currentPIN)
+            if !isAuthenticated {
+                AirCatchLog.error("Relay PIN mismatch", category: .network)
+                sendRelayControl(type: .pairingFailed, payload: Data())
+                return
+            }
+            // Generate new token on successful PIN auth
+            grantedSessionToken = UUID().uuidString
+            trustedSessionTokens.insert(grantedSessionToken!)
+            #if DEBUG
+            AirCatchLog.info("🔐 Relay: Generated new session token for client", category: .network)
+            #endif
+        } else {
+            // No token and no PIN - require authentication
+            AirCatchLog.error("Relay: No session token or PIN provided", category: .network)
+            sendRelayControl(type: .pairingFailed, payload: Data())
+            return
+        }
+
         connectedClients = max(connectedClients, 1)
+        AirCatchLog.info("🤝 Client count: \(connectedClients), starting relay session", category: .network)
 
         isRelaySession = true
         currentFrameRate = AirCatchConfig.relayInitialFrameRate
@@ -594,12 +716,129 @@ final class HostManager: ObservableObject {
                 bitrate: currentBitrate,
                 isVirtualDisplay: false,
                 displayMode: .mirror,
-                displayPosition: nil
+                displayPosition: nil,
+                sessionToken: grantedSessionToken
             )
 
             if let data = try? JSONEncoder().encode(ack) {
                 self.sendRelayControl(type: .handshakeAck, payload: data)
             }
+
+            if wantsVideo {
+                self.startWebRTCSessionIfNeeded()
+                if let width = self.screenStreamer?.captureWidth,
+                   let height = self.screenStreamer?.captureHeight {
+                    self.webRTCSession?.updateVideoFormat(width: width, height: height, fps: self.currentFrameRate)
+                }
+            }
+        }
+    }
+
+    // MARK: - WebRTC Signaling (Relay)
+
+    @MainActor
+    private func startWebRTCSessionIfNeeded() {
+        guard relayClient?.isConnected == true else { return }
+        guard webRTCSession == nil else { return }
+
+        let session = WebRTCHostSession(iceServerURLs: AirCatchConfig.webrtcIceServerURLs)
+        session.setEncodingConstraints(
+            maxBitrateBps: AirCatchConfig.webrtcMaxBitrate,
+            minBitrateBps: AirCatchConfig.webrtcMinBitrate,
+            maxFramerate: AirCatchConfig.webrtcMaxFrameRate
+        )
+        session.onSignal = { [weak self] message in
+            Task { @MainActor in
+                self?.sendWebRTCSignal(message)
+            }
+        }
+        session.onConnectionStateChange = { [weak self] state in
+            Task { @MainActor in
+                self?.handleWebRTCStateChange(state)
+            }
+        }
+        session.onDataReceived = { [weak self] data in
+             Task { @MainActor in
+                 self?.handleWebRTCData(data)
+             }
+         }
+
+        webRTCSession = session
+        session.start()
+    }
+
+    @MainActor
+    private func stopWebRTCSession() {
+        webRTCSession?.close()
+        webRTCSession = nil
+        webRTCActive = false
+    }
+
+    @MainActor
+    private func handleWebRTCSignal(_ payload: Data) {
+        guard let message = try? JSONDecoder().decode(WebRTCSignalMessage.self, from: payload) else {
+            AirCatchLog.error("WebRTC: Failed to decode signal", category: .network)
+            return
+        }
+        if webRTCSession == nil {
+            startWebRTCSessionIfNeeded()
+        }
+        webRTCSession?.handleRemoteSignal(message)
+    }
+
+    @MainActor
+    private func handleWebRTCData(_ data: Data) {
+        // Expected format: [Type: 1] [Length: 4 (BigEndian)] [Payload: N]
+        // This matches the format sent by ClientManager.sendControl via RelayClient
+        guard data.count >= 5 else { return }
+        
+        let typeVal = data[0]
+        guard let type = PacketType(rawValue: typeVal) else { return }
+        
+        // Parse BigEndian length
+        let length = UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4])
+        
+        guard data.count >= 5 + Int(length) else { return }
+        let payload = data.subdata(in: 5..<5+Int(length))
+        
+        // Fast path for input events
+        switch type {
+        case .touchEvent:
+            handleTouchEvent(payload)
+        case .scrollEvent:
+            handleScrollEvent(payload)
+        case .keyEvent:
+            handleKeyEvent(payload)
+        case .mediaKeyEvent:
+            handleMediaKeyEvent(payload)
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func sendWebRTCSignal(_ message: WebRTCSignalMessage) {
+        guard let data = try? JSONEncoder().encode(message) else { return }
+        sendRelayControl(type: .webrtcSignal, payload: data)
+    }
+
+    @MainActor
+    private func handleWebRTCStateChange(_ state: RTCPeerConnectionState) {
+        switch state {
+        case .connected:
+            webRTCActive = true
+            if isRelaySession {
+                screenStreamer?.setEncodingEnabled(false)
+            }
+            AirCatchLog.info("WebRTC connected (relay video active)", category: .network)
+        case .failed, .disconnected, .closed:
+            webRTCActive = false
+            if isRelaySession {
+                screenStreamer?.setEncodingEnabled(true)
+            }
+            AirCatchLog.info("WebRTC disconnected - falling back to relay video", category: .network)
+        default:
+            break
         }
     }
     
@@ -618,14 +857,26 @@ final class HostManager: ObservableObject {
                 networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
                 return
             }
-            guard let authResponse = handshakeRequest?.authResponse else {
-                networkManager.sendTCP(to: connection, type: .pairingFailed, payload: Data())
-                self.clearTCPAuthChallenge(for: connection)
-                return
+            
+            // SECURITY: Check session token first (for reconnection), then PIN authentication
+            var authenticatedPIN: String?
+            var grantedSessionToken: String?
+            
+            if let token = handshakeRequest?.sessionToken, self.trustedSessionTokens.contains(token) {
+                grantedSessionToken = token
+                #if DEBUG
+                AirCatchLog.info("🔐 TCP: Session token auth succeeded (reconnection)", category: .network)
+                #endif
+            } else if let authResponse = handshakeRequest?.authResponse {
+                // Challenge-response PIN auth
+                if self.verifyTCPAuthResponse(authResponse, for: connection, expectedPIN: self.currentPIN) {
+                    authenticatedPIN = self.currentPIN
+                }
             }
+            
+            let isAuthenticated = (grantedSessionToken != nil) || (authenticatedPIN != nil)
 
-            // Verify PIN via challenge-response
-            if !self.verifyTCPAuthResponse(authResponse, for: connection) {
+            if !isAuthenticated {
                 #if DEBUG
                 AirCatchLog.debug("PIN mismatch for: \(connection.endpoint)", category: .network)
                 #endif
@@ -635,10 +886,22 @@ final class HostManager: ObservableObject {
                 return
             }
 
+            // Generate new session token if authenticated via PIN (not token)
+            if grantedSessionToken == nil {
+                grantedSessionToken = UUID().uuidString
+                self.trustedSessionTokens.insert(grantedSessionToken!)
+                #if DEBUG
+                AirCatchLog.info("🔐 TCP: Generated new session token for client", category: .network)
+                #endif
+            }
+
             self.clearTCPAuthChallenge(for: connection)
+            if let pin = authenticatedPIN {
+                self.crypto.deriveKey(from: pin)
+            }
 
             #if DEBUG
-            AirCatchLog.debug("PIN verified successfully for: \(connection.endpoint)", category: .network)
+            AirCatchLog.debug("Auth verified successfully for: \(connection.endpoint)", category: .network)
             #endif
             connectedClients += 1
             
@@ -708,7 +971,8 @@ final class HostManager: ObservableObject {
                 bitrate: currentBitrate,
                 isVirtualDisplay: false,
                 displayMode: .mirror,
-                displayPosition: nil
+                displayPosition: nil,
+                sessionToken: grantedSessionToken
             )
             
             if let data = try? JSONEncoder().encode(ack) {
@@ -743,6 +1007,9 @@ final class HostManager: ObservableObject {
 
     @MainActor
     private func handleQualityReport(_ payload: Data) {
+        if webRTCActive {
+            return
+        }
         guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
 
         if let estimated = report.estimatedBandwidthBps, estimated > 0 {
@@ -831,7 +1098,16 @@ final class HostManager: ObservableObject {
         // PERFORMANCE: Discard stale touch events to prevent accumulated delay
         // from causing taps to become long presses
         let eventAge = Date().timeIntervalSince1970 - touch.timestamp
-        if eventAge > Self.maxTouchEventAge {
+        let isEndingEvent: Bool = {
+            switch touch.eventType {
+            case .ended, .cancelled, .dragEnded:
+                return true
+            default:
+                return false
+            }
+        }()
+
+        if eventAge > Self.maxTouchEventAge, !isEndingEvent {
             #if DEBUG
             AirCatchLog.debug("Discarding stale touch event (age: \(String(format: "%.0f", eventAge * 1000))ms)", category: .input)
             #endif
@@ -945,7 +1221,7 @@ final class HostManager: ObservableObject {
         AirCatchLog.debug("Received key event: keyCode=\(keyEvent.keyCode) char=\(keyEvent.character ?? "") down=\(keyEvent.isKeyDown)", category: .input)
         #endif
         
-        // Check if this is a text injection event (Voice Typing)
+        // Check if this is a text injection event (paste/multi-char input)
         if let character = keyEvent.character, !character.isEmpty, keyEvent.keyCode == 0 {
             // KeyCode 0 with a character string is our signal for "Injection"
             // PERFORMANCE: Removed nested Task - already on MainActor
@@ -1086,18 +1362,33 @@ final class HostManager: ObservableObject {
             currentBitrate = AirCatchConfig.defaultBitrate
         }
         
+        // PERFORMANCE: Cap bitrate for remote relay sessions to prevent bufferbloat
+        // High bitrates (10Mbps+) cause TCP head-of-line blocking on WAN, killing touch input.
+        if isRelaySession {
+            let remoteCap = 4_000_000 // 4 Mbps
+            if currentBitrate > remoteCap {
+                AirCatchLog.info("📉 Capping remote bitrate from \(currentBitrate/1_000_000)Mbps to \(remoteCap/1_000_000)Mbps for stability", category: .video)
+                currentBitrate = remoteCap
+            }
+        }
+        
         AirCatchLog.info("Starting stream: \(currentBitrate / 1_000_000)Mbps @ \(currentFrameRate)fps, audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay), displayID: \(captureDisplayID)", category: .video)
+        let shouldSendWebRTC = isRelaySession
         screenStreamer = ScreenStreamer(
             targetFrameRate: currentFrameRate,
             targetBitrate: currentBitrate,
             maxClientWidth: clientMaxWidth,
             maxClientHeight: clientMaxHeight,
             targetDisplayID: captureDisplayID,
-            codecOverride: nil,
             audioEnabled: audioEnabled,
             optimizeForHostDisplay: optimizeForHostDisplay,
+            encodeVideo: true,
             onFrame: { [weak self] compressedFrame in
                 self?.broadcastVideoFrame(compressedFrame)
+            },
+            onRawFrame: { [weak self] pixelBuffer, time in
+                guard shouldSendWebRTC else { return }
+                self?.webRTCSession?.sendFrame(pixelBuffer: pixelBuffer, time: time)
             },
             onAudio: audioEnabled ? { [weak self] audioData in
                 self?.broadcastAudioFrame(audioData)
@@ -1109,6 +1400,15 @@ final class HostManager: ObservableObject {
             try await screenStreamer?.start()
             isStreaming = true
             postStatusChange()
+
+            if isRelaySession,
+               let width = screenStreamer?.captureWidth,
+               let height = screenStreamer?.captureHeight {
+                webRTCSession?.updateVideoFormat(width: width, height: height, fps: currentFrameRate)
+            }
+            if isRelaySession && webRTCActive {
+                screenStreamer?.setEncodingEnabled(false)
+            }
             
             AirCatchLog.info("Screen streaming started", category: .video)
         } catch {
@@ -1160,7 +1460,7 @@ final class HostManager: ObservableObject {
         for key in oldKeys { cachedFrames.removeValue(forKey: key) }
     }
 
-    private nonisolated func cacheFrameForRetransmit(frameId: UInt32, totalChunks: Int, chunksByIndex: [Int: Data]) {
+    private nonisolated func cacheFrameForRetransmit(frameId: UInt32, totalChunks: Int, maxPayloadSize: Int, frameData: Data) {
         // Must be called on cachedFramesQueue
         // Note: losslessVideoEnabled is checked before calling this from broadcastVideoFrame
         
@@ -1174,10 +1474,13 @@ final class HostManager: ObservableObject {
             }
         }
         
+        // PERFORMANCE: Store frame data once instead of per-chunk copies
         cachedFrames[frameId] = CachedFrame(
             createdAt: Date().timeIntervalSinceReferenceDate,
+            frameId: frameId,
             totalChunks: totalChunks,
-            chunksByIndex: chunksByIndex
+            maxPayloadSize: maxPayloadSize,
+            frameData: frameData
         )
     }
     
@@ -1185,6 +1488,7 @@ final class HostManager: ObservableObject {
     private func broadcastVideoFrame(_ data: Data) {
         // In relay mode, skip E2EE since there's no PIN-based key exchange
         let isRelayMode = relayClient?.isConnected ?? false
+        let sendRelayVideo = !(isRelayMode && webRTCActive)
         
         let frameData: Data
         if isRelayMode {
@@ -1220,6 +1524,7 @@ final class HostManager: ObservableObject {
         // Capture main-actor state needed for the background send.
         let maxPayloadSize = maxUDPPayloadSize
         let shouldCacheForRetransmit = losslessVideoEnabled
+        let capturedRelay = relayClient
         // Dispatch to avoid blocking the compression callback thread
         let dataToChunk = frameData  // Use encrypted data for chunking
         broadcastQueue.async { [weak self] in
@@ -1238,11 +1543,15 @@ final class HostManager: ObservableObject {
                 AirCatchLog.debug("Broadcasting Frame \(frameId): \(totalLen) bytes, \(totalChunks) chunks", category: .video)
             }
             
-            // Fragment and send
-            var chunksForCache: [Int: Data] = [:]
-            if shouldCacheForRetransmit {
-                chunksForCache.reserveCapacity(totalChunks)
+            // PERFORMANCE: For relay mode, send full frame without chunking
+            // WebSocket/TCP handles fragmentation, so we avoid chunk overhead entirely
+            // This reduces message count by ~50x for typical frames
+            if sendRelayVideo, let relay = capturedRelay, relay.isConnectedThreadSafe {
+                relay.send(type: .videoFrame, payload: dataToChunk)
             }
+            
+            // Fragment and send via UDP (only for local network, needs small MTU-safe chunks)
+            // PERFORMANCE: No longer build chunksForCache - we store frame data directly
             dataToChunk.withUnsafeBytes { rawBuffer in
                 for i in 0..<totalChunks {
                     let start = i * maxPayloadSize
@@ -1262,24 +1571,17 @@ final class HostManager: ObservableObject {
                     packet.append(contentsOf: rawBuffer[start..<end])
 
                     NetworkManager.shared.broadcastUDP(type: .videoFrameChunk, payload: packet)
-                    
-                    // Also send through relay if connected
-                    if let relay = HostManager.shared.relayClient, relay.isConnected {
-                        relay.send(type: .videoFrameChunk, payload: packet)
-                    }
-
-                    if shouldCacheForRetransmit {
-                        chunksForCache[i] = packet
-                    }
                 }
             }
 
+            // PERFORMANCE: Cache frame data once instead of per-chunk copies
             if shouldCacheForRetransmit {
-                let chunksSnapshot = chunksForCache
                 let frameIdCopy = frameId
                 let totalChunksCopy = totalChunks
+                let maxPayloadCopy = maxPayloadSize
+                let frameDataCopy = dataToChunk
                 self.cachedFramesQueue.async {
-                    self.cacheFrameForRetransmit(frameId: frameIdCopy, totalChunks: totalChunksCopy, chunksByIndex: chunksSnapshot)
+                    self.cacheFrameForRetransmit(frameId: frameIdCopy, totalChunks: totalChunksCopy, maxPayloadSize: maxPayloadCopy, frameData: frameDataCopy)
                 }
             }
         }
@@ -1305,7 +1607,20 @@ final class HostManager: ObservableObject {
         NetworkManager.shared.broadcastUDP(type: .audioPCM, payload: audioData)
         
         // Also send through relay if connected
-        if let relay = relayClient, relay.isConnected {
+        if let webrtc = webRTCSession, webrtc.isDataChannelOpen {
+            // PERFORMANCE: Send audio via WebRTC Data Channel (UDP) to avoid TCP head-of-line blocking
+            // Construct packet: [Type: 1] [Length: 4] [Payload: N]
+            var packet = Data()
+            packet.append(PacketType.audioPCM.rawValue)
+            let length = UInt32(audioData.count)
+            packet.append(UInt8((length >> 24) & 0xFF))
+            packet.append(UInt8((length >> 16) & 0xFF))
+            packet.append(UInt8((length >> 8) & 0xFF))
+            packet.append(UInt8(length & 0xFF))
+            packet.append(audioData)
+            
+            webrtc.sendData(packet)
+        } else if let relay = relayClient, relay.isConnected {
             relay.send(type: .audioPCM, payload: audioData)
         }
     }
@@ -1337,8 +1652,9 @@ final class HostManager: ObservableObject {
             guard let self else { return }
             guard let cached = self.cachedFrames[request.frameId] else { return }
 
+            // PERFORMANCE: Lazy chunk reconstruction from stored frame data
             let payloadsToResend: [Data] = request.missingChunkIndices.compactMap { idx in
-                cached.chunksByIndex[Int(idx)]
+                cached.chunkPacket(at: Int(idx))
             }
 
             self.broadcastQueue.async {
@@ -1363,18 +1679,20 @@ final class HostManager: ObservableObject {
         guard let request else { return }
         guard losslessVideoEnabled else { return }
 
+        let capturedRelay = relayClient
         cachedFramesQueue.async { [weak self] in
             guard let self else { return }
             guard let cached = self.cachedFrames[request.frameId] else { return }
 
+            // PERFORMANCE: Lazy chunk reconstruction from stored frame data
             let payloadsToResend: [Data] = request.missingChunkIndices.compactMap { idx in
-                cached.chunksByIndex[Int(idx)]
+                cached.chunkPacket(at: Int(idx))
             }
 
-            self.broadcastQueue.async { [weak self] in
-                guard let self else { return }
+            self.broadcastQueue.async {
+                guard let relay = capturedRelay, relay.isConnectedThreadSafe else { return }
                 for payload in payloadsToResend {
-                    self.sendRelayControl(type: .videoFrameChunk, payload: payload)
+                    relay.send(type: .videoFrameChunk, payload: payload)
                 }
             }
         }
@@ -1391,4 +1709,3 @@ final class HostManager: ObservableObject {
         NotificationCenter.default.post(name: Self.statusDidChange, object: isStreaming)
     }
 }
-

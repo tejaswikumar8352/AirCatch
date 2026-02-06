@@ -105,15 +105,14 @@ final class AudioPlayer {
         
         packetCount += 1
         
-        // Skip 8-byte timestamp header
-        let pcmData = Data(data.dropFirst(8))
-        
         guard let format = audioFormat else { return }
         
         // Calculate frame count assuming Interleaved Stereo Input (L R L R)
         // 2 channels * 4 bytes/sample = 8 bytes/frame
+        // Skip 8-byte timestamp header in calculation
+        let pcmByteCount = data.count - 8
         let bytesPerFrame: UInt32 = 8
-        let frameCount = UInt32(pcmData.count) / bytesPerFrame
+        let frameCount = UInt32(pcmByteCount) / bytesPerFrame
         
         guard frameCount > 0 else { return }
         
@@ -123,9 +122,11 @@ final class AudioPlayer {
         }
         buffer.frameLength = frameCount
         
-        // PERFORMANCE: Use vDSP for SIMD-optimized de-interleaving (L R L R... → [L L L...] and [R R R...])
-        pcmData.withUnsafeBytes { rawBufferPointer in
-            guard let src = rawBufferPointer.bindMemory(to: Float.self).baseAddress else { return }
+        // PERFORMANCE: Read directly from original data with 8-byte offset (no copy)
+        data.withUnsafeBytes { rawBufferPointer in
+            // Skip 8-byte timestamp header
+            guard let baseAddress = rawBufferPointer.baseAddress else { return }
+            let src = baseAddress.advanced(by: 8).assumingMemoryBound(to: Float.self)
             
             if let dstLeft = buffer.floatChannelData?[0], let dstRight = buffer.floatChannelData?[1] {
                 // Use Accelerate framework for SIMD-optimized strided copy
@@ -168,11 +169,12 @@ final class AudioPlayer {
         
         #if DEBUG
         if packetCount == 1 {
-            AirCatchLog.debug("First audio packet: \(pcmData.count) bytes, \(frameCount) frames (Stereo De-interleave)", category: .general)
+            AirCatchLog.debug("First audio packet: \(data.count - 8) bytes, \(frameCount) frames (Stereo De-interleave)", category: .general)
         }
         #endif
     }
     
+    @discardableResult
     private func updatePendingBuffers(_ delta: Int) -> Int {
         stateQueue.sync {
             pendingBuffers = max(0, pendingBuffers + delta)

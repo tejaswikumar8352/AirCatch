@@ -14,12 +14,6 @@ import Combine
 struct VideoStreamOverlay: View {
     @EnvironmentObject var clientManager: ClientManager
     @StateObject private var viewModel = VideoStreamViewModel()
-    @State private var showKeyboard = false
-    
-    // Keyboard position and size (draggable/resizable)
-    @State private var keyboardPosition: CGPoint = .zero
-    @State private var keyboardSize: CGSize = CGSize(width: 600, height: 220)
-    @State private var keyboardInitialized = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -27,11 +21,22 @@ struct VideoStreamOverlay: View {
                 // Solid black background for letterbox/pillarbox areas
                 Color.black
                 
-                if let pixelBuffer = viewModel.pixelBuffer {
-                    // Get video dimensions
-                    let videoWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
-                    let videoHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-                    let videoSize = CGSize(width: videoWidth, height: videoHeight)
+                let webRTCTrack = clientManager.webRTCVideoTrack
+                let hasVideo = webRTCTrack != nil || viewModel.pixelBuffer != nil
+
+                if hasVideo {
+                    let videoSize: CGSize = {
+                        if let pixelBuffer = viewModel.pixelBuffer {
+                            return CGSize(
+                                width: CGFloat(CVPixelBufferGetWidth(pixelBuffer)),
+                                height: CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+                            )
+                        }
+                        if let screenInfo = clientManager.screenInfo {
+                            return CGSize(width: CGFloat(screenInfo.width), height: CGFloat(screenInfo.height))
+                        }
+                        return geometry.size
+                    }()
                     
                     // Calculate aspect-fit frame
                     let contentFrame = calculateAspectFitFrame(
@@ -39,64 +44,25 @@ struct VideoStreamOverlay: View {
                         containerSize: geometry.size
                     )
                     
-                    // Calculate letterbox height (bottom black bar)
-                    let bottomLetterboxHeight = geometry.size.height - contentFrame.maxY
-                    
                     // Video and touch layer
                     ZStack {
                         // Video layer
-                        MetalVideoView(
-                            pixelBuffer: Binding(
-                                get: { viewModel.pixelBuffer },
-                                set: { _ in }
+                        if let webRTCTrack {
+                            WebRTCVideoView(track: webRTCTrack)
+                        } else {
+                            MetalVideoView(
+                                pixelBuffer: Binding(
+                                    get: { viewModel.pixelBuffer },
+                                    set: { _ in }
+                                )
                             )
-                        )
+                        }
                         
                         // Touch layer
                         MouseInputView()
                     }
                     .frame(width: contentFrame.width, height: contentFrame.height)
                     .position(x: contentFrame.midX, y: contentFrame.midY)
-                    
-                    // Keyboard toggle button - positioned in the letterbox area (bottom-right)
-                    if bottomLetterboxHeight > 50 {
-                        // Place button in the letterbox area when there's enough space
-                        KeyboardToggleButton(showKeyboard: $showKeyboard)
-                            .position(
-                                x: geometry.size.width - 40,
-                                y: contentFrame.maxY + (bottomLetterboxHeight / 2)
-                            )
-                    } else {
-                        // Fallback: position at bottom-right corner with some padding
-                        VStack {
-                            Spacer()
-                            HStack {
-                                Spacer()
-                                KeyboardToggleButton(showKeyboard: $showKeyboard)
-                                    .padding(.trailing, 20)
-                                    .padding(.bottom, 20)
-                            }
-                        }
-                    }
-                    
-                    // Mac-style keyboard overlay (draggable & resizable)
-                    if showKeyboard {
-                        MacKeyboardView(
-                            isVisible: $showKeyboard,
-                            position: $keyboardPosition,
-                            size: $keyboardSize
-                        )
-                        .onAppear {
-                            // Initialize keyboard position to center-bottom
-                            if !keyboardInitialized {
-                                keyboardPosition = CGPoint(
-                                    x: geometry.size.width / 2,
-                                    y: geometry.size.height - keyboardSize.height / 2 - 20
-                                )
-                                keyboardInitialized = true
-                            }
-                        }
-                    }
                     
                 } else {
                     ProgressView()
@@ -105,17 +71,22 @@ struct VideoStreamOverlay: View {
                 }
             }
         }
-        .onReceive(clientManager.videoFrameSubject.receive(on: DispatchQueue.main)) { data in
-            viewModel.decode(frameData: data)
+        .onReceive(clientManager.videoFrameSubject) { data in
+            if clientManager.webRTCVideoTrack == nil {
+                viewModel.decode(frameData: data)
+            }
+        }
+        .onChange(of: clientManager.webRTCVideoTrack) { _, newValue in
+            if newValue != nil {
+                viewModel.reset()
+            }
         }
         .onChange(of: clientManager.state) { _, newState in
             if case .disconnected = newState {
                 viewModel.reset()
-                showKeyboard = false
             }
             if case .error = newState {
                 viewModel.reset()
-                showKeyboard = false
             }
         }
         .ignoresSafeArea()

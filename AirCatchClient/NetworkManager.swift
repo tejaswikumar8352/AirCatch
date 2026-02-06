@@ -15,7 +15,7 @@ final class NetworkManager {
     
     // MARK: - UDP Components
     private var udpClientConnection: NWConnection?
-    private var udpReceiveHandler: (@MainActor (Packet, NWEndpoint?) -> Void)?
+    private var udpReceiveHandler: ((Packet, NWEndpoint?) -> Void)?
     
     // MARK: - TCP Components
     private var tcpClientConnection: NWConnection?
@@ -29,7 +29,7 @@ final class NetworkManager {
         port: UInt16,
         includePeerToPeer: Bool = true,
         requiredInterfaceType: NWInterface.InterfaceType? = nil,
-        onPacket: @MainActor @escaping (Packet, NWEndpoint?) -> Void
+        onPacket: @escaping (Packet, NWEndpoint?) -> Void
     ) {
         udpReceiveHandler = onPacket
 
@@ -189,9 +189,7 @@ final class NetworkManager {
 
             if let data, let packet = self.parsePacket(from: data) {
                 let handler = self.udpReceiveHandler
-                Task { @MainActor in
-                    handler?(packet, connection.endpoint)
-                }
+                handler?(packet, connection.endpoint)
             }
 
             switch connection.state {
