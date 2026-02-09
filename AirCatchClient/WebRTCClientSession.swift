@@ -25,11 +25,17 @@ final class WebRTCClientSession: NSObject {
         return dataChannel?.readyState == .open
     }
 
-    init(iceServerURLs: [String]) {
+    init(iceServerConfigs: [WebRTCIceServerConfig]) {
         let encoderFactory = RTCDefaultVideoEncoderFactory()
         let decoderFactory = RTCDefaultVideoDecoderFactory()
         self.factory = RTCPeerConnectionFactory(encoderFactory: encoderFactory, decoderFactory: decoderFactory)
-        self.iceServers = iceServerURLs.map { RTCIceServer(urlStrings: [$0]) }
+        self.iceServers = iceServerConfigs.map { config in
+            if let username = config.username,
+               let credential = config.credential {
+                return RTCIceServer(urlStrings: config.urlStrings, username: username, credential: credential)
+            }
+            return RTCIceServer(urlStrings: config.urlStrings)
+        }
         super.init()
         RTCInitializeSSL()
         peerConnection = makePeerConnection()

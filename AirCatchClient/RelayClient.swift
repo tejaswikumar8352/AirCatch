@@ -12,6 +12,9 @@ import Combine
 
 /// Handles WebSocket connection to remote relay server for AirCatchClient
 final class RelayClient: NSObject, ObservableObject {
+    private static let insecureRelayWSUserDefaultsKey = "allowInsecureRelayWS"
+    private static let insecureRelayWSEnvKey = "AIRCATCH_ALLOW_INSECURE_RELAY_WS"
+    private static let insecureRelayWSQueryKey = "allowInsecureWs"
     
     // MARK: - Properties
     
@@ -59,6 +62,11 @@ final class RelayClient: NSObject, ObservableObject {
             onError?("Invalid relay server URL")
             return
         }
+
+        guard isRelayURLAllowed(url) else {
+            onError?(relayURLValidationErrorMessage())
+            return
+        }
         
         guard roomCode.count >= 4 else {
             onError?("Invalid room code")
@@ -71,17 +79,18 @@ final class RelayClient: NSObject, ObservableObject {
         // Cancel existing connections
         disconnect()
         
-        // Use single combined socket for compatibility
-        // (Dual-channel mode requires updated server)
+        // PERFORMANCE: Dual-channel mode - separate sockets for video and control
+        // Prevents head-of-line blocking where large video frames delay touch/input events
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         
         controlSocketTask = urlSession.webSocketTask(with: request)
-        videoSocketTask = controlSocketTask  // Share same socket
+        videoSocketTask = urlSession.webSocketTask(with: request)  // Separate socket for video
         
         controlSocketTask?.resume()
+        videoSocketTask?.resume()
         
-        AirCatchLog.info("🔗 Connecting to relay server: \(serverURL) with room: \(self.roomCode)")
+        AirCatchLog.info("🔗 Connecting to relay server (dual-channel): \(serverURL) with room: \(self.roomCode)")
     }
     
     /// Disconnect from relay server
@@ -159,6 +168,60 @@ final class RelayClient: NSObject, ObservableObject {
         }
         
         AirCatchLog.info("📤 Sent client registration for room: \(roomCode)")
+    }
+
+    private func isRelayURLAllowed(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "wss" { return true }
+        guard scheme == "ws" else { return false }
+
+        let host = (url.host ?? "").lowercased()
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+            return true
+        }
+
+        if insecureRelayWSAllowedForTesting(url: url) {
+            AirCatchLog.info("Allowing insecure ws:// relay URL for testing (DEBUG override).")
+            return true
+        }
+
+        return false
+    }
+
+    private func relayURLValidationErrorMessage() -> String {
+        #if DEBUG
+        return "Relay URL must use wss:// (ws:// is allowed only for localhost). For testing use '?allowInsecureWs=1' or set UserDefaults '\(Self.insecureRelayWSUserDefaultsKey)' to true."
+        #else
+        return "Relay URL must use wss:// (ws:// is allowed only for localhost). For testing use '?allowInsecureWs=1'."
+        #endif
+    }
+
+    private func insecureRelayWSAllowedForTesting(url: URL) -> Bool {
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let items = components.queryItems,
+           items.contains(where: { $0.name.caseInsensitiveCompare(Self.insecureRelayWSQueryKey) == .orderedSame && ($0.value ?? "1") != "0" }) {
+            return true
+        }
+
+        if let raw = ProcessInfo.processInfo.environment[Self.insecureRelayWSEnvKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !raw.isEmpty {
+            if raw == "1" || raw == "true" || raw == "yes" || raw == "on" {
+                return true
+            }
+        }
+
+        if UserDefaults.standard.bool(forKey: Self.insecureRelayWSUserDefaultsKey) {
+            return true
+        }
+
+        #if DEBUG
+        // Debug builds default to allowing non-local ws:// for fast LAN/WAN testing.
+        return true
+        #else
+        return false
+        #endif
     }
     
     private func receiveMessages(from task: URLSessionWebSocketTask, channel: String) {

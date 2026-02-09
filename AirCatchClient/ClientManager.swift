@@ -116,6 +116,9 @@ final class ClientManager: ObservableObject {
     )
     private nonisolated let streamingFlag: AtomicBool = .init(false)
     private nonisolated let audioEnabledFlag: AtomicBool = .init(false)
+    private nonisolated let webRTCActiveFlag: AtomicBool = .init(false)  // Thread-safe WebRTC state mirror
+    private nonisolated let relaySessionActiveFlag: AtomicBool = .init(false)
+    private nonisolated let lastStreamingStateUpdate: AtomicUInt64 = .init(0)
     
     @Published var discoveredHosts: [DiscoveredHost] = []
     @Published private(set) var connectedHost: DiscoveredHost?
@@ -203,19 +206,21 @@ final class ClientManager: ObservableObject {
     private let networkManager = NetworkManager.shared
     private let bonjourBrowser = BonjourBrowser()
     private let mpcClient = MPCAirCatchClient()
-    private let audioPlayer = AudioPlayer()
+    private nonisolated let audioPlayer = AudioPlayer()
 
-    private let crypto = CryptoManager()  // E2EE decryption
+    private nonisolated let crypto = CryptoManager()  // E2EE decryption
     private var relayClient: RelayClient?
     private var webRTCSession: WebRTCClientSession?
     private var webRTCActive: Bool = false
     private var relayHandshakeSent = false
     private var lastRelayHandshakeAt: TimeInterval = 0
+    private var lastTouchMoveSentAt: CFTimeInterval = 0
+    private var lastScrollSentAt: CFTimeInterval = 0
     private var cancellables = Set<AnyCancellable>()
 
     
     // Video Reassembly
-    private let reassembler = VideoReassembler()
+    private nonisolated let reassembler = VideoReassembler()
     private lazy var udpStreamProcessor = makeUDPStreamProcessor()
 
     // Telemetry
@@ -263,6 +268,7 @@ final class ClientManager: ObservableObject {
         streamingFlag.set(false)
         screenInfo = nil
         relayClient = nil
+        relaySessionActiveFlag.set(false)
         stopWebRTCSession()
         
         if shouldRetry {
@@ -284,6 +290,7 @@ final class ClientManager: ObservableObject {
         stopDiscovery()
         stopWebRTCSession()
         self.relayClient = relayClient
+        relaySessionActiveFlag.set(true)
         relayHandshakeSent = false
         lastRelayHandshakeAt = 0
         pendingRequestVideo = true
@@ -291,6 +298,11 @@ final class ClientManager: ObservableObject {
         streamingFlag.set(false)
         state = .connected
         debugConnectionStatus = "Connected (Relay)"
+        // SECURITY: Derive E2EE key from room code for relay encryption
+        let relayPIN = relayPINOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !relayPIN.isEmpty {
+            crypto.deriveKey(from: relayPIN)
+        }
         if audioEnabled {
             audioPlayer.start()
         }
@@ -299,6 +311,7 @@ final class ClientManager: ObservableObject {
 
     func stopRelaySession(shouldRestartDiscovery: Bool = true) {
         relayClient = nil
+        relaySessionActiveFlag.set(false)
         audioPlayer.stop()
         streamingFlag.set(false)
         stopWebRTCSession()
@@ -310,6 +323,10 @@ final class ClientManager: ObservableObject {
         if shouldRestartDiscovery {
             startDiscovery()
         }
+    }
+
+    nonisolated var isRelaySessionActive: Bool {
+        relaySessionActiveFlag.get()
     }
 
     private func sendRelayHandshake() {
@@ -337,7 +354,7 @@ final class ClientManager: ObservableObject {
             return session
         }
 
-        let session = WebRTCClientSession(iceServerURLs: AirCatchConfig.webrtcIceServerURLs)
+        let session = WebRTCClientSession(iceServerConfigs: AirCatchConfig.webrtcIceServers)
         session.onSignal = { [weak self] message in
             self?.sendWebRTCSignal(message)
         }
@@ -401,8 +418,10 @@ final class ClientManager: ObservableObject {
         switch state {
         case .connected:
             webRTCActive = true
+            webRTCActiveFlag.set(true)
         case .failed, .disconnected, .closed:
             webRTCActive = false
+            webRTCActiveFlag.set(false)
             webRTCVideoTrack = nil
         default:
             break
@@ -414,6 +433,7 @@ final class ClientManager: ObservableObject {
         webRTCSession = nil
         webRTCVideoTrack = nil
         webRTCActive = false
+        webRTCActiveFlag.set(false)
     }
 
 
@@ -577,8 +597,16 @@ final class ClientManager: ObservableObject {
         AirCatchLog.info("E2EE: Received auth challenge (v\(authChallenge.version)), sending response", category: .network)
         #endif
         
+        let pin = relayClient != nil
+            ? relayPINOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+            : enteredPIN
+        guard !pin.isEmpty else {
+            state = .error("Authentication failed")
+            return
+        }
+
         // Now send handshake with auth response instead of plaintext PIN
-        let response = crypto.computeChallengeResponse(challenge: authChallenge.challenge, pin: enteredPIN)
+        let response = crypto.computeChallengeResponse(challenge: authChallenge.challenge, pin: pin)
         pendingAuthChallenge = nil
         sendHandshake(authResponse: response)
     }
@@ -682,9 +710,6 @@ final class ClientManager: ObservableObject {
         AirCatchLog.info("   Scale: \(scale)x", category: .video)
         #endif
 
-        let relayPIN = isRelay ? relayPINOverride.trimmingCharacters(in: .whitespacesAndNewlines) : ""
-        let pinValue = relayPIN.isEmpty ? nil : relayPIN
-
         return HandshakeRequest(
             clientName: UIDevice.current.name,
             clientVersion: "2.0",
@@ -702,7 +727,7 @@ final class ClientManager: ObservableObject {
             requestAudio: audioEnabled,
             preferLowLatency: true,
             losslessVideo: !isRelay,
-            pin: pinValue,
+            pin: nil,
             authResponse: authResponse,
             sessionToken: savedSessionToken,  // Send saved token for reconnection
             optimizeForHostDisplay: optimizeForHostDisplay
@@ -918,7 +943,8 @@ final class ClientManager: ObservableObject {
             return
         }
 
-        let request = makeHandshakeRequest(authResponse: authResponse, connectionMode: currentConnectionMode())
+        let mode: ConnectionMode? = relayClient == nil ? currentConnectionMode() : nil
+        let request = makeHandshakeRequest(authResponse: authResponse, connectionMode: mode)
         
         if let data = try? JSONEncoder().encode(request) {
             sendControl(type: .handshake, payload: data)
@@ -1037,8 +1063,79 @@ final class ClientManager: ObservableObject {
     
     // MARK: - Relay Packet Handling
     
+    /// PERFORMANCE: Handle relay video/audio packets without MainActor hop.
+    /// Called directly from the WebSocket receive callback thread.
+    nonisolated func handleRelayMediaPacket(_ packet: Packet) {
+        // PERFORMANCE: Skip relay video if WebRTC is handling video delivery
+        // Prevents duplicate decode/render of frames already arriving via WebRTC
+        if webRTCActiveFlag.get() && (packet.type == .videoFrame || packet.type == .videoFrameChunk) {
+            return
+        }
+        
+        let videoFrameQueue = videoFrameQueue
+        let subject = UncheckedSendable(videoFrameSubject)
+        
+        switch packet.type {
+        case .videoFrame:
+            recordIncomingBytes(packet.payload.count)
+            let frameData: Data
+            if crypto.isReady {
+                guard let decrypted = crypto.decrypt(packet.payload) else {
+                    #if DEBUG
+                    AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
+                    #endif
+                    return
+                }
+                frameData = decrypted
+            } else {
+                frameData = packet.payload
+            }
+            videoFrameQueue.async {
+                subject.value.send(frameData)
+            }
+            setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
+            
+        case .videoFrameChunk:
+            recordIncomingBytes(packet.payload.count)
+            reassembler.process(
+                chunk: packet.payload,
+                losslessEnabled: false,
+                onNack: { _, _ in },
+                onComplete: { [weak self] frameData in
+                    guard let self else { return }
+                    let decryptedData: Data
+                    if self.crypto.isReady {
+                        guard let decrypted = self.crypto.decrypt(frameData) else { return }
+                        decryptedData = decrypted
+                    } else {
+                        decryptedData = frameData
+                    }
+                    videoFrameQueue.async {
+                        subject.value.send(decryptedData)
+                    }
+                    self.setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
+                }
+            )
+            
+        case .audioPCM:
+            if audioEnabledFlag.get() {
+                let audioData: Data
+                if crypto.isReady {
+                    guard let decrypted = crypto.decrypt(packet.payload) else { return }
+                    audioData = decrypted
+                } else {
+                    audioData = packet.payload
+                }
+                audioPlayer.playAudioPacket(audioData)
+            }
+            
+        default:
+            break
+        }
+    }
+    
     /// Handle packets received from the relay server (video/audio from Host)
-    /// Note: Relay packets are NOT encrypted since there's no PIN-based key exchange in relay mode
+    /// SECURITY: Relay packets are now encrypted with PIN-derived key (E2EE)
     func handleRelayPacket(_ packet: Packet) {
         let videoFrameQueue = videoFrameQueue
         let videoFrameSubject = UncheckedSendable(videoFrameSubject)
@@ -1047,9 +1144,21 @@ final class ClientManager: ObservableObject {
         case .videoFrame:
             if usingWebRTC { return }
             recordIncomingBytes(packet.payload.count)
-            // Relay mode: no encryption, use payload directly
+            // SECURITY: Decrypt relay video frames with PIN-derived key
+            let frameData: Data
+            if crypto.isReady {
+                guard let decrypted = crypto.decrypt(packet.payload) else {
+                    #if DEBUG
+                    AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
+                    #endif
+                    return
+                }
+                frameData = decrypted
+            } else {
+                frameData = packet.payload
+            }
             videoFrameQueue.async {
-                videoFrameSubject.value.send(packet.payload)
+                videoFrameSubject.value.send(frameData)
             }
             setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
         case .pong:
@@ -1059,7 +1168,7 @@ final class ClientManager: ObservableObject {
         case .videoFrameChunk:
             if usingWebRTC { return }
             recordIncomingBytes(packet.payload.count)
-            // Handle chunked video via reassembler (no decryption needed for relay)
+            // Handle chunked video via reassembler
             reassembler.process(
                 chunk: packet.payload,
                 losslessEnabled: false,
@@ -1072,18 +1181,39 @@ final class ClientManager: ObservableObject {
                 },
                 onComplete: { [weak self] frameData in
                     guard let self = self else { return }
-                    // Relay mode: no encryption, use frame directly
+                    // SECURITY: Decrypt reassembled relay frame
+                    let decryptedData: Data
+                    if self.crypto.isReady {
+                        guard let decrypted = self.crypto.decrypt(frameData) else {
+                            #if DEBUG
+                            AirCatchLog.error("E2EE: Relay reassembled frame decryption failed", category: .video)
+                            #endif
+                            return
+                        }
+                        decryptedData = decrypted
+                    } else {
+                        decryptedData = frameData
+                    }
                     videoFrameQueue.async {
-                        videoFrameSubject.value.send(frameData)
+                        videoFrameSubject.value.send(decryptedData)
                     }
                     self.setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
                 }
             )
         case .audioPCM:
-            // Relay mode: no encryption, use payload directly
+            // SECURITY: Decrypt relay audio frames
             if audioEnabled {
-                audioPlayer.playAudioPacket(packet.payload)
+                let audioData: Data
+                if crypto.isReady {
+                    guard let decrypted = crypto.decrypt(packet.payload) else { return }
+                    audioData = decrypted
+                } else {
+                    audioData = packet.payload
+                }
+                audioPlayer.playAudioPacket(audioData)
             }
+        case .authChallenge:
+            handleAuthChallenge(packet.payload)
         case .handshakeAck:
             handleHandshakeAck(packet.payload)
         case .webrtcSignal:
@@ -1203,6 +1333,16 @@ final class ClientManager: ObservableObject {
     ///   - eventType: The type of touch event
     func sendTouchEvent(normalizedX: Double, normalizedY: Double, eventType: TouchEventType) {
         guard state == .connected || state == .streaming else { return }
+
+        if relayClient != nil {
+            let isContinuousMove = (eventType == .moved || eventType == .dragMoved)
+            if isContinuousMove {
+                let now = CACurrentMediaTime()
+                let minInterval: CFTimeInterval = 1.0 / 60.0
+                guard now - lastTouchMoveSentAt >= minInterval else { return }
+                lastTouchMoveSentAt = now
+            }
+        }
         
         // NOTE: No throttling for local modes - user wants lowest latency possible
         
@@ -1236,6 +1376,12 @@ final class ClientManager: ObservableObject {
     /// Sends a scroll event to the Mac host (for two-finger scroll on iPad).
     func sendScrollEvent(deltaX: Double, deltaY: Double) {
         guard state == .connected || state == .streaming else { return }
+        if relayClient != nil {
+            let now = CACurrentMediaTime()
+            let minInterval: CFTimeInterval = 1.0 / 60.0
+            guard now - lastScrollSentAt >= minInterval else { return }
+            lastScrollSentAt = now
+        }
         let event = ScrollEvent(deltaX: deltaX, deltaY: deltaY)
         // PERFORMANCE: Use cached encoder
         if let data = try? Self.jsonEncoder.encode(event) {
@@ -1286,12 +1432,18 @@ final class ClientManager: ObservableObject {
     }
 
     private nonisolated func recordIncomingBytes(_ count: Int) {
-        Task { @MainActor in
-            receivedBytesCounter.add(count)
-        }
+        receivedBytesCounter.add(count)
     }
 
     private nonisolated func setStreamingStateIfNeeded(debugStatus: String) {
+        // PERFORMANCE: Throttle MainActor dispatch — only update once per 500ms
+        // instead of every frame, to avoid main-thread contention at 60fps
+        let now = DispatchTime.now().uptimeNanoseconds
+        let last = lastStreamingStateUpdate.load()
+        let interval: UInt64 = 500_000_000 // 500ms in nanoseconds
+        guard now - last > interval else { return }
+        guard lastStreamingStateUpdate.compareAndSwap(expected: last, desired: now) else { return }
+        
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if self.state != .streaming {
@@ -1304,33 +1456,33 @@ final class ClientManager: ObservableObject {
 
 }
 
-private struct UncheckedSendable<T>: @unchecked Sendable {
+nonisolated private struct UncheckedSendable<T>: @unchecked Sendable {
     let value: T
     init(_ value: T) { self.value = value }
 }
 
-private final class AtomicBool: @unchecked Sendable {
+nonisolated private final class AtomicBool: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: Bool
+    private nonisolated(unsafe) var value: Bool
 
     nonisolated init(_ value: Bool) {
         self.value = value
     }
 
-    func get() -> Bool {
+    nonisolated func get() -> Bool {
         lock.lock()
         let current = value
         lock.unlock()
         return current
     }
 
-    func set(_ newValue: Bool) {
+    nonisolated func set(_ newValue: Bool) {
         lock.lock()
         value = newValue
         lock.unlock()
     }
 
-    func compareAndSet(expected: Bool, newValue: Bool) -> Bool {
+    nonisolated func compareAndSet(expected: Bool, newValue: Bool) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         if value == expected {
@@ -1341,21 +1493,21 @@ private final class AtomicBool: @unchecked Sendable {
     }
 }
 
-private final class AtomicInt: @unchecked Sendable {
+nonisolated private final class AtomicInt: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: Int
+    private nonisolated(unsafe) var value: Int
 
     nonisolated init(_ value: Int) {
         self.value = value
     }
 
-    func add(_ delta: Int) {
+    nonisolated func add(_ delta: Int) {
         lock.lock()
         value += delta
         lock.unlock()
     }
 
-    func swap(_ newValue: Int) -> Int {
+    nonisolated func swap(_ newValue: Int) -> Int {
         lock.lock()
         let oldValue = value
         value = newValue
@@ -1364,7 +1516,33 @@ private final class AtomicInt: @unchecked Sendable {
     }
 }
 
-private final class UDPStreamProcessor {
+nonisolated private final class AtomicUInt64: @unchecked Sendable {
+    private let lock = NSLock()
+    private nonisolated(unsafe) var value: UInt64
+
+    nonisolated init(_ value: UInt64) {
+        self.value = value
+    }
+
+    nonisolated func load() -> UInt64 {
+        lock.lock()
+        let v = value
+        lock.unlock()
+        return v
+    }
+
+    nonisolated func compareAndSwap(expected: UInt64, desired: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if value == expected {
+            value = desired
+            return true
+        }
+        return false
+    }
+}
+
+nonisolated private final class UDPStreamProcessor {
     private let crypto: CryptoManager
     private let reassembler: VideoReassembler
     private let audioPlayer: AudioPlayer
@@ -1476,7 +1654,7 @@ private final class UDPStreamProcessor {
 
 // MARK: - Video Reassembler (Thread-Safe)
 
-private final class VideoReassembler {
+nonisolated private final class VideoReassembler: @unchecked Sendable {
     private struct ChunkSlice {
         let data: Data
         let payloadRange: Range<Data.Index>
@@ -1490,12 +1668,12 @@ private final class VideoReassembler {
         var nackedIndices: Set<Int>
     }
 
-    private var reassemblyBuffer: [UInt32: FrameAssembly] = [:]
+    private nonisolated(unsafe) var reassemblyBuffer: [UInt32: FrameAssembly] = [:]
     private let queue = DispatchQueue(label: "com.aircatch.reassembly")
-    private var chunkCount = 0
-    private var frameCount = 0
+    private nonisolated(unsafe) var chunkCount = 0
+    private nonisolated(unsafe) var frameCount = 0
     
-    func process(
+    nonisolated func process(
         chunk data: Data,
         losslessEnabled: Bool,
         onNack: @escaping (UInt32, [UInt16]) -> Void,

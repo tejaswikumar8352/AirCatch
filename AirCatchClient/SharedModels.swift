@@ -38,6 +38,18 @@ enum AirCatchLog {
 
 // MARK: - Configuration Constants
 
+nonisolated struct WebRTCIceServerConfig: Sendable {
+    let urlStrings: [String]
+    let username: String?
+    let credential: String?
+
+    init(urlStrings: [String], username: String? = nil, credential: String? = nil) {
+        self.urlStrings = urlStrings
+        self.username = username
+        self.credential = credential
+    }
+}
+
 enum AirCatchConfig {
     nonisolated static let udpPort: UInt16 = 5555
     nonisolated static let tcpPort: UInt16 = 5556
@@ -57,16 +69,51 @@ enum AirCatchConfig {
     static let relayInitialBitrate: Int = 4_000_000  // 4 Mbps starting point for relay
     static let relayMaxBitrate: Int = 8_000_000      // 8 Mbps cap for relay
     static let relayInitialFrameRate: Int = 30       // 30 FPS starting point for relay
-    static let relayMaxFrameRate: Int = 30           // 30 FPS cap for relay
-    static let maxTouchEventsPerSecond: Int = 60
+    static let relayMaxFrameRate: Int = 45           // 45 FPS cap for relay
+    static let maxTouchEventsPerSecond: Int = 120
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
     
-    // WebRTC ICE servers (STUN). For best remote reliability, add a TURN server.
-    static let webrtcIceServerURLs: [String] = [
-        "stun:stun.l.google.com:19302",
-        "stun:stun1.l.google.com:19302"
-    ]
+    // SECURITY: Maximum TCP payload length to prevent memory exhaustion attacks (16MB)
+    static let maxTCPPayloadLength: Int = 16_777_216
+    
+    // WebRTC ICE servers. Includes STUN defaults and optional TURN from env/UserDefaults.
+    static let webrtcIceServers: [WebRTCIceServerConfig] = {
+        var servers: [WebRTCIceServerConfig] = [
+            WebRTCIceServerConfig(
+                urlStrings: [
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302"
+                ]
+            )
+        ]
+
+        let env = ProcessInfo.processInfo.environment
+        let defaults = UserDefaults.standard
+        let combinedTurnURLs = parseIceURLList(env["AIRCATCH_TURN_URLS"])
+            + parseIceURLList(env["AIRCATCH_TURN_URL"])
+            + parseIceURLList(defaults.string(forKey: "relayTURNURLs"))
+            + parseIceURLList(defaults.string(forKey: "relayTURNURL"))
+
+        var turnURLs: [String] = []
+        for url in combinedTurnURLs where !turnURLs.contains(url) {
+            turnURLs.append(url)
+        }
+
+        if !turnURLs.isEmpty {
+            let username = nonEmptyString(env["AIRCATCH_TURN_USERNAME"] ?? defaults.string(forKey: "relayTURNUsername"))
+            let credential = nonEmptyString(env["AIRCATCH_TURN_CREDENTIAL"] ?? defaults.string(forKey: "relayTURNCredential"))
+            servers.append(
+                WebRTCIceServerConfig(
+                    urlStrings: turnURLs,
+                    username: username,
+                    credential: credential
+                )
+            )
+        }
+
+        return servers
+    }()
     static let webrtcMinBitrate: Int = 4_000_000  // 4 Mbps floor
     static let webrtcMaxBitrate: Int = 16_000_000 // 16 Mbps ceiling
     static let webrtcMaxFrameRate: Int = 30       // Prefer 30 fps for stability
@@ -77,6 +124,20 @@ enum AirCatchConfig {
     // Frame cache settings
     static let frameCacheTTL: TimeInterval = 1.0  // Seconds before cached frames expire
     static let cachePruneInterval: Int = 60       // Prune every N frames
+    
+    private static func parseIceURLList(_ raw: String?) -> [String] {
+        guard let raw else { return [] }
+        return raw
+            .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\n" || $0 == "\t" })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func nonEmptyString(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
     
 }
 
@@ -302,7 +363,7 @@ struct HandshakeAck: Codable {
 // MARK: - Touch Event Models
 
 /// Touch event sent from client to host.
-struct TouchEvent: Codable {
+nonisolated struct TouchEvent: Codable, Sendable {
     let normalizedX: Double
     let normalizedY: Double
     let eventType: TouchEventType
@@ -323,7 +384,7 @@ struct TouchEvent: Codable {
 }
 
 /// Type of touch event.
-enum TouchEventType: String, Codable {
+nonisolated enum TouchEventType: String, Codable, Sendable {
     case began
     case moved
     case ended
@@ -338,7 +399,7 @@ enum TouchEventType: String, Codable {
 
 // MARK: - Scroll Event
 
-struct ScrollEvent: Codable {
+nonisolated struct ScrollEvent: Codable, Sendable {
     let deltaX: Double
     let deltaY: Double
     let timestamp: TimeInterval
@@ -353,7 +414,7 @@ struct ScrollEvent: Codable {
 // MARK: - Key Event
 
 /// Keyboard modifier flags (matches macOS CGEventFlags)
-struct KeyModifiers: OptionSet, Codable {
+nonisolated struct KeyModifiers: OptionSet, Codable, Sendable {
     let rawValue: UInt32
     
     static let shift     = KeyModifiers(rawValue: 1 << 0)
@@ -364,7 +425,7 @@ struct KeyModifiers: OptionSet, Codable {
 }
 
 /// Keyboard event sent from client to host
-struct KeyEvent: Codable {
+nonisolated struct KeyEvent: Codable, Sendable {
     let keyCode: UInt16       // macOS virtual key code
     let character: String?    // The character typed (for text input)
     let modifiers: KeyModifiers
@@ -381,7 +442,7 @@ struct KeyEvent: Codable {
 }
 
 /// Media key event for system controls (volume, brightness, play/pause, etc.)
-struct MediaKeyEvent: Codable {
+nonisolated struct MediaKeyEvent: Codable, Sendable {
     let mediaKey: Int32       // NX key type (e.g., NX_KEYTYPE_SOUND_UP = 0)
     let keyCode: UInt16       // Fallback key code
     let timestamp: TimeInterval

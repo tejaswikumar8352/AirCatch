@@ -7,7 +7,7 @@ struct HostView: View {
     
     // Relay mode settings
     @AppStorage("useRelayMode") private var useRelayMode = false
-    @AppStorage("relayServerURL") private var relayServerURL = "ws://3.84.120.156:8080"
+    @AppStorage("relayServerURL") private var relayServerURL = "wss://relay.qai88.com"
     @State private var relayRoomCode = ""
     @State private var isRelayConnected = false
     @State private var isClientConnected = false
@@ -153,7 +153,7 @@ struct HostView: View {
                 Text("Relay Server")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                TextField("ws://3.84.120.156:8080", text: $relayServerURL)
+                TextField("wss://relay.qai88.com", text: $relayServerURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isRelayConnected)
@@ -308,31 +308,26 @@ struct HostView: View {
         // Forward received data to HostManager for processing
         relayClient.onDataReceived = { data in
             // Parse packet and handle via HostManager
-            // This will be the input events from client
-            AirCatchLog.info("📥 Host received \(data.count) bytes from relay")
-            guard data.count >= 5 else { 
-                AirCatchLog.error("📥 Packet too small: \(data.count) bytes")
-                return 
-            }
+            guard data.count >= 5 else { return }
             let type = data[0]
             let length = Int(UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4]))
             let payloadStart = 5
             let payloadEnd = min(data.count, payloadStart + length)
-            guard payloadEnd >= payloadStart else { 
-                AirCatchLog.error("📥 Invalid payload bounds")
-                return 
-            }
+            guard payloadEnd >= payloadStart else { return }
             let payload = data[payloadStart..<payloadEnd]
             
             if let packetType = PacketType(rawValue: type) {
-                AirCatchLog.info("📥 Parsed packet type: \(packetType)")
                 let packet = Packet(type: packetType, payload: Data(payload))
-                // Process packet through HostManager (touch, scroll, key events)
-                Task { @MainActor in
-                    HostManager.shared.handleRelayPacket(packet)
+                // PERFORMANCE: Route input events directly to nonisolated handler
+                // to skip unnecessary MainActor hop (saves ~1-2ms per event)
+                switch packetType {
+                case .touchEvent, .scrollEvent, .keyEvent, .mediaKeyEvent:
+                    HostManager.shared.handleRelayInputPacket(packet)
+                default:
+                    Task { @MainActor in
+                        HostManager.shared.handleRelayPacket(packet)
+                    }
                 }
-            } else {
-                AirCatchLog.error("📥 Unknown packet type: \(type)")
             }
         }
     }

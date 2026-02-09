@@ -40,7 +40,7 @@ final class WebRTCHostSession: NSObject {
         dataChannel.sendData(buffer)
     }
 
-    init(iceServerURLs: [String]) {
+    init(iceServerConfigs: [WebRTCIceServerConfig]) {
         let encoderFactory = RTCDefaultVideoEncoderFactory()
         if let h264 = RTCDefaultVideoEncoderFactory.supportedCodecs()
             .first(where: { $0.name == kRTCVideoCodecH264Name }) {
@@ -51,7 +51,13 @@ final class WebRTCHostSession: NSObject {
         self.videoSource = factory.videoSource()
         self.videoTrack = factory.videoTrack(with: videoSource, trackId: "aircatch_video")
         self.capturer = ExternalVideoCapturer()
-        self.iceServers = iceServerURLs.map { RTCIceServer(urlStrings: [$0]) }
+        self.iceServers = iceServerConfigs.map { config in
+            if let username = config.username,
+               let credential = config.credential {
+                return RTCIceServer(urlStrings: config.urlStrings, username: username, credential: credential)
+            }
+            return RTCIceServer(urlStrings: config.urlStrings)
+        }
         super.init()
         RTCInitializeSSL()
         capturer.delegate = videoSource

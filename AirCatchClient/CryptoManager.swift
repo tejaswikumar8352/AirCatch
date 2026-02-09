@@ -11,7 +11,7 @@ import CryptoKit
 
 /// Provides end-to-end encryption using AES-256-GCM with PIN-derived key.
 /// This ensures neither network sniffers nor intermediaries can read data.
-final class CryptoManager {
+nonisolated final class CryptoManager: @unchecked Sendable {
     private var key: SymmetricKey?
     private let lock = NSLock()
     
@@ -22,7 +22,7 @@ final class CryptoManager {
     
     /// Computes a challenge response for PIN verification (client-side).
     /// The response is HMAC-SHA256(challenge, authKey) where authKey is derived from PIN.
-    func computeChallengeResponse(challenge: Data, pin: String) -> Data? {
+    nonisolated func computeChallengeResponse(challenge: Data, pin: String) -> Data? {
         guard !pin.isEmpty else { return nil }
         
         // Derive an authentication key from PIN (separate from encryption key)
@@ -41,7 +41,7 @@ final class CryptoManager {
     
     /// Derives a 256-bit AES key from the PIN using HKDF.
     /// Call this when PIN is generated (host) or entered (client).
-    func deriveKey(from pin: String) {
+    nonisolated func deriveKey(from pin: String) {
         guard !pin.isEmpty else {
             lock.lock()
             key = nil
@@ -70,14 +70,14 @@ final class CryptoManager {
     }
     
     /// Clears the encryption key (call on disconnect).
-    func clearKey() {
+    nonisolated func clearKey() {
         lock.lock()
         key = nil
         lock.unlock()
     }
     
     /// Returns true if encryption is ready.
-    var isReady: Bool {
+    nonisolated var isReady: Bool {
         lock.lock()
         let ready = key != nil
         lock.unlock()
@@ -86,7 +86,7 @@ final class CryptoManager {
     
     /// Encrypts plaintext data using AES-256-GCM.
     /// Returns: nonce (12) + ciphertext + tag (16), or nil on failure.
-    func encrypt(_ plaintext: Data) -> Data? {
+    nonisolated func encrypt(_ plaintext: Data) -> Data? {
         lock.lock()
         let key = key
         lock.unlock()
@@ -110,7 +110,7 @@ final class CryptoManager {
     
     /// Decrypts ciphertext (nonce + ciphertext + tag) using AES-256-GCM.
     /// Returns plaintext or nil if decryption fails (wrong key, tampered data).
-    func decrypt(_ ciphertext: Data) -> Data? {
+    nonisolated func decrypt(_ ciphertext: Data) -> Data? {
         lock.lock()
         let key = key
         lock.unlock()

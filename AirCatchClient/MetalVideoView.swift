@@ -12,7 +12,7 @@ import CoreVideo
 
 /// SwiftUI wrapper for the Metal video view.
 struct MetalVideoView: UIViewRepresentable {
-    @Binding var pixelBuffer: CVPixelBuffer?
+    let viewModel: VideoStreamViewModel
     
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
@@ -34,29 +34,33 @@ struct MetalVideoView: UIViewRepresentable {
         // Disable vsync wait for immediate frame display (lowest latency)
         mtkView.presentsWithTransaction = false
         context.coordinator.setupMetal(device: mtkView.device!, view: mtkView)
+        context.coordinator.bindFrameSource(viewModel: viewModel, view: mtkView)
         
         // Subscribe to memory warnings for cache flushing
-        NotificationCenter.default.addObserver(
+        // Store observer token for cleanup in dismantleUIView
+        let observer = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
             queue: .main
         ) { _ in
             context.coordinator.flushTextureCache()
         }
+        context.coordinator.memoryWarningObserver = observer
         
         return mtkView
     }
     
     func updateUIView(_ uiView: MTKView, context: Context) {
-        if Thread.isMainThread {
-            context.coordinator.currentPixelBuffer = pixelBuffer
-            uiView.setNeedsDisplay()
-        } else {
-            DispatchQueue.main.async {
-                context.coordinator.currentPixelBuffer = pixelBuffer
-                uiView.setNeedsDisplay()
-            }
+        context.coordinator.bindFrameSource(viewModel: viewModel, view: uiView)
+    }
+    
+    static func dismantleUIView(_ uiView: MTKView, coordinator: MetalVideoRenderer) {
+        // Remove memory warning observer to prevent accumulation
+        if let observer = coordinator.memoryWarningObserver {
+            NotificationCenter.default.removeObserver(observer)
+            coordinator.memoryWarningObserver = nil
         }
+        coordinator.unbindFrameSource()
     }
     
     func makeCoordinator() -> MetalVideoRenderer {
@@ -73,6 +77,9 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private var samplerState: MTLSamplerState!
     
     var currentPixelBuffer: CVPixelBuffer?
+    var memoryWarningObserver: NSObjectProtocol?
+    private weak var boundViewModel: VideoStreamViewModel?
+    private weak var boundView: MTKView?
     private var viewportSize: CGSize = .zero
     private var frameCount: Int = 0
     
@@ -148,6 +155,36 @@ class MetalVideoRenderer: NSObject, MTKViewDelegate {
         if let cache = textureCache {
             CVMetalTextureCacheFlush(cache, 0)
         }
+    }
+
+    func bindFrameSource(viewModel: VideoStreamViewModel, view: MTKView) {
+        if boundViewModel === viewModel, boundView === view {
+            return
+        }
+
+        unbindFrameSource()
+        boundViewModel = viewModel
+        boundView = view
+
+        viewModel.setFrameSink { [weak self, weak view] pixelBuffer in
+            guard let self, let view else { return }
+            if Thread.isMainThread {
+                self.currentPixelBuffer = pixelBuffer
+                view.setNeedsDisplay()
+            } else {
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.currentPixelBuffer = pixelBuffer
+                    view.setNeedsDisplay()
+                }
+            }
+        }
+    }
+
+    func unbindFrameSource() {
+        boundViewModel?.clearFrameSink()
+        boundViewModel = nil
+        boundView = nil
     }
     
     private func setupPipeline(view: MTKView) {

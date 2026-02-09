@@ -21,9 +21,10 @@ private let NX_KEYTYPE_NEXT: Int32 = 17
 private let NX_KEYTYPE_PREVIOUS: Int32 = 18
 
 /// Injects mouse and keyboard events into the system.
-@MainActor
-final class InputInjector {
-    static let shared = InputInjector()
+/// PERFORMANCE: Removed @MainActor - CGEvent.post works from any thread,
+/// and processing on background threads reduces touch latency by avoiding main runloop.
+final class InputInjector: @unchecked Sendable {
+    nonisolated static let shared = InputInjector()
     
     private init() {}
     
@@ -32,7 +33,7 @@ final class InputInjector {
     ///   - xPercent: Normalized X coordinate (0.0 = left, 1.0 = right)
     ///   - yPercent: Normalized Y coordinate (0.0 = top, 1.0 = bottom)
     ///   - eventType: The type of touch event to simulate
-    func injectClick(xPercent: Double, yPercent: Double, eventType: TouchEventType) {
+    nonisolated func injectClick(xPercent: Double, yPercent: Double, eventType: TouchEventType) {
         guard let point = pointForNormalized(xPercent: xPercent, yPercent: yPercent) else { return }
         
         switch eventType {
@@ -58,13 +59,13 @@ final class InputInjector {
     }
     
     /// Simulates a single left click at the given screen coordinate.
-    func injectSingleClick(at point: CGPoint) {
+    nonisolated func injectSingleClick(at point: CGPoint) {
         injectMouseDown(at: point)
         injectMouseUp(at: point)
     }
     
     /// Simulates a mouse down event.
-    private func injectMouseDown(at point: CGPoint) {
+    private nonisolated func injectMouseDown(at point: CGPoint) {
         guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: .leftMouseDown,
@@ -80,7 +81,7 @@ final class InputInjector {
     }
     
     /// Simulates a mouse up event.
-    private func injectMouseUp(at point: CGPoint) {
+    private nonisolated func injectMouseUp(at point: CGPoint) {
         guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: .leftMouseUp,
@@ -96,7 +97,7 @@ final class InputInjector {
     }
     
     /// Simulates a mouse drag event.
-    private func injectMouseDrag(to point: CGPoint) {
+    private nonisolated func injectMouseDrag(to point: CGPoint) {
         guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: .leftMouseDragged,
@@ -112,7 +113,7 @@ final class InputInjector {
     }
     
     /// Moves the mouse cursor without clicking.
-    func moveMouse(to point: CGPoint) {
+    nonisolated func moveMouse(to point: CGPoint) {
         guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: .mouseMoved,
@@ -128,19 +129,19 @@ final class InputInjector {
     }
 
     /// Moves the mouse cursor using normalized coordinates (0..1).
-    func moveMouse(xPercent: Double, yPercent: Double) {
+    nonisolated func moveMouse(xPercent: Double, yPercent: Double) {
         guard let point = pointForNormalized(xPercent: xPercent, yPercent: yPercent) else { return }
         moveMouse(to: point)
     }
 
     /// Moves the mouse cursor using normalized coordinates (0..1) within a specific screen frame.
-    func moveMouse(xPercent: Double, yPercent: Double, in screenFrame: CGRect) {
+    nonisolated func moveMouse(xPercent: Double, yPercent: Double, in screenFrame: CGRect) {
         let point = pointForNormalized(xPercent: xPercent, yPercent: yPercent, in: screenFrame)
         moveMouse(to: point)
     }
 
     /// Converts normalized coordinates (0.0-1.0) within a specific screen frame and performs a click/drag.
-    func injectClick(xPercent: Double, yPercent: Double, eventType: TouchEventType, in screenFrame: CGRect) {
+    nonisolated func injectClick(xPercent: Double, yPercent: Double, eventType: TouchEventType, in screenFrame: CGRect) {
         let point = pointForNormalized(xPercent: xPercent, yPercent: yPercent, in: screenFrame)
 
         switch eventType {
@@ -166,7 +167,7 @@ final class InputInjector {
     }
     
     /// Simulates a right click.
-    func injectRightClick(at point: CGPoint) {
+    nonisolated func injectRightClick(at point: CGPoint) {
         guard let downEvent = CGEvent(
             mouseEventSource: nil,
             mouseType: .rightMouseDown,
@@ -190,7 +191,7 @@ final class InputInjector {
     }
     
     /// Simulates a double click.
-    func injectDoubleClick(at point: CGPoint) {
+    nonisolated func injectDoubleClick(at point: CGPoint) {
         // macOS requires the click count to be set for double clicks to be recognized properly by some apps.
         // We simulate: Down(1) -> Up(1) -> Down(2) -> Up(2)
         
@@ -202,7 +203,7 @@ final class InputInjector {
     }
     
     
-    private func injectClickEvent(at point: CGPoint, type: CGEventType, count: Int64) {
+    private nonisolated func injectClickEvent(at point: CGPoint, type: CGEventType, count: Int64) {
         guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: type,
@@ -214,7 +215,7 @@ final class InputInjector {
         event.post(tap: .cghidEventTap)
     }
     
-    private func injectRightClickEvent(at point: CGPoint, type: CGEventType, count: Int64) {
+    private nonisolated func injectRightClickEvent(at point: CGPoint, type: CGEventType, count: Int64) {
         guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: type,
@@ -227,7 +228,7 @@ final class InputInjector {
     }
     
     /// Simulates a scroll event.
-    func injectScroll(deltaX: Int32, deltaY: Int32, at point: CGPoint) {
+    nonisolated func injectScroll(deltaX: Int32, deltaY: Int32, at point: CGPoint) {
         // First move mouse to position
         moveMouse(to: point)
         
@@ -258,7 +259,7 @@ final class InputInjector {
     }
 
     /// Gets the current main screen frame in global CG display coordinates.
-    private func currentMainScreenFrame() -> CGRect? {
+    private nonisolated func currentMainScreenFrame() -> CGRect? {
         let bounds = CGDisplayBounds(CGMainDisplayID())
         guard bounds != .zero else {
             #if DEBUG
@@ -269,7 +270,7 @@ final class InputInjector {
         return bounds
     }
 
-    private func pointForNormalized(xPercent: Double, yPercent: Double) -> CGPoint? {
+    private nonisolated func pointForNormalized(xPercent: Double, yPercent: Double) -> CGPoint? {
         guard let screenFrame = currentMainScreenFrame() else { return nil }
         // CGEvent uses global display coordinates with origin at top-left of primary display
         let x = xPercent * screenFrame.width
@@ -279,7 +280,7 @@ final class InputInjector {
 
     /// Converts normalized (0-1) coordinates to CGEvent screen coordinates.
     /// CGEvent and CGDisplayBounds share the same global coordinate space.
-    private func pointForNormalized(xPercent: Double, yPercent: Double, in screenFrame: CGRect) -> CGPoint {
+    private nonisolated func pointForNormalized(xPercent: Double, yPercent: Double, in screenFrame: CGRect) -> CGPoint {
         let x = screenFrame.origin.x + (xPercent * screenFrame.width)
         let y = screenFrame.origin.y + (yPercent * screenFrame.height)
         return CGPoint(x: x, y: y)
@@ -292,7 +293,7 @@ final class InputInjector {
     ///   - keyCode: macOS virtual key code
     ///   - modifiers: Modifier keys (shift, control, option, command)
     ///   - isKeyDown: true for key press, false for key release
-    func injectKeyEvent(keyCode: UInt16, modifiers: KeyModifiers, isKeyDown: Bool) {
+    nonisolated func injectKeyEvent(keyCode: UInt16, modifiers: KeyModifiers, isKeyDown: Bool) {
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(keyCode), keyDown: isKeyDown) else {
             #if DEBUG
             AirCatchLog.debug(" Failed to create keyboard event for keyCode: \(keyCode)")
@@ -363,7 +364,7 @@ final class InputInjector {
     /// Injects a text string directly as keyboard input.
     /// This is useful for paste operations where constructing individual key events is inefficient.
     /// - Parameter text: The string to inject.
-    func injectText(_ text: String) {
+    nonisolated func injectText(_ text: String) {
         // We support control characters used by incremental text corrections.
         // - U+0008 BACKSPACE => deleteBackward (keyCode 51)
         // - U+007F DELETE    => deleteBackward (common in some streams)

@@ -19,7 +19,7 @@ struct ContentView: View {
     
     // Relay connection state
     @State private var showRelayOverlay = false
-    @AppStorage("relayServerURL") private var relayServerURL = "ws://3.84.120.156:8080"
+    @AppStorage("relayServerURL") private var relayServerURL = "wss://relay.qai88.com"
     @State private var relayRoomCode = ""
     @StateObject private var relayClient = RelayClient()
     @State private var relayError: String?
@@ -145,29 +145,28 @@ struct ContentView: View {
         
         relayClient.onDataReceived = { data in
             // Forward received data to ClientManager for video/audio processing
-            AirCatchLog.info("📥 Client received \(data.count) bytes from relay")
-            guard data.count >= 5 else { 
-                AirCatchLog.error("📥 Packet too small: \(data.count) bytes")
-                return 
-            }
+            guard data.count >= 5 else { return }
             let type = data[0]
             let length = Int(UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4]))
             let payloadStart = 5
             let payloadEnd = min(data.count, payloadStart + length)
-            guard payloadEnd >= payloadStart else { 
-                AirCatchLog.error("📥 Invalid payload bounds")
-                return 
-            }
+            guard payloadEnd >= payloadStart else { return }
+            // SECURITY: Bounds check - reject oversized payloads (max 16MB)
+            guard length <= 16_777_216 else { return }
             let payload = data[payloadStart..<payloadEnd]
             
             if let packetType = PacketType(rawValue: type) {
-                AirCatchLog.info("📥 Client received packet type: \(packetType)")
                 let packet = Packet(type: packetType, payload: Data(payload))
-                Task { @MainActor in
-                    ClientManager.shared.handleRelayPacket(packet)
+                // PERFORMANCE: Route video/audio directly to background processing,
+                // only hop to MainActor for control packets that update UI state
+                switch packetType {
+                case .videoFrame, .videoFrameChunk, .audioPCM:
+                    ClientManager.shared.handleRelayMediaPacket(packet)
+                default:
+                    Task { @MainActor in
+                        ClientManager.shared.handleRelayPacket(packet)
+                    }
                 }
-            } else {
-                AirCatchLog.error("📥 Unknown packet type: \(type)")
             }
         }
     }
@@ -546,7 +545,7 @@ private struct RelayConnectOverlay: View {
                         Text("Relay Server")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("ws://3.84.120.156:8080", text: $serverURL)
+                        TextField("wss://relay.qai88.com", text: $serverURL)
                             .textFieldStyle(.roundedBorder)
                             .keyboardType(.URL)
                             .autocorrectionDisabled()

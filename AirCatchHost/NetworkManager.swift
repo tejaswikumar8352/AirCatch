@@ -107,8 +107,8 @@ final class NetworkManager {
         parameters.allowLocalEndpointReuse = true
         parameters.includePeerToPeer = true
         
-        // Optimize for interactive video streaming
-        parameters.serviceClass = .interactiveVideo
+        // Control/input path: favor low-latency small-packet delivery.
+        parameters.serviceClass = .responsiveData
         
         if let tcpOption = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
             tcpOption.enableKeepalive = true
@@ -506,6 +506,13 @@ final class NetworkManager {
             // Parse payload length (big endian)
             let length = Int(data[1]) << 24 | Int(data[2]) << 16 | Int(data[3]) << 8 | Int(data[4])
             
+            // SECURITY: Reject oversized payloads to prevent memory exhaustion
+            if length > AirCatchConfig.maxTCPPayloadLength {
+                AirCatchLog.error("TCP payload too large: \(length) bytes - rejecting", category: .network)
+                self.tcpReceiveLoop(on: connection)
+                return
+            }
+            
             if length == 0 {
                 self.tcpReceiveHandler?(Packet(type: type, payload: Data()), connection)
                 self.tcpReceiveLoop(on: connection)
@@ -576,4 +583,3 @@ private extension NetworkManager {
         list.removeAll { $0 === connection }
     }
 }
-

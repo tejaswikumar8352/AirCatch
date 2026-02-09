@@ -11,7 +11,7 @@ import CoreMedia
 import Accelerate  // PERFORMANCE: SIMD-optimized audio processing
 
 /// Plays PCM audio streamed from the AirCatch host.
-final class AudioPlayer {
+nonisolated final class AudioPlayer: @unchecked Sendable {
     
     // MARK: - Audio Engine
     
@@ -25,9 +25,7 @@ final class AudioPlayer {
     // We will upmix this to Stereo on playback.
     private let sampleRate: Double = 48000
     private let channelCount: UInt32 = 2
-    private lazy var audioFormat: AVAudioFormat? = {
-        AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount)
-    }()
+    private let audioFormat: AVAudioFormat?
     
     // MARK: - State
     
@@ -41,6 +39,7 @@ final class AudioPlayer {
     // MARK: - Initialization
     
     init() {
+        self.audioFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount)
         setupAudioSession()
         setupAudioEngine()
     }
@@ -75,7 +74,7 @@ final class AudioPlayer {
     
     // MARK: - Public API
     
-    func start() {
+    nonisolated func start() {
         guard !isRunning else { return }
         
         do {
@@ -88,7 +87,7 @@ final class AudioPlayer {
         }
     }
     
-    func stop() {
+    nonisolated func stop() {
         guard isRunning else { return }
         
         playerNode.stop()
@@ -100,7 +99,7 @@ final class AudioPlayer {
     
     /// Play audio data received from host
     /// - Parameter data: Audio packet with 8-byte timestamp header + PCM data
-    func playAudioPacket(_ data: Data) {
+    nonisolated func playAudioPacket(_ data: Data) {
         guard isRunning, data.count > 8 else { return }
         
         packetCount += 1
@@ -175,14 +174,14 @@ final class AudioPlayer {
     }
     
     @discardableResult
-    private func updatePendingBuffers(_ delta: Int) -> Int {
+    private nonisolated func updatePendingBuffers(_ delta: Int) -> Int {
         stateQueue.sync {
             pendingBuffers = max(0, pendingBuffers + delta)
             return pendingBuffers
         }
     }
 
-    private func resetPendingBuffers() {
+    private nonisolated func resetPendingBuffers() {
         stateQueue.sync {
             pendingBuffers = 0
         }

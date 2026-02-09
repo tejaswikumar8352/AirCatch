@@ -13,6 +13,9 @@ import Combine
 
 /// Handles WebSocket connection to remote relay server for AirCatchHost
 final class RelayClient: NSObject {
+    private static let insecureRelayWSUserDefaultsKey = "allowInsecureRelayWS"
+    private static let insecureRelayWSEnvKey = "AIRCATCH_ALLOW_INSECURE_RELAY_WS"
+    private static let insecureRelayWSQueryKey = "allowInsecureWs"
     
     // MARK: - Properties
     
@@ -24,6 +27,12 @@ final class RelayClient: NSObject {
     private let connectionLock = NSLock()
     private var _isConnectedAtomic = false
     private var serverURL: URL?
+    
+    // PERFORMANCE: Backpressure cap for video sends
+    // Limits outstanding video send operations to prevent unbounded memory growth
+    private let maxOutstandingVideoSends = 3
+    private var outstandingVideoSends = 0
+    private let videoSendLock = NSLock()
     
     // Track which channels are connected
     private var videoConnected = false
@@ -75,6 +84,11 @@ final class RelayClient: NSObject {
             onError?("Invalid relay server URL")
             return
         }
+
+        guard isRelayURLAllowed(url) else {
+            onError?(relayURLValidationErrorMessage())
+            return
+        }
         
         self.serverURL = url
         self.roomCode = roomCode ?? generateRoomCode()
@@ -82,17 +96,18 @@ final class RelayClient: NSObject {
         // Cancel existing connections
         disconnect()
         
-        // Use single combined socket for compatibility
-        // (Dual-channel mode requires updated server)
+        // PERFORMANCE: Dual-channel mode - separate sockets for video and control
+        // Prevents head-of-line blocking where large video frames delay touch/input events
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         
         controlSocketTask = urlSession.webSocketTask(with: request)
-        videoSocketTask = controlSocketTask  // Share same socket
+        videoSocketTask = urlSession.webSocketTask(with: request)  // Separate socket for video
         
         controlSocketTask?.resume()
+        videoSocketTask?.resume()
         
-        AirCatchLog.info("🔗 Connecting to relay server: \(serverURL)")
+        AirCatchLog.info("🔗 Connecting to relay server (dual-channel): \(serverURL)")
     }
     
     /// Disconnect from relay server
@@ -115,7 +130,21 @@ final class RelayClient: NSObject {
     func sendVideo(data: Data) {
         guard isConnectedThreadSafe else { return }
         
-        videoSocketTask?.send(.data(data)) { error in
+        // PERFORMANCE: Drop video frames if too many sends are outstanding
+        // Prevents unbounded memory growth when network is slow
+        videoSendLock.lock()
+        guard outstandingVideoSends < maxOutstandingVideoSends else {
+            videoSendLock.unlock()
+            return  // Drop frame - newer ones will arrive soon
+        }
+        outstandingVideoSends += 1
+        videoSendLock.unlock()
+        
+        videoSocketTask?.send(.data(data)) { [weak self] error in
+            guard let self else { return }
+            self.videoSendLock.lock()
+            self.outstandingVideoSends -= 1
+            self.videoSendLock.unlock()
             if let error = error {
                 AirCatchLog.error("Relay video send error: \(error)")
             }
@@ -166,6 +195,60 @@ final class RelayClient: NSObject {
     private func generateRoomCode() -> String {
         let characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // Excluded confusing chars: I, O, 0, 1
         return String((0..<6).map { _ in characters.randomElement()! })
+    }
+
+    private func isRelayURLAllowed(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "wss" { return true }
+        guard scheme == "ws" else { return false }
+
+        let host = (url.host ?? "").lowercased()
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+            return true
+        }
+
+        if insecureRelayWSAllowedForTesting(url: url) {
+            AirCatchLog.info("Allowing insecure ws:// relay URL for testing (DEBUG override).")
+            return true
+        }
+
+        return false
+    }
+
+    private func relayURLValidationErrorMessage() -> String {
+        #if DEBUG
+        return "Relay URL must use wss:// (ws:// is allowed only for localhost). For testing use '?allowInsecureWs=1' or set UserDefaults '\(Self.insecureRelayWSUserDefaultsKey)' to true."
+        #else
+        return "Relay URL must use wss:// (ws:// is allowed only for localhost). For testing use '?allowInsecureWs=1'."
+        #endif
+    }
+
+    private func insecureRelayWSAllowedForTesting(url: URL) -> Bool {
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let items = components.queryItems,
+           items.contains(where: { $0.name.caseInsensitiveCompare(Self.insecureRelayWSQueryKey) == .orderedSame && ($0.value ?? "1") != "0" }) {
+            return true
+        }
+
+        if let raw = ProcessInfo.processInfo.environment[Self.insecureRelayWSEnvKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !raw.isEmpty {
+            if raw == "1" || raw == "true" || raw == "yes" || raw == "on" {
+                return true
+            }
+        }
+
+        if UserDefaults.standard.bool(forKey: Self.insecureRelayWSUserDefaultsKey) {
+            return true
+        }
+
+        #if DEBUG
+        // Debug builds default to allowing non-local ws:// for fast LAN/WAN testing.
+        return true
+        #else
+        return false
+        #endif
     }
     
     private func registerAsHost(task: URLSessionWebSocketTask, channel: String) {

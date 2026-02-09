@@ -32,6 +32,7 @@ final class ScreenStreamer: NSObject {
     // MARK: - Capture Components
     
     private var stream: SCStream?
+    private var streamConfiguration: SCStreamConfiguration?
     private var streamOutput: StreamOutput?
     private var videoQueue: DispatchQueue?
     private var encodeQueue: DispatchQueue?
@@ -132,7 +133,7 @@ final class ScreenStreamer: NSObject {
         config.width = width
         config.height = height
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(targetFrameRate))
-        config.queueDepth = 5 // Allow buffer for compression pipeline
+        config.queueDepth = 3 // Keep latency low while preserving encoder headroom
         
         // Use compatible pixel format - BGRA works with both H.264 and HEVC
         // VideoToolbox will handle color space conversion internally
@@ -183,6 +184,7 @@ final class ScreenStreamer: NSObject {
         try await stream.startCapture()
         
         self.stream = stream
+        self.streamConfiguration = config
         isRunning = true
         
         AirCatchLog.info(" Started capturing at \(targetFrameRate)fps (\(width)x\(height))")
@@ -196,6 +198,7 @@ final class ScreenStreamer: NSObject {
         }
         
         stream = nil
+        streamConfiguration = nil
         streamOutput = nil
         
         if let session = compressionSession {
@@ -205,6 +208,10 @@ final class ScreenStreamer: NSObject {
         
         isRunning = false
         AirCatchLog.info(" Stopped")
+    }
+    
+    deinit {
+        reusableAudioBufferList.deallocate()
     }
 
     /// Enable/disable video encoding while keeping capture running.
@@ -399,6 +406,26 @@ final class ScreenStreamer: NSObject {
         // Also update keyframe interval to match 1 second
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
         AirCatchLog.info(" Encoder FPS updated to \(fps)")
+    }
+
+    /// Updates both encoder FPS hints and capture output FPS.
+    /// This is required for real throughput reduction under network congestion.
+    func setCaptureFrameRate(_ fps: Int) {
+        let clampedFps = max(1, fps)
+        setFrameRate(clampedFps)
+
+        guard let stream, let config = streamConfiguration else { return }
+        targetFrameRate = clampedFps
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(clampedFps))
+
+        Task {
+            do {
+                try await stream.updateConfiguration(config)
+                AirCatchLog.info(" Capture FPS updated to \(clampedFps)")
+            } catch {
+                AirCatchLog.error("Failed to update capture FPS: \(error)", category: .video)
+            }
+        }
     }
     
     private var compressCount = 0
@@ -676,20 +703,23 @@ final class ScreenStreamer: NSObject {
     
     // MARK: - Audio Processing
     
+    // PERFORMANCE: Pre-allocated audio buffer list to avoid allocator churn per sample callback.
+    // ScreenCaptureKit delivers up to 2 audio buffers (stereo planar).
+    private let audioListSize = MemoryLayout<AudioBufferList>.size + MemoryLayout<AudioBuffer>.size
+    private lazy var reusableAudioBufferList: UnsafeMutablePointer<UInt8> = {
+        let ptr = UnsafeMutablePointer<UInt8>.allocate(capacity: audioListSize)
+        return ptr
+    }()
+    
     /// Process audio sample buffer and send raw PCM data to callback
     private func processAudioSample(_ sampleBuffer: CMSampleBuffer) {
         guard let audioCallback = audioCallback else { return }
         
-        // Allocate space for 2 buffers (Safe limit for stereo from ScreenCaptureKit).
-        // Standard AudioBufferList struct only has space for 1 buffer.
-        // Size = Header + (Start of buffers) ... No, it implies 1 buffer.
-        // Correct calculation:
-        let listSize = MemoryLayout<AudioBufferList>.size + MemoryLayout<AudioBuffer>.size
-        let bufferListPointer = UnsafeMutablePointer<UInt8>.allocate(capacity: listSize)
-        defer { bufferListPointer.deallocate() }
+        // PERFORMANCE: Reuse pre-allocated buffer instead of allocating per sample
+        let bufferListPointer = reusableAudioBufferList
         
-        // Initialize with zeros just in case
-        bufferListPointer.initialize(repeating: 0, count: listSize)
+        // Zero out for each use
+        bufferListPointer.initialize(repeating: 0, count: audioListSize)
         
         // Rebound to AudioBufferList for API call
         let audioBufferListPtr = bufferListPointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { $0 }
@@ -700,7 +730,7 @@ final class ScreenStreamer: NSObject {
             sampleBuffer,
             bufferListSizeNeededOut: nil,
             bufferListOut: audioBufferListPtr,
-            bufferListSize: listSize,
+            bufferListSize: audioListSize,
             blockBufferAllocator: nil,
             blockBufferMemoryAllocator: nil,
             flags: 0,

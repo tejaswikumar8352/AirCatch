@@ -22,15 +22,12 @@ struct VideoStreamOverlay: View {
                 Color.black
                 
                 let webRTCTrack = clientManager.webRTCVideoTrack
-                let hasVideo = webRTCTrack != nil || viewModel.pixelBuffer != nil
+                let hasVideo = webRTCTrack != nil || viewModel.hasFrame
 
                 if hasVideo {
                     let videoSize: CGSize = {
-                        if let pixelBuffer = viewModel.pixelBuffer {
-                            return CGSize(
-                                width: CGFloat(CVPixelBufferGetWidth(pixelBuffer)),
-                                height: CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-                            )
+                        if let frameSize = viewModel.frameSize {
+                            return frameSize
                         }
                         if let screenInfo = clientManager.screenInfo {
                             return CGSize(width: CGFloat(screenInfo.width), height: CGFloat(screenInfo.height))
@@ -50,12 +47,7 @@ struct VideoStreamOverlay: View {
                         if let webRTCTrack {
                             WebRTCVideoView(track: webRTCTrack)
                         } else {
-                            MetalVideoView(
-                                pixelBuffer: Binding(
-                                    get: { viewModel.pixelBuffer },
-                                    set: { _ in }
-                                )
-                            )
+                            MetalVideoView(viewModel: viewModel)
                         }
                         
                         // Touch layer
@@ -126,9 +118,15 @@ struct VideoStreamOverlay: View {
 // MARK: - View Model (Immediate Frame Display)
 
 final class VideoStreamViewModel: NSObject, ObservableObject {
-    @Published var pixelBuffer: CVPixelBuffer?
+    @Published private(set) var hasFrame: Bool = false
+    @Published private(set) var frameSize: CGSize?
     var lastTouchLocation: CGPoint?
     private let decoder = VideoDecoder()
+    private let frameSinkLock = NSLock()
+    private var frameSink: ((CVPixelBuffer) -> Void)?
+    private let streamStateLock = NSLock()
+    private var cachedHasFrame = false
+    private var cachedFrameSize: CGSize?
     
     override init() {
         super.init()
@@ -139,11 +137,35 @@ final class VideoStreamViewModel: NSObject, ObservableObject {
         decoder.decode(frameData: frameData)
     }
     
+    func setFrameSink(_ sink: @escaping (CVPixelBuffer) -> Void) {
+        frameSinkLock.lock()
+        frameSink = sink
+        frameSinkLock.unlock()
+    }
+
+    func clearFrameSink() {
+        frameSinkLock.lock()
+        frameSink = nil
+        frameSinkLock.unlock()
+    }
+
     func reset() {
         decoder.reset()
-        Task { @MainActor in
-            self.pixelBuffer = nil
+        streamStateLock.lock()
+        cachedHasFrame = false
+        cachedFrameSize = nil
+        streamStateLock.unlock()
+        Task { @MainActor [weak self] in
+            self?.hasFrame = false
+            self?.frameSize = nil
         }
+    }
+
+    private func pushFrameToSink(_ pixelBuffer: CVPixelBuffer) {
+        frameSinkLock.lock()
+        let sink = frameSink
+        frameSinkLock.unlock()
+        sink?(pixelBuffer)
     }
 }
 
@@ -152,6 +174,8 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
     private static var frameLogCount = 0
     
     func decoder(_ decoder: VideoDecoder, didOutputPixelBuffer pixelBuffer: CVPixelBuffer, presentationTime: CMTime) {
+        pushFrameToSink(pixelBuffer)
+
         // Only log first frame to reduce noise
         VideoStreamViewModel.frameLogCount += 1
         if VideoStreamViewModel.frameLogCount == 1 {
@@ -159,18 +183,39 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
             let height = CVPixelBufferGetHeight(pixelBuffer)
             AirCatchLog.info("Streaming started: \(width)x\(height)", category: .video)
         }
-        
-        // Display frame immediately for lowest latency
-        Task { @MainActor in
-            self.pixelBuffer = pixelBuffer
+
+        let newSize = CGSize(
+            width: CGFloat(CVPixelBufferGetWidth(pixelBuffer)),
+            height: CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+        )
+
+        var shouldPublish = false
+        streamStateLock.lock()
+        if !cachedHasFrame || cachedFrameSize != newSize {
+            cachedHasFrame = true
+            cachedFrameSize = newSize
+            shouldPublish = true
+        }
+        streamStateLock.unlock()
+
+        if shouldPublish {
+            Task { @MainActor [weak self] in
+                self?.hasFrame = true
+                self?.frameSize = newSize
+            }
         }
     }
 
     
     func decoder(_ decoder: VideoDecoder, didEncounterError error: Error) {
         AirCatchLog.info(" Decode error: \(error)")
-        Task { @MainActor in
-            self.pixelBuffer = nil
+        streamStateLock.lock()
+        cachedHasFrame = false
+        cachedFrameSize = nil
+        streamStateLock.unlock()
+        Task { @MainActor [weak self] in
+            self?.hasFrame = false
+            self?.frameSize = nil
         }
     }
 }

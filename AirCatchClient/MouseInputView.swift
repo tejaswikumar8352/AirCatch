@@ -29,11 +29,17 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     private var twoFingerPanGesture: UIPanGestureRecognizer?
     private var activeTouchCount: Int = 0
     
-    // PERFORMANCE: Throttle continuous events to 60Hz (16.67ms)
+    // PERFORMANCE: Throttle continuous events.
+    // Local mode can use higher rates, relay mode is capped lower to prevent control-path queueing.
     private var lastMoveTime: CFTimeInterval = 0
     private var lastPanTime: CFTimeInterval = 0
     private var lastPinchTime: CFTimeInterval = 0
-    private let throttleInterval: CFTimeInterval = 1.0 / 60.0  // 60Hz
+    private let localThrottleInterval: CFTimeInterval = 1.0 / 120.0
+    private let relayThrottleInterval: CFTimeInterval = 1.0 / 60.0
+
+    private func activeThrottleInterval() -> CFTimeInterval {
+        clientManager?.isRelaySessionActive == true ? relayThrottleInterval : localThrottleInterval
+    }
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -98,10 +104,10 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
         super.touchesMoved(touches, with: event)
         activeTouchCount = event?.allTouches?.count ?? touches.count
         // Only forward single-finger touches for drag
-        // PERFORMANCE: Throttle to 60Hz to reduce event flood on ProMotion displays
+        // PERFORMANCE: Throttle to 120Hz to reduce event flood on ProMotion displays
         if activeTouchCount == 1 {
             let now = CACurrentMediaTime()
-            if now - lastMoveTime >= throttleInterval {
+            if now - lastMoveTime >= activeThrottleInterval() {
                 lastMoveTime = now
                 forwardTouch(touches, phase: .moved)
             }
@@ -155,9 +161,9 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     @objc private func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
         case .began, .changed:
-            // PERFORMANCE: Throttle to 60Hz
+            // PERFORMANCE: Throttle to 120Hz
             let now = CACurrentMediaTime()
-            guard now - lastPanTime >= throttleInterval else {
+            guard now - lastPanTime >= activeThrottleInterval() else {
                 gesture.setTranslation(.zero, in: self)  // Still reset to get cumulative delta
                 return
             }
@@ -183,9 +189,9 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         switch gesture.state {
         case .began, .changed:
-            // PERFORMANCE: Throttle to 60Hz
+            // PERFORMANCE: Throttle to 120Hz
             let now = CACurrentMediaTime()
-            guard now - lastPinchTime >= throttleInterval else {
+            guard now - lastPinchTime >= activeThrottleInterval() else {
                 return
             }
             lastPinchTime = now
