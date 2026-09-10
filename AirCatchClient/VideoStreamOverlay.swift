@@ -155,10 +155,7 @@ final class VideoStreamViewModel: NSObject, ObservableObject {
         cachedHasFrame = false
         cachedFrameSize = nil
         streamStateLock.unlock()
-        Task { @MainActor [weak self] in
-            self?.hasFrame = false
-            self?.frameSize = nil
-        }
+        publishFrameState(hasFrame: false, frameSize: nil)
     }
 
     private func pushFrameToSink(_ pixelBuffer: CVPixelBuffer) {
@@ -166,6 +163,18 @@ final class VideoStreamViewModel: NSObject, ObservableObject {
         let sink = frameSink
         frameSinkLock.unlock()
         sink?(pixelBuffer)
+    }
+
+    private func publishFrameState(hasFrame: Bool, frameSize: CGSize?) {
+        let apply = { [weak self] in
+            self?.hasFrame = hasFrame
+            self?.frameSize = frameSize
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
     }
 }
 
@@ -199,10 +208,7 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
         streamStateLock.unlock()
 
         if shouldPublish {
-            Task { @MainActor [weak self] in
-                self?.hasFrame = true
-                self?.frameSize = newSize
-            }
+            publishFrameState(hasFrame: true, frameSize: newSize)
         }
     }
 
@@ -213,10 +219,7 @@ extension VideoStreamViewModel: VideoDecoderDelegate {
         cachedHasFrame = false
         cachedFrameSize = nil
         streamStateLock.unlock()
-        Task { @MainActor [weak self] in
-            self?.hasFrame = false
-            self?.frameSize = nil
-        }
+        publishFrameState(hasFrame: false, frameSize: nil)
     }
 }
 

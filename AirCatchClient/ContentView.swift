@@ -126,21 +126,29 @@ struct ContentView: View {
     
     private func setupRelayCallbacks() {
         relayClient.onHostConnected = { [self] in
-            showRelayOverlay = false
-            clientManager.startRelaySession(with: relayClient)
-            AirCatchLog.info("Host connected via relay - ready to stream")
+            Task { @MainActor in
+                showRelayOverlay = false
+                clientManager.startRelaySession(with: relayClient)
+                AirCatchLog.info("Host connected via relay - ready to stream")
+            }
         }
 
         relayClient.onHostDisconnected = { [self] in
-            clientManager.stopRelaySession()
+            Task { @MainActor in
+                clientManager.stopRelaySession()
+            }
         }
 
         relayClient.onDisconnected = { [self] _ in
-            clientManager.stopRelaySession(shouldRestartDiscovery: false)
+            Task { @MainActor in
+                clientManager.stopRelaySession(shouldRestartDiscovery: false)
+            }
         }
         
         relayClient.onError = { error in
-            relayError = error
+            Task { @MainActor in
+                relayError = error
+            }
         }
         
         relayClient.onDataReceived = { data in

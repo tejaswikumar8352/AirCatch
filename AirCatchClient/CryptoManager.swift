@@ -8,6 +8,7 @@
 
 import Foundation
 import CryptoKit
+import CommonCrypto
 
 /// Provides end-to-end encryption using AES-256-GCM with PIN-derived key.
 /// This ensures neither network sniffers nor intermediaries can read data.
@@ -18,28 +19,57 @@ nonisolated final class CryptoManager: @unchecked Sendable {
     // SECURITY: Use unique, version-tagged salts for different derivation purposes
     private static let encryptionSalt = "AirCatch-E2EE-v2-encryption".data(using: .utf8)!
     private static let authSalt = "AirCatch-E2EE-v2-auth".data(using: .utf8)!
-    private static let info = "AirCatch-Session".data(using: .utf8)!
+    private nonisolated static let pbkdfRounds: UInt32 = 200_000
+    private nonisolated static let derivedKeyLength: Int = 32
+    
+    private static func deriveKeyMaterial(pin: String, salt: Data) -> Data? {
+        var derived = Data(count: Self.derivedKeyLength)
+        let passwordLength = pin.lengthOfBytes(using: .utf8)
+        guard passwordLength > 0 else { return nil }
+        
+        let status = salt.withUnsafeBytes { saltBytes in
+            derived.withUnsafeMutableBytes { derivedBytes in
+                pin.withCString { passwordPtr in
+                    CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        passwordPtr,
+                        passwordLength,
+                        saltBytes.bindMemory(to: UInt8.self).baseAddress,
+                        salt.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                        Self.pbkdfRounds,
+                        derivedBytes.bindMemory(to: UInt8.self).baseAddress,
+                        Self.derivedKeyLength
+                    )
+                }
+            }
+        }
+        
+        guard status == kCCSuccess else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: PBKDF2 key derivation failed (\(status))", category: .network)
+            #endif
+            return nil
+        }
+        return derived
+    }
     
     /// Computes a challenge response for PIN verification (client-side).
     /// The response is HMAC-SHA256(challenge, authKey) where authKey is derived from PIN.
     nonisolated func computeChallengeResponse(challenge: Data, pin: String) -> Data? {
         guard !pin.isEmpty else { return nil }
         
-        // Derive an authentication key from PIN (separate from encryption key)
-        let pinData = Data(pin.utf8)
-        let authKey = HKDF<SHA256>.deriveKey(
-            inputKeyMaterial: SymmetricKey(data: pinData),
-            salt: Self.authSalt,
-            info: Self.info,
-            outputByteCount: 32
-        )
+        guard let authKeyData = Self.deriveKeyMaterial(pin: pin, salt: Self.authSalt) else {
+            return nil
+        }
+        let authKey = SymmetricKey(data: authKeyData)
         
         // HMAC the challenge with the auth key
         let hmac = HMAC<SHA256>.authenticationCode(for: challenge, using: authKey)
         return Data(hmac)
     }
     
-    /// Derives a 256-bit AES key from the PIN using HKDF.
+    /// Derives a 256-bit AES key from the PIN using PBKDF2-HMAC-SHA256.
     /// Call this when PIN is generated (host) or entered (client).
     nonisolated func deriveKey(from pin: String) {
         guard !pin.isEmpty else {
@@ -49,19 +79,14 @@ nonisolated final class CryptoManager: @unchecked Sendable {
             return
         }
         
-        let pinData = Data(pin.utf8)
-        
-        // Use HKDF to derive a strong key from the short PIN
-        // Salt ensures different apps with same PIN get different keys
-        // Info adds context to the derivation
-        let derivedKey = HKDF<SHA256>.deriveKey(
-            inputKeyMaterial: SymmetricKey(data: pinData),
-            salt: Self.encryptionSalt,
-            info: Self.info,
-            outputByteCount: 32  // 256 bits for AES-256
-        )
+        guard let keyData = Self.deriveKeyMaterial(pin: pin, salt: Self.encryptionSalt) else {
+            lock.lock()
+            key = nil
+            lock.unlock()
+            return
+        }
         lock.lock()
-        key = derivedKey
+        key = SymmetricKey(data: keyData)
         lock.unlock()
         
         #if DEBUG

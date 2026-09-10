@@ -10,20 +10,34 @@
 import Foundation
 import Network
 import Combine
+import CryptoKit
+import Security
 
 /// Handles WebSocket connection to remote relay server for AirCatchHost
 final class RelayClient: NSObject {
     private static let insecureRelayWSUserDefaultsKey = "allowInsecureRelayWS"
     private static let insecureRelayWSEnvKey = "AIRCATCH_ALLOW_INSECURE_RELAY_WS"
     private static let insecureRelayWSQueryKey = "allowInsecureWs"
+    private static let disableTLSPinningUserDefaultsKey = "disableRelayTLSPinning"
+    private static let disableTLSPinningEnvKey = "AIRCATCH_DISABLE_RELAY_TLS_PINNING"
+    private static let pinnedSPKIUserDefaultsKey = "relayPinnedSPKIByHost"
+    private static let defaultPinnedSPKIByHost: [String: Set<String>] = [
+        // relay.qai88.com current public key pin (base64 SHA-256 of SecKey external representation)
+        "relay.qai88.com": ["1+GESKm46Vf+tOAl5Ny3A1NbS9B5Q7jxy7NXhqoDbDA="],
+    ]
     
     // MARK: - Properties
     
     // Dual-channel WebSocket connections
     private var videoSocketTask: URLSessionWebSocketTask?
     private var controlSocketTask: URLSessionWebSocketTask?
-    private var urlSession: URLSession!
-    private let delegateQueue = OperationQueue()
+    // PERFORMANCE: Separate URLSessions per channel to avoid head-of-line blocking.
+    // A shared serial delegateQueue causes video callbacks to delay control callbacks,
+    // producing progressive lag over minutes of streaming.
+    private var videoURLSession: URLSession!
+    private var controlURLSession: URLSession!
+    private let videoDelegateQueue = OperationQueue()
+    private let controlDelegateQueue = OperationQueue()
     private let connectionLock = NSLock()
     private var _isConnectedAtomic = false
     private var serverURL: URL?
@@ -33,6 +47,10 @@ final class RelayClient: NSObject {
     private let maxOutstandingVideoSends = 3
     private var outstandingVideoSends = 0
     private let videoSendLock = NSLock()
+    
+    // PERFORMANCE: Time-based send gating for prolonged backpressure.
+    // If backpressure has been saturated for > 1s, drop aggressively until it recovers.
+    private var backpressureSaturatedSince: TimeInterval = 0
     
     // Track which channels are connected
     private var videoConnected = false
@@ -68,8 +86,14 @@ final class RelayClient: NSObject {
     
     override init() {
         super.init()
-        delegateQueue.maxConcurrentOperationCount = 1
-        urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: delegateQueue)
+        // PERFORMANCE: Each channel gets its own serial queue so video frame
+        // processing never blocks control message handling.
+        videoDelegateQueue.maxConcurrentOperationCount = 1
+        videoDelegateQueue.qualityOfService = .userInitiated
+        controlDelegateQueue.maxConcurrentOperationCount = 1
+        controlDelegateQueue.qualityOfService = .userInteractive  // Control is highest priority
+        videoURLSession = URLSession(configuration: .default, delegate: self, delegateQueue: videoDelegateQueue)
+        controlURLSession = URLSession(configuration: .default, delegate: self, delegateQueue: controlDelegateQueue)
     }
     
     // MARK: - Connection
@@ -81,12 +105,17 @@ final class RelayClient: NSObject {
     ///   - roomCode: Room code for client to join (auto-generated if nil)
     func connect(to serverURL: String, roomCode: String? = nil) {
         guard let url = URL(string: serverURL) else {
-            onError?("Invalid relay server URL")
+            dispatchToMain { [weak self] in
+                self?.onError?("Invalid relay server URL")
+            }
             return
         }
 
         guard isRelayURLAllowed(url) else {
-            onError?(relayURLValidationErrorMessage())
+            let message = relayURLValidationErrorMessage()
+            dispatchToMain { [weak self] in
+                self?.onError?(message)
+            }
             return
         }
         
@@ -101,8 +130,9 @@ final class RelayClient: NSObject {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         
-        controlSocketTask = urlSession.webSocketTask(with: request)
-        videoSocketTask = urlSession.webSocketTask(with: request)  // Separate socket for video
+        // PERFORMANCE: Use separate URLSessions so each channel has its own delegate queue.
+        controlSocketTask = controlURLSession.webSocketTask(with: request)
+        videoSocketTask = videoURLSession.webSocketTask(with: request)
         
         controlSocketTask?.resume()
         videoSocketTask?.resume()
@@ -118,7 +148,7 @@ final class RelayClient: NSObject {
         controlSocketTask = nil
         videoConnected = false
         controlConnected = false
-        DispatchQueue.main.async { [weak self] in
+        dispatchToMain { [weak self] in
             self?.isConnected = false
             self?.clientConnected = false
         }
@@ -133,22 +163,40 @@ final class RelayClient: NSObject {
         // PERFORMANCE: Drop video frames if too many sends are outstanding
         // Prevents unbounded memory growth when network is slow
         videoSendLock.lock()
-        guard outstandingVideoSends < maxOutstandingVideoSends else {
+        let outstanding = outstandingVideoSends
+        guard outstanding < maxOutstandingVideoSends else {
+            // PERFORMANCE: Track how long backpressure has been saturated.
+            // If saturated for > 1s, the connection is too slow — caller should
+            // consider reducing bitrate/framerate.
+            if backpressureSaturatedSince == 0 {
+                backpressureSaturatedSince = Date().timeIntervalSinceReferenceDate
+            }
             videoSendLock.unlock()
             return  // Drop frame - newer ones will arrive soon
         }
         outstandingVideoSends += 1
+        backpressureSaturatedSince = 0  // Reset — we have capacity
         videoSendLock.unlock()
         
         videoSocketTask?.send(.data(data)) { [weak self] error in
             guard let self else { return }
             self.videoSendLock.lock()
-            self.outstandingVideoSends -= 1
+            self.outstandingVideoSends = max(0, self.outstandingVideoSends - 1)
             self.videoSendLock.unlock()
             if let error = error {
                 AirCatchLog.error("Relay video send error: \(error)")
             }
         }
+    }
+    
+    /// Returns how long (seconds) the video send queue has been continuously saturated.
+    /// HostManager can use this to proactively reduce bitrate when relay is slow.
+    var backpressureDuration: TimeInterval {
+        videoSendLock.lock()
+        let since = backpressureSaturatedSince
+        videoSendLock.unlock()
+        guard since > 0 else { return 0 }
+        return Date().timeIntervalSinceReferenceDate - since
     }
     
     /// Send control/audio data through control channel (low-latency, never dropped)
@@ -182,8 +230,10 @@ final class RelayClient: NSObject {
         packet.append(payload)
         
         // Route based on packet type
+        // PERFORMANCE: Audio goes through video channel to avoid flooding
+        // the control channel and blocking touch/keyboard events.
         switch type {
-        case .videoFrame, .videoFrameChunk:
+        case .videoFrame, .videoFrameChunk, .audioPCM:
             sendVideo(data: packet)
         default:
             sendControl(data: packet)
@@ -191,6 +241,14 @@ final class RelayClient: NSObject {
     }
     
     // MARK: - Private Methods
+
+    private func dispatchToMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
+    }
     
     private func generateRoomCode() -> String {
         let characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // Excluded confusing chars: I, O, 0, 1
@@ -251,6 +309,44 @@ final class RelayClient: NSObject {
         #endif
     }
     
+    private static func parseBoolFlag(_ raw: String) -> Bool {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return value == "1" || value == "true" || value == "yes" || value == "on"
+    }
+    
+    private func isTLSPinningDisabled() -> Bool {
+        if UserDefaults.standard.bool(forKey: Self.disableTLSPinningUserDefaultsKey) {
+            return true
+        }
+        if let envRaw = ProcessInfo.processInfo.environment[Self.disableTLSPinningEnvKey],
+           Self.parseBoolFlag(envRaw) {
+            return true
+        }
+        return false
+    }
+    
+    private func expectedPinnedSPKI(for host: String) -> Set<String>? {
+        guard !isTLSPinningDisabled() else { return nil }
+        let normalized = host.lowercased()
+        
+        if let custom = UserDefaults.standard.dictionary(forKey: Self.pinnedSPKIUserDefaultsKey) as? [String: [String]],
+           let pins = custom[normalized], !pins.isEmpty {
+            return Set(pins)
+        }
+        
+        return Self.defaultPinnedSPKIByHost[normalized]
+    }
+    
+    private static func spkiHashBase64(from trust: SecTrust) -> String? {
+        guard let key = SecTrustCopyKey(trust) else { return nil }
+        
+        var error: Unmanaged<CFError>?
+        guard let keyData = SecKeyCopyExternalRepresentation(key, &error) as Data? else { return nil }
+        
+        let digest = SHA256.hash(data: keyData)
+        return Data(digest).base64EncodedString()
+    }
+    
     private func registerAsHost(task: URLSessionWebSocketTask, channel: String) {
         // Only include channel if using dual-channel mode (separate sockets)
         var registration: [String: Any] = [
@@ -266,14 +362,18 @@ final class RelayClient: NSObject {
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: registration),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
-            onError?("Failed to create registration message")
+            dispatchToMain { [weak self] in
+                self?.onError?("Failed to create registration message")
+            }
             return
         }
         
         task.send(.string(jsonString)) { [weak self] error in
             if let error = error {
                 AirCatchLog.error("Registration send error (\(channel)): \(error)")
-                self?.onError?("Failed to register with relay server")
+                self?.dispatchToMain {
+                    self?.onError?("Failed to register with relay server")
+                }
             }
         }
         
@@ -342,7 +442,7 @@ final class RelayClient: NSObject {
             
             // Fire callbacks when both channels are connected (or combined mode)
             if videoConnected && controlConnected {
-                DispatchQueue.main.async { [weak self] in
+                dispatchToMain { [weak self] in
                     self?.isConnected = true
                     self?.clientConnected = peerConnected
                     self?.onConnected?()
@@ -359,7 +459,7 @@ final class RelayClient: NSObject {
             
             // Fire callback on control channel connection (triggers once)
             if peerChannel == "control" || peerChannel == "combined" {
-                DispatchQueue.main.async { [weak self] in
+                dispatchToMain { [weak self] in
                     self?.clientConnected = true
                     self?.onClientConnected?()
                 }
@@ -371,7 +471,7 @@ final class RelayClient: NSObject {
             
             // Fire disconnect on control channel (more important)
             if peerChannel == "control" || peerChannel == "combined" {
-                DispatchQueue.main.async { [weak self] in
+                dispatchToMain { [weak self] in
                     self?.clientConnected = false
                     self?.onClientDisconnected?()
                 }
@@ -380,7 +480,7 @@ final class RelayClient: NSObject {
         case "error":
             let errorMessage = json["message"] as? String ?? "Unknown error"
             AirCatchLog.error("Relay error (\(channel)): \(errorMessage)")
-            DispatchQueue.main.async { [weak self] in
+            dispatchToMain { [weak self] in
                 self?.onError?(errorMessage)
             }
             
@@ -402,7 +502,7 @@ final class RelayClient: NSObject {
         
         // If both channels are disconnected, notify
         if !videoConnected && !controlConnected {
-            DispatchQueue.main.async { [weak self] in
+            dispatchToMain { [weak self] in
                 self?.isConnected = false
                 self?.clientConnected = false
                 self?.onDisconnected?(error)
@@ -414,6 +514,51 @@ final class RelayClient: NSObject {
 // MARK: - URLSessionWebSocketDelegate
 
 extension RelayClient: URLSessionWebSocketDelegate {
+    
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        
+        let host = challenge.protectionSpace.host.lowercased()
+        guard let expectedPins = expectedPinnedSPKI(for: host) else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        
+        var trustError: CFError?
+        guard SecTrustEvaluateWithError(trust, &trustError) else {
+            AirCatchLog.error("TLS trust evaluation failed for \(host)")
+            dispatchToMain { [weak self] in
+                self?.onError?("Relay TLS trust validation failed")
+            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        
+        guard let actualPin = Self.spkiHashBase64(from: trust) else {
+            AirCatchLog.error("TLS pinning failed: unable to extract server key for \(host)")
+            dispatchToMain { [weak self] in
+                self?.onError?("Relay TLS pin validation failed")
+            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        
+        guard expectedPins.contains(actualPin) else {
+            AirCatchLog.error("TLS pin mismatch for \(host)")
+            dispatchToMain { [weak self] in
+                self?.onError?("Relay TLS pin mismatch")
+            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
     
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, 
                     didOpenWithProtocol protocol: String?) {

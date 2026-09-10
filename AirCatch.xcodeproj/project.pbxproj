@@ -320,7 +320,7 @@
 			mainGroup = B7FFBE292EEF50A000E3750E;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				0FD9A4174ADB4149997DC48E /* XCRemoteSwiftPackageReference "WebRTC" */,
+				0FD9A4174ADB4149997DC48E /* XCRemoteSwiftPackageReference "webrtc" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B7FFBE332EEF50A000E3750E /* Products */;
@@ -628,6 +628,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = AirCatchHost/AirCatchHost.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -1007,7 +1008,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		0FD9A4174ADB4149997DC48E /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+		0FD9A4174ADB4149997DC48E /* XCRemoteSwiftPackageReference "webrtc" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/jitsi/webrtc.git";
 			requirement = {
@@ -1020,7 +1021,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		E0965076A00343C296292308 /* WebRTC */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0FD9A4174ADB4149997DC48E /* XCRemoteSwiftPackageReference "WebRTC" */;
+			package = 0FD9A4174ADB4149997DC48E /* XCRemoteSwiftPackageReference "webrtc" */;
 			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */

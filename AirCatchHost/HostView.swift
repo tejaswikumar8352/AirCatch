@@ -275,34 +275,42 @@ struct HostView: View {
     
     private func setupRelayCallbacks() {
         relayClient.onConnected = { [self] in
-            isRelayConnected = true
-            relayRoomCode = relayClient.roomCode
-            relayError = nil
+            Task { @MainActor in
+                isRelayConnected = true
+                relayRoomCode = relayClient.roomCode
+                relayError = nil
+            }
         }
         
         relayClient.onDisconnected = { _ in
-            isRelayConnected = false
-            isClientConnected = false
-            relayRoomCode = ""
+            Task { @MainActor in
+                isRelayConnected = false
+                isClientConnected = false
+                relayRoomCode = ""
+            }
         }
         
         relayClient.onClientConnected = { [self] in
-            isClientConnected = true
-            // Set the relay client on HostManager so it can send video through it
-            HostManager.shared.relayClient = relayClient
+            Task { @MainActor in
+                isClientConnected = true
+                // Set the relay client on HostManager so it can send video through it
+                HostManager.shared.relayClient = relayClient
+            }
         }
         
         relayClient.onClientDisconnected = { [self] in
-            isClientConnected = false
-            // Stop streaming when client disconnects
             Task { @MainActor in
+                isClientConnected = false
+                // Stop streaming when client disconnects
                 HostManager.shared.stopRelayStreaming()
                 HostManager.shared.relayClient = nil
             }
         }
         
         relayClient.onError = { error in
-            relayError = error
+            Task { @MainActor in
+                relayError = error
+            }
         }
         
         // Forward received data to HostManager for processing

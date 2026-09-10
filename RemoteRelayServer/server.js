@@ -116,6 +116,8 @@ function shouldDropControlPacketUnderPressure(packet, bufferedAmount) {
             return true;
 
         // Audio is best-effort for responsiveness in congested relay sessions.
+        // Note: Audio is now primarily routed through the video channel, but may
+        // still appear on control in legacy/combined mode.
         case PACKET.AUDIO_PCM:
         case PACKET.SCROLL_EVENT:
             return true;
@@ -127,15 +129,17 @@ function shouldDropControlPacketUnderPressure(packet, bufferedAmount) {
 
         case PACKET.TOUCH_EVENT: {
             // Under pressure, drop high-rate move events but keep presses/releases.
+            // PERFORMANCE: Check for "moved" or "dragMoved" using indexOf on the raw
+            // buffer instead of JSON.parse — avoids expensive string allocation + parse
+            // on every touch event when the server is already under CPU pressure.
             try {
-                const event = JSON.parse(packet.payload.toString('utf8'));
-                const type = event && event.eventType;
-                if (type === 'moved' || type === 'dragMoved') {
+                const payloadStr = packet.payload.toString('utf8');
+                if (payloadStr.includes('"moved"') || payloadStr.includes('"dragMoved"')) {
                     return true;
                 }
                 return false;
             } catch (_) {
-                // If parsing fails, only drop at hard-pressure.
+                // If conversion fails, only drop at hard-pressure.
                 return hardPressure;
             }
         }
@@ -450,10 +454,11 @@ wss.on('connection', (ws, req) => {
         
         const packet = parseAirCatchPacket(message);
 
-        // PERFORMANCE: Video channel backpressure - drop video payload under pressure.
+        // PERFORMANCE: Video channel backpressure - drop video/audio payload under pressure.
+        // Audio is now routed through the video channel to avoid flooding control.
         if ((roomInfo.channel === 'video' || roomInfo.channel === 'combined') &&
             peer.bufferedAmount > PERFORMANCE.BACKPRESSURE_THRESHOLD) {
-            if (packet && (packet.type === PACKET.VIDEO_FRAME || packet.type === PACKET.VIDEO_FRAME_CHUNK)) {
+            if (packet && (packet.type === PACKET.VIDEO_FRAME || packet.type === PACKET.VIDEO_FRAME_CHUNK || packet.type === PACKET.AUDIO_PCM)) {
                 return;
             }
         }

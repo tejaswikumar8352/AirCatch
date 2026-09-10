@@ -75,7 +75,7 @@ final class DisplayManager {
         var config: CGDisplayConfigRef?
         CGBeginDisplayConfiguration(&config)
         CGConfigureDisplayWithDisplayMode(config, displayID, selected, nil)
-        let error = CGCompleteDisplayConfiguration(config, .permanently)
+        let error = CGCompleteDisplayConfiguration(config, .forSession)
         if error == .success {
             isResolutionChanged = true
         } else {
@@ -160,7 +160,7 @@ final class DisplayManager {
         CGBeginDisplayConfiguration(&config)
         CGConfigureDisplayWithDisplayMode(config, displayID, mode, nil)
         
-        let error = CGCompleteDisplayConfiguration(config, .permanently)
+        let error = CGCompleteDisplayConfiguration(config, .forSession)
         if error == .success {
             isResolutionChanged = true
         } else {
@@ -177,7 +177,7 @@ final class DisplayManager {
         var config: CGDisplayConfigRef?
         CGBeginDisplayConfiguration(&config)
         CGConfigureDisplayWithDisplayMode(config, displayID, original, nil)
-        CGCompleteDisplayConfiguration(config, .permanently)
+        CGCompleteDisplayConfiguration(config, .forSession)
         
         isResolutionChanged = false
         originalMode = nil

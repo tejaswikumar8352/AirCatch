@@ -21,6 +21,38 @@ final class HostManager: ObservableObject {
     static let shared = HostManager()
     static let statusDidChange = Notification.Name("StreamingStatusChanged")
     
+    private final class InputStateCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isVirtualDisplayActive = false
+        private var clientDimensions: (width: Int, height: Int)?
+        private var isRelaySession = false
+        
+        func snapshot() -> (isVirtualDisplayActive: Bool, clientDimensions: (width: Int, height: Int)?, isRelaySession: Bool) {
+            lock.lock()
+            let snapshot = (isVirtualDisplayActive, clientDimensions, isRelaySession)
+            lock.unlock()
+            return snapshot
+        }
+        
+        func setVirtualDisplayActive(_ value: Bool) {
+            lock.lock()
+            isVirtualDisplayActive = value
+            lock.unlock()
+        }
+        
+        func setClientDimensions(_ value: (width: Int, height: Int)?) {
+            lock.lock()
+            clientDimensions = value
+            lock.unlock()
+        }
+        
+        func setRelaySession(_ value: Bool) {
+            lock.lock()
+            isRelaySession = value
+            lock.unlock()
+        }
+    }
+    
     // PERFORMANCE: Cached JSON coders to avoid allocation per touch event
     // nonisolated(unsafe): These are thread-safe reference types used from inputProcessingQueue
     private nonisolated static let jsonEncoder = JSONEncoder()
@@ -40,9 +72,7 @@ final class HostManager: ObservableObject {
     
     // Thread-safe cached copies of MainActor state for nonisolated input handlers.
     // Updated from MainActor when connection state changes; read from inputProcessingQueue.
-    private nonisolated(unsafe) var _cachedIsVirtualDisplayActive: Bool = false
-    private nonisolated(unsafe) var _cachedClientDimensions: (width: Int, height: Int)?
-    private nonisolated(unsafe) var _cachedIsRelaySession: Bool = false
+    private nonisolated let inputStateCache = InputStateCache()
     
     // MARK: - Published State
     
@@ -87,8 +117,11 @@ final class HostManager: ObservableObject {
     /// Relay client for remote connections (set by HostView when in relay mode)
     var relayClient: RelayClient?
 
-    /// Session tokens granted to clients for reconnection without PIN (cleared on app quit)
-    private var trustedSessionTokens: Set<String> = []
+    /// Session tokens granted to clients for reconnection without PIN.
+    /// Value is absolute expiry timestamp (epoch seconds).
+    private var trustedSessionTokens: [String: TimeInterval] = [:]
+    private nonisolated static let sessionTokenTTL: TimeInterval = 24 * 60 * 60
+    private nonisolated static let maxTrustedSessionTokens: Int = 64
 
     private var tcpAuthChallenges: [ObjectIdentifier: Data] = [:]
     private var relayAuthChallenge: Data?
@@ -115,6 +148,8 @@ final class HostManager: ObservableObject {
 
     /// Track whether the active session is relay-based for lower default caps.
     private var isRelaySession: Bool = false
+    /// Track whether the active local session is strict AWDL over MPC.
+    private var mpcSessionActive: Bool = false
 
     // MARK: - WebRTC (Relay Video)
     private var webRTCSession: WebRTCHostSession?
@@ -236,9 +271,8 @@ final class HostManager: ObservableObject {
                     name: Host.current().localizedName ?? "Mac"
                 )
 
-                // Advertise via AirCatch (MultipeerConnectivity) for close-range P2P.
-                self.setupMPCHostCallbacksIfNeeded()
-                self.mpcHost.start()
+                // AWDL/P2P now runs over Network.framework sockets with includePeerToPeer.
+                // Keep MPC disabled to avoid parallel transport overhead.
 
                 isRunning = true
                 postStatusChange()
@@ -258,12 +292,12 @@ final class HostManager: ObservableObject {
         
         networkManager.stopAll()
         bonjourAdvertiser.stopAdvertising()
-        mpcHost.stop()
         tcpAuthChallenges.removeAll()
         relayAuthChallenge = nil
         
         isRunning = false
         isStreaming = false
+        mpcSessionActive = false
         connectedClients = 0
         postStatusChange()
         
@@ -424,8 +458,27 @@ final class HostManager: ObservableObject {
             guard let self else { return }
             self.handleMPCPacket(packet, from: peer)
         }
+        // PERFORMANCE: Nonisolated fast-path for input events from MPC.
+        // Routes touch/scroll/key directly to inputProcessingQueue without
+        // the MainActor hop that handleMPCPacket would otherwise require.
+        mpcHost.onInputReceived = { [weak self] packet, _ in
+            guard let self else { return }
+            switch packet.type {
+            case .touchEvent:
+                self.enqueueTouchEvent(packet.payload)
+            case .scrollEvent:
+                self.enqueueScrollEvent(packet.payload)
+            case .keyEvent:
+                self.enqueueKeyEvent(packet.payload)
+            case .mediaKeyEvent:
+                self.enqueueMediaKeyEvent(packet.payload)
+            default:
+                break
+            }
+        }
         mpcHost.onPeerDisconnected = { [weak self] _ in
             guard let self else { return }
+            self.mpcSessionActive = false
             if self.connectedClients > 0 {
                 self.connectedClients -= 1
             }
@@ -523,9 +576,10 @@ final class HostManager: ObservableObject {
         stopStreaming()
         // Only restore if we are the last client disconnecting
         if connectedClients == 0 {
+            mpcSessionActive = false
             // Destroy virtual display if active
             virtualDisplayManager.destroyVirtualDisplay()
-            self._cachedIsVirtualDisplayActive = false
+            self.setCachedVirtualDisplayActive(false)
             // Also restore main display if it was changed
             DisplayManager.shared.restoreOriginalResolution()
         }
@@ -535,6 +589,12 @@ final class HostManager: ObservableObject {
         switch packet.type {
         case .handshake:
             handleMPCHandshake(payload: packet.payload, from: peer)
+        case .ping:
+            handleMPCPingPacket(packet.payload, to: peer)
+        case .qualityReport:
+            Task { @MainActor in
+                self.handleQualityReport(packet.payload)
+            }
         case .touchEvent:
             enqueueTouchEvent(packet.payload)
         case .scrollEvent:
@@ -543,6 +603,8 @@ final class HostManager: ObservableObject {
             enqueueKeyEvent(packet.payload)
         case .mediaKeyEvent:
             enqueueMediaKeyEvent(packet.payload)
+        case .videoFrameChunkNack:
+            break
         case .audioPCM:
             break
         case .disconnect:
@@ -551,6 +613,7 @@ final class HostManager: ObservableObject {
             }
             postStatusChange()
             if connectedClients == 0 {
+                mpcSessionActive = false
                 stopStreamingAndRestore() // Restore resolution on disconnect
             }
         default:
@@ -575,7 +638,7 @@ final class HostManager: ObservableObject {
         var grantedSessionToken: String?
         
         // Token-based auth: client sends saved token for instant reconnection
-        if let token = handshakeRequest?.sessionToken, trustedSessionTokens.contains(token) {
+        if let token = handshakeRequest?.sessionToken, isTrustedSessionToken(token) {
             isAuthenticated = true
             grantedSessionToken = token  // Reuse existing token
             #if DEBUG
@@ -610,7 +673,7 @@ final class HostManager: ObservableObject {
         // Generate new session token if authenticated via PIN (not token)
         if grantedSessionToken == nil {
             grantedSessionToken = Self.generateSecureToken()
-            trustedSessionTokens.insert(grantedSessionToken!)
+            storeTrustedSessionToken(grantedSessionToken!)
             #if DEBUG
             AirCatchLog.info("🔐 Generated new session token for client", category: .network)
             #endif
@@ -622,7 +685,8 @@ final class HostManager: ObservableObject {
         connectedClients += 1
 
         isRelaySession = false
-        _cachedIsRelaySession = false
+        mpcSessionActive = true
+        setCachedIsRelaySession(false)
         currentFrameRate = AirCatchConfig.defaultFrameRate
         currentBitrate = AirCatchConfig.defaultBitrate
 
@@ -714,7 +778,7 @@ final class HostManager: ObservableObject {
         var authenticatedPIN: String?
         var grantedSessionToken: String?
         
-        if let token = handshakeRequest?.sessionToken, trustedSessionTokens.contains(token) {
+        if let token = handshakeRequest?.sessionToken, isTrustedSessionToken(token) {
             grantedSessionToken = token
             relayAuthChallenge = nil
             #if DEBUG
@@ -729,7 +793,7 @@ final class HostManager: ObservableObject {
             authenticatedPIN = currentPIN
             // Generate new token on successful PIN auth
             grantedSessionToken = Self.generateSecureToken()
-            trustedSessionTokens.insert(grantedSessionToken!)
+            storeTrustedSessionToken(grantedSessionToken!)
             relayAuthChallenge = nil
             #if DEBUG
             AirCatchLog.info("🔐 Relay: Generated new session token for client", category: .network)
@@ -749,7 +813,8 @@ final class HostManager: ObservableObject {
         AirCatchLog.info("🤝 Client count: \(connectedClients), starting relay session", category: .network)
 
         isRelaySession = true
-        _cachedIsRelaySession = true
+        mpcSessionActive = false
+        setCachedIsRelaySession(true)
         currentFrameRate = AirCatchConfig.relayInitialFrameRate
         currentBitrate = AirCatchConfig.relayInitialBitrate
 
@@ -980,7 +1045,7 @@ final class HostManager: ObservableObject {
             var authenticatedPIN: String?
             var grantedSessionToken: String?
             
-            if let token = handshakeRequest?.sessionToken, self.trustedSessionTokens.contains(token) {
+            if let token = handshakeRequest?.sessionToken, self.isTrustedSessionToken(token) {
                 grantedSessionToken = token
                 #if DEBUG
                 AirCatchLog.info("🔐 TCP: Session token auth succeeded (reconnection)", category: .network)
@@ -1007,7 +1072,7 @@ final class HostManager: ObservableObject {
             // Generate new session token if authenticated via PIN (not token)
             if grantedSessionToken == nil {
                 grantedSessionToken = Self.generateSecureToken()
-                self.trustedSessionTokens.insert(grantedSessionToken!)
+                self.storeTrustedSessionToken(grantedSessionToken!)
                 #if DEBUG
                 AirCatchLog.info("🔐 TCP: Generated new session token for client", category: .network)
                 #endif
@@ -1024,7 +1089,8 @@ final class HostManager: ObservableObject {
             connectedClients += 1
             
             isRelaySession = false
-            _cachedIsRelaySession = false
+            mpcSessionActive = false
+            setCachedIsRelaySession(false)
             currentFrameRate = AirCatchConfig.defaultFrameRate
             currentBitrate = AirCatchConfig.defaultBitrate
 
@@ -1105,6 +1171,11 @@ final class HostManager: ObservableObject {
     private var qualityStableCount = 0
     private var frameRateStableCount = 0
     private var frameRateDegradeCount = 0
+    // PERFORMANCE: Prevent rapid bitrate oscillation with a cooldown timer.
+    // Without this, relay sessions bounce between high and low bitrate every few seconds,
+    // causing jerky video and encoder stalls.
+    private var lastBitrateChangeAt: TimeInterval = 0
+    private let bitrateChangeCooldown: TimeInterval = 4.0  // seconds between changes
 
     @MainActor
     private func handlePingPacket(_ payload: Data, from connection: NWConnection) {
@@ -1112,6 +1183,14 @@ final class HostManager: ObservableObject {
         let pong = PongPacket(pingTimestamp: ping.timestamp)
         if let data = try? JSONEncoder().encode(pong) {
             networkManager.sendTCP(to: connection, type: .pong, payload: data)
+        }
+    }
+
+    private func handleMPCPingPacket(_ payload: Data, to peer: MCPeerID) {
+        guard let ping = try? JSONDecoder().decode(PingPacket.self, from: payload) else { return }
+        let pong = PongPacket(pingTimestamp: ping.timestamp)
+        if let data = try? JSONEncoder().encode(pong) {
+            mpcHost.send(to: peer, type: .pong, payload: data, mode: .unreliable)
         }
     }
 
@@ -1144,14 +1223,22 @@ final class HostManager: ObservableObject {
             : AirCatchConfig.defaultFrameRate
         let minFPS = isRelaySession ? 20 : 30
 
-        let latencyThreshold = 80.0
+        // PERFORMANCE: Relay WAN connections have baseline RTT of 50-200ms.
+        // Using 80ms would cause constant false-positive congestion detection,
+        // leading to non-stop bitrate oscillation (the main cause of relay lag).
+        let latencyThreshold = isRelaySession ? 200.0 : 80.0
         let droppedFrameThreshold = 0
         let decreaseStep = isRelaySession ? 1_000_000 : 2_000_000
         let increaseStep = isRelaySession ? 500_000 : 1_000_000
 
         let isCongested = report.droppedFrames > droppedFrameThreshold || report.latencyMs > latencyThreshold
 
-        if isCongested {
+        // PERFORMANCE: Also check relay backpressure duration.
+        // If the host's video send queue has been saturated for > 2s, the
+        // connection is slower than the stream — force a bitrate reduction.
+        let relayBackpressureCongested = isRelaySession && (relayClient?.backpressureDuration ?? 0) > 2.0
+
+        if isCongested || relayBackpressureCongested {
             frameRateStableCount = 0
             frameRateDegradeCount += 1
             if frameRateDegradeCount >= 2 && currentFrameRate > minFPS {
@@ -1178,17 +1265,26 @@ final class HostManager: ObservableObject {
 
         var newBitrate = currentBitrate
         var changed = false
+        let now = Date().timeIntervalSince1970
 
-        if isCongested {
+        if isCongested || relayBackpressureCongested {
             qualityStableCount = 0
+            // PERFORMANCE: Allow immediate decrease (no cooldown) to recover from congestion fast.
             newBitrate = max(minBitrate, currentBitrate - decreaseStep)
             if newBitrate != currentBitrate {
-                AirCatchLog.info("⚠️ Network congestion (Drop: \(report.droppedFrames), Latency: \(Int(report.latencyMs))ms). Reducing to \(newBitrate/1_000_000)Mbps")
+                let backpressureSeconds = relayClient?.backpressureDuration ?? 0.0
+                AirCatchLog.info("⚠️ Network congestion (Drop: \(report.droppedFrames), Latency: \(Int(report.latencyMs))ms, BP: \(String(format: "%.1f", backpressureSeconds))s). Reducing to \(newBitrate/1_000_000)Mbps")
                 changed = true
             }
         } else {
             qualityStableCount += 1
-            if qualityStableCount > 3 {
+            // PERFORMANCE: Require more stable reports (6 instead of 3) for relay before
+            // increasing bitrate, and enforce a cooldown between changes.
+            // This prevents rapid oscillation that causes encoder stalls and jerky video.
+            let stableCountNeeded = isRelaySession ? 6 : 3
+            if qualityStableCount > stableCountNeeded {
+                // Enforce cooldown: don't increase bitrate if we changed recently
+                guard now - lastBitrateChangeAt >= bitrateChangeCooldown else { return }
                 qualityStableCount = 0
                 let targetBitrate = min(maxBitrate, baseBitrate)
                 if currentBitrate < targetBitrate {
@@ -1202,6 +1298,7 @@ final class HostManager: ObservableObject {
         if changed {
             currentBitrate = newBitrate
             screenStreamer?.setBitrate(newBitrate)
+            lastBitrateChangeAt = now
         }
     }
 
@@ -1214,10 +1311,11 @@ final class HostManager: ObservableObject {
             #endif
             return
         }
+        let cachedState = cachedInputStateSnapshot()
         
         // Discard stale events based on host-side queue delay (not cross-device wall clock).
         let queueDelay = Date().timeIntervalSinceReferenceDate - receivedAt
-        let maxQueueDelay = _cachedIsRelaySession ? Self.maxInputQueueDelayRelay : Self.maxInputQueueDelayLocal
+        let maxQueueDelay = cachedState.isRelaySession ? Self.maxInputQueueDelayRelay : Self.maxInputQueueDelayLocal
         let isEndingEvent: Bool = {
             switch touch.eventType {
             case .ended, .cancelled, .dragEnded:
@@ -1244,8 +1342,8 @@ final class HostManager: ObservableObject {
 
         // Only adjust for letterboxing if NOT using virtual display
         // (i.e., when streaming main display with different aspect ratio)
-        if !_cachedIsVirtualDisplayActive {
-            if let (clientW, clientH) = _cachedClientDimensions, clientW > 0, clientH > 0 {
+        if !cachedState.isVirtualDisplayActive {
+            if let (clientW, clientH) = cachedState.clientDimensions, clientW > 0, clientH > 0 {
                 let hostW = screenFrame.width
                 let hostH = screenFrame.height
 
@@ -1298,8 +1396,9 @@ final class HostManager: ObservableObject {
     
     // PERFORMANCE: nonisolated - runs on inputProcessingQueue
     private nonisolated func handleScrollEvent(_ payload: Data, receivedAt: TimeInterval) {
+        let cachedState = cachedInputStateSnapshot()
         let queueDelay = Date().timeIntervalSinceReferenceDate - receivedAt
-        let maxQueueDelay = _cachedIsRelaySession ? Self.maxInputQueueDelayRelay : Self.maxInputQueueDelayLocal
+        let maxQueueDelay = cachedState.isRelaySession ? Self.maxInputQueueDelayRelay : Self.maxInputQueueDelayLocal
         if queueDelay > maxQueueDelay {
             return
         }
@@ -1372,6 +1471,22 @@ final class HostManager: ObservableObject {
         }
     }
     
+    private nonisolated func cachedInputStateSnapshot() -> (isVirtualDisplayActive: Bool, clientDimensions: (width: Int, height: Int)?, isRelaySession: Bool) {
+        inputStateCache.snapshot()
+    }
+    
+    private nonisolated func setCachedVirtualDisplayActive(_ value: Bool) {
+        inputStateCache.setVirtualDisplayActive(value)
+    }
+    
+    private nonisolated func setCachedClientDimensions(_ value: (width: Int, height: Int)?) {
+        inputStateCache.setClientDimensions(value)
+    }
+    
+    private nonisolated func setCachedIsRelaySession(_ value: Bool) {
+        inputStateCache.setRelaySession(value)
+    }
+    
     // MARK: - Screen Streaming
     
     /// Start streaming for relay mode clients
@@ -1404,10 +1519,10 @@ final class HostManager: ObservableObject {
         
         if let w = clientMaxWidth, let h = clientMaxHeight {
             self.currentClientDimensions = (w, h)
-            self._cachedClientDimensions = (w, h)
+            self.setCachedClientDimensions((w, h))
         } else {
             self.currentClientDimensions = nil
-            self._cachedClientDimensions = nil
+            self.setCachedClientDimensions(nil)
         }
         
         // Store device model for Sidecar-like iPad detection
@@ -1422,6 +1537,7 @@ final class HostManager: ObservableObject {
         // - Apply preset resolution with 2x HiDPI scaling
         // - Match iPad's ~4:3 aspect ratio to avoid letterboxing
         var virtualDisplayID: CGDirectDisplayID? = nil
+        setCachedVirtualDisplayActive(false)
         if !optimizeForHostDisplay,
            let w = clientMaxWidth, let h = clientMaxHeight, w > 0, h > 0 {
             // Pass device model for better iPad detection (Sidecar-like hardware handshake)
@@ -1431,7 +1547,7 @@ final class HostManager: ObservableObject {
                 deviceModel: deviceModel
             )
             if virtualDisplayID != nil {
-                self._cachedIsVirtualDisplayActive = true
+                self.setCachedVirtualDisplayActive(true)
                 // Wait for virtual display to be ready
                 try? await Task.sleep(for: .milliseconds(500))
                 AirCatchLog.info("✅ Using Sidecar-like virtual display: \(virtualDisplayManager.presetName)", category: .video)
@@ -1595,26 +1711,34 @@ final class HostManager: ObservableObject {
     
     // Changed per instructions:
     private func broadcastVideoFrame(_ data: Data) {
-        // SECURITY: Always encrypt video data when E2EE key is available
+        // SECURITY: Relay and local media must remain encrypted end-to-end.
         let isRelayMode = relayClient?.isConnected ?? false
         let sendRelayVideo = !(isRelayMode && webRTCActive)
-        
-        let frameData: Data
-        if crypto.isReady {
-            guard let encrypted = crypto.encrypt(data) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: Video frame encryption failed - dropping frame", category: .video)
-                #endif
-                return
-            }
-            frameData = encrypted
-        } else if !isRelayMode {
+        let sendMPCVideo = mpcSessionActive
+        guard crypto.isReady else {
             #if DEBUG
-            AirCatchLog.error("E2EE: Cannot broadcast - encryption not ready", category: .video)
+            AirCatchLog.error("E2EE: Dropping video frame - encryption key not ready", category: .video)
             #endif
             return
-        } else {
-            frameData = data
+        }
+        guard let frameData = crypto.encrypt(data) else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: Video frame encryption failed - dropping frame", category: .video)
+            #endif
+            return
+        }
+
+        // Strict AWDL mode: route media over MPC only (no router/IP path).
+        if sendMPCVideo {
+            // PERFORMANCE: Always use .reliable for MPC video frames.
+            // MCSession's .unreliable mode silently drops messages > ~64KB,
+            // which includes most HEVC keyframes (100-300KB at 16Mbps).
+            // A dropped keyframe causes ~1 second of frozen/corrupt video
+            // because all subsequent P-frames are undecodable until the
+            // next keyframe arrives. .reliable adds ~1-2ms latency but
+            // guarantees delivery, eliminating periodic stalls.
+            mpcHost.broadcast(type: .videoFrame, payload: frameData, mode: .reliable)
+            return
         }
         
         // If client prefers reliability over latency, send complete frames over TCP.
@@ -1700,12 +1824,24 @@ final class HostManager: ObservableObject {
     
     /// Broadcasts audio data to all connected clients via UDP
     private func broadcastAudioFrame(_ data: Data) {
-        // SECURITY: Always encrypt audio data when E2EE key is available
-        let audioData: Data
-        if crypto.isReady, let encrypted = crypto.encrypt(data) {
-            audioData = encrypted
-        } else {
-            audioData = data
+        // SECURITY: Relay and local media must remain encrypted end-to-end.
+        guard crypto.isReady else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: Dropping audio frame - encryption key not ready", category: .video)
+            #endif
+            return
+        }
+        guard let audioData = crypto.encrypt(data) else {
+            #if DEBUG
+            AirCatchLog.error("E2EE: Audio frame encryption failed - dropping frame", category: .video)
+            #endif
+            return
+        }
+
+        // Strict AWDL mode: route audio over MPC only.
+        if mpcSessionActive {
+            mpcHost.broadcast(type: .audioPCM, payload: audioData, mode: .unreliable)
+            return
         }
         
         // Audio packets are small enough to send in one UDP datagram (typically ~4KB for 48kHz stereo)
@@ -1816,6 +1952,34 @@ final class HostManager: ObservableObject {
     }
     
     // MARK: - Security Helpers
+    
+    private func pruneExpiredSessionTokens(now: TimeInterval = Date().timeIntervalSince1970) {
+        trustedSessionTokens = trustedSessionTokens.filter { $0.value > now }
+    }
+    
+    private func isTrustedSessionToken(_ token: String, now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+        pruneExpiredSessionTokens(now: now)
+        guard let expiry = trustedSessionTokens[token], expiry > now else {
+            trustedSessionTokens.removeValue(forKey: token)
+            return false
+        }
+        // Sliding TTL keeps active devices connected while expiring stale tokens.
+        trustedSessionTokens[token] = now + Self.sessionTokenTTL
+        return true
+    }
+    
+    private func storeTrustedSessionToken(_ token: String, now: TimeInterval = Date().timeIntervalSince1970) {
+        pruneExpiredSessionTokens(now: now)
+        trustedSessionTokens[token] = now + Self.sessionTokenTTL
+        
+        let overflow = trustedSessionTokens.count - Self.maxTrustedSessionTokens
+        guard overflow > 0 else { return }
+        
+        let byExpiry = trustedSessionTokens.sorted { $0.value < $1.value }
+        for (tokenToRemove, _) in byExpiry.prefix(overflow) {
+            trustedSessionTokens.removeValue(forKey: tokenToRemove)
+        }
+    }
     
     /// SECURITY: Generate cryptographically secure session token using SecRandomCopyBytes
     private static func generateSecureToken() -> String {

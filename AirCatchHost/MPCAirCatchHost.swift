@@ -21,6 +21,11 @@ final class MPCAirCatchHost: NSObject {
     var onPeerConnected: ((MCPeerID) -> Void)?
     var onPeerDisconnected: ((MCPeerID) -> Void)?
 
+    /// PERFORMANCE: Nonisolated fast-path for input events.
+    /// Called directly from MPC delegate thread to bypass MainActor.
+    /// Set once during setup; called from background thread.
+    nonisolated(unsafe) var onInputReceived: ((Packet, MCPeerID) -> Void)?
+
     override init() {
         let hostName = Host.current().localizedName ?? "Mac"
         self.myPeerID = MCPeerID(displayName: hostName)
@@ -126,6 +131,18 @@ extension MPCAirCatchHost: MCSessionDelegate {
 
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let packet = Self.parseDatagram(data) else { return }
+
+        // PERFORMANCE: Route input events directly to nonisolated handler
+        // to bypass MainActor hop. This reduces touch-to-inject latency by
+        // ~1-2ms per event, critical for Sidecar-like responsiveness.
+        switch packet.type {
+        case .touchEvent, .scrollEvent, .keyEvent, .mediaKeyEvent:
+            onInputReceived?(packet, peerID)
+            return
+        default:
+            break
+        }
+
         Task { @MainActor in
             self.onPacketReceived?(packet, peerID)
         }

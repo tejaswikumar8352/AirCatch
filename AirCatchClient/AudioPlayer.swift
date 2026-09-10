@@ -51,12 +51,28 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
     // MARK: - Setup
     
     private func setupAudioSession() {
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
-            try audioSession.setActive(true)
-        } catch {
-            AirCatchLog.error("Failed to setup audio session: \(error)", category: .general)
+        if #available(iOS 27.0, *) {
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+                audioSession.activate(options: []) { success, error in
+                    if let error = error {
+                        AirCatchLog.error("Failed to activate audio session: \(error)", category: .general)
+                    }
+                }
+            } catch {
+                AirCatchLog.error("Failed to setup audio session: \(error)", category: .general)
+            }
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+                    try audioSession.setActive(true)
+                } catch {
+                    AirCatchLog.error("Failed to setup audio session: \(error)", category: .general)
+                }
+            }
         }
     }
     

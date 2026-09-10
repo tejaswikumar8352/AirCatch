@@ -25,6 +25,11 @@ final class MPCAirCatchClient: NSObject {
     var onDisconnected: (() -> Void)?
     var onPacketReceived: ((Packet) -> Void)?
 
+    /// PERFORMANCE: Nonisolated fast-path for video/audio frames.
+    /// Called directly from MPC delegate thread without MainActor hop.
+    /// Set once during setup; called from background thread.
+    nonisolated(unsafe) var onMediaReceived: ((Packet) -> Void)?
+
     override init() {
         let name = UIDevice.current.name
         self.myPeerID = MCPeerID(displayName: name)
@@ -121,6 +126,18 @@ extension MPCAirCatchClient: MCSessionDelegate {
 
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let packet = Self.parseDatagram(data) else { return }
+
+        // PERFORMANCE: Route video/audio directly to nonisolated handler
+        // to bypass MainActor serialization at 60fps. Without this, every
+        // frame goes through MainActor competing with UI and input handling.
+        switch packet.type {
+        case .videoFrame, .videoFrameChunk, .audioPCM:
+            onMediaReceived?(packet)
+            return
+        default:
+            break
+        }
+
         Task { @MainActor in
             self.onPacketReceived?(packet)
         }

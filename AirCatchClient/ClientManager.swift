@@ -9,7 +9,6 @@ import Foundation
 import Network
 @preconcurrency import Combine
 import UIKit
-import MultipeerConnectivity
 @preconcurrency import WebRTC
 
 /// Connection state machine
@@ -205,7 +204,6 @@ final class ClientManager: ObservableObject {
     
     private let networkManager = NetworkManager.shared
     private let bonjourBrowser = BonjourBrowser()
-    private let mpcClient = MPCAirCatchClient()
     private nonisolated let audioPlayer = AudioPlayer()
 
     private nonisolated let crypto = CryptoManager()  // E2EE decryption
@@ -214,6 +212,7 @@ final class ClientManager: ObservableObject {
     private var webRTCActive: Bool = false
     private var relayHandshakeSent = false
     private var lastRelayHandshakeAt: TimeInterval = 0
+    private var usingPeerToPeerTransport = false
     private var lastTouchMoveSentAt: CFTimeInterval = 0
     private var lastScrollSentAt: CFTimeInterval = 0
     private var cancellables = Set<AnyCancellable>()
@@ -232,7 +231,6 @@ final class ClientManager: ObservableObject {
     
     private init() {
         setupBonjourCallbacks()
-        setupMPCCallbacks()
         setupAutoConnectLogic()
         audioEnabledFlag.set(audioEnabled)
         // Do not start discovery immediately on init
@@ -245,7 +243,6 @@ final class ClientManager: ObservableObject {
         
         state = .discovering
         bonjourBrowser.startBrowsing(serviceType: AirCatchConfig.bonjourServiceType)
-        mpcClient.startBrowsing()
         #if DEBUG
         AirCatchLog.info(" Started Bonjour discovery")
         #endif
@@ -253,7 +250,6 @@ final class ClientManager: ObservableObject {
     
     func stopDiscovery() {
         bonjourBrowser.stopBrowsing()
-        mpcClient.stop()
         discoveredHosts.removeAll()
         
         if state == .discovering {
@@ -262,6 +258,7 @@ final class ClientManager: ObservableObject {
     }
     
     func disconnect(shouldRetry: Bool = false) {
+        usingPeerToPeerTransport = false
         networkManager.stopAll()
         stopTelemetry()
         audioPlayer.stop()
@@ -289,6 +286,7 @@ final class ClientManager: ObservableObject {
     func startRelaySession(with relayClient: RelayClient) {
         stopDiscovery()
         stopWebRTCSession()
+        usingPeerToPeerTransport = false
         self.relayClient = relayClient
         relaySessionActiveFlag.set(true)
         relayHandshakeSent = false
@@ -440,12 +438,13 @@ final class ClientManager: ObservableObject {
     // MARK: - Bonjour Setup
     
     private func setupBonjourCallbacks() {
-        bonjourBrowser.onHostFound = { host in
-            if let idx = ClientManager.shared.discoveredHosts.firstIndex(where: { $0.id == host.id }) {
+        bonjourBrowser.onHostFound = { [weak self] host in
+            guard let self else { return }
+            if let idx = self.discoveredHosts.firstIndex(where: { $0.id == host.id }) {
                 // If the host was first discovered via MPC, it may have endpoint=nil.
                 // Merge Bonjour's resolved endpoint into the existing entry.
-                let existing = ClientManager.shared.discoveredHosts[idx]
-                ClientManager.shared.discoveredHosts[idx] = DiscoveredHost(
+                let existing = self.discoveredHosts[idx]
+                self.discoveredHosts[idx] = DiscoveredHost(
                     id: existing.id,
                     name: existing.name,
                     endpoint: host.endpoint ?? existing.endpoint,
@@ -455,19 +454,20 @@ final class ClientManager: ObservableObject {
                     hostId: existing.hostId
                 )
             } else {
-                ClientManager.shared.discoveredHosts.append(host)
+                self.discoveredHosts.append(host)
             }
             #if DEBUG
             AirCatchLog.info(" Found host: \(host.name)")
             #endif
         }
 
-        bonjourBrowser.onHostLost = { host in
-            if let idx = ClientManager.shared.discoveredHosts.firstIndex(where: { $0.id == host.id }) {
-                let existing = ClientManager.shared.discoveredHosts[idx]
+        bonjourBrowser.onHostLost = { [weak self] host in
+            guard let self else { return }
+            if let idx = self.discoveredHosts.firstIndex(where: { $0.id == host.id }) {
+                let existing = self.discoveredHosts[idx]
                 if existing.mpcPeerName != nil {
                     // Keep the entry if it's still reachable via MPC; just clear Bonjour endpoint.
-                    ClientManager.shared.discoveredHosts[idx] = DiscoveredHost(
+                    self.discoveredHosts[idx] = DiscoveredHost(
                         id: existing.id,
                         name: existing.name,
                         endpoint: nil,
@@ -477,7 +477,7 @@ final class ClientManager: ObservableObject {
                         hostId: existing.hostId
                     )
                 } else {
-                    ClientManager.shared.discoveredHosts.remove(at: idx)
+                    self.discoveredHosts.remove(at: idx)
                 }
             }
             #if DEBUG
@@ -486,61 +486,6 @@ final class ClientManager: ObservableObject {
         }
     }
 
-    private func setupMPCCallbacks() {
-        mpcClient.onHostFound = { peer, info in
-            let hostName = info?["name"] ?? peer.displayName
-            let hostId = info?["hostId"]
-
-            // Merge into existing entry by name (best-effort; Bonjour doesn't expose a stable hostId today).
-            if let idx = ClientManager.shared.discoveredHosts.firstIndex(where: { $0.name == hostName }) {
-                let existing = ClientManager.shared.discoveredHosts[idx]
-                ClientManager.shared.discoveredHosts[idx] = DiscoveredHost(
-                    id: existing.id,
-                    name: existing.name,
-                    endpoint: existing.endpoint,
-                    udpPort: existing.udpPort,
-                    tcpPort: existing.tcpPort,
-                    mpcPeerName: peer.displayName,
-                    hostId: hostId ?? existing.hostId
-                )
-            } else {
-                ClientManager.shared.discoveredHosts.append(
-                    DiscoveredHost(
-                        id: hostName,
-                        name: hostName,
-                        endpoint: nil,
-                        udpPort: nil,
-                        tcpPort: nil,
-                        mpcPeerName: peer.displayName,
-                        hostId: hostId
-                    )
-                )
-            }
-        }
-
-        mpcClient.onHostLost = { peer in
-            // Only clear MPC capability; keep Bonjour entry if present.
-            for i in ClientManager.shared.discoveredHosts.indices {
-                if ClientManager.shared.discoveredHosts[i].mpcPeerName == peer.displayName {
-                    let existing = ClientManager.shared.discoveredHosts[i]
-                    ClientManager.shared.discoveredHosts[i] = DiscoveredHost(
-                        id: existing.id,
-                        name: existing.name,
-                        endpoint: existing.endpoint,
-                        udpPort: existing.udpPort,
-                        tcpPort: existing.tcpPort,
-                        mpcPeerName: nil,
-                        hostId: existing.hostId
-                    )
-                }
-            }
-        }
-
-        mpcClient.onPacketReceived = nil
-        mpcClient.onConnected = nil
-        mpcClient.onDisconnected = nil
-    }
-    
     // MARK: - Auto-Connect Logic
     
     private func setupAutoConnectLogic() {
@@ -573,9 +518,18 @@ final class ClientManager: ObservableObject {
         // E2EE: Derive encryption key from PIN
         crypto.deriveKey(from: enteredPIN)
 
-        // MultipeerConnectivity is kept for discovery only.
-        
-        // Resolve the service endpoint to get IP address
+        // AWDL mode: use Network.framework peer-to-peer sockets end-to-end.
+        if connectionOption == .udpPeerToPeerAWDL {
+            debugConnectionStatus = "Connecting over AWDL (Network.framework)..."
+            if host.endpoint == nil {
+                state = .error("AWDL endpoint unavailable. Wait for host discovery and try again.")
+                return
+            }
+            resolveAndConnect(host: host)
+            return
+        }
+
+        // Local Network mode: resolve host endpoint and connect over TCP/UDP.
         resolveAndConnect(host: host)
     }
 
@@ -683,6 +637,7 @@ final class ClientManager: ObservableObject {
 
     private func makeHandshakeRequest(authResponse: Data?, connectionMode: ConnectionMode?) -> HandshakeRequest {
         let isRelay = relayClient != nil
+        let useLosslessChunkRetransmit = !isRelay && connectionOption == .udpNetworkFramework
         // Get iPad display properties for Sidecar-like hardware handshake
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -726,7 +681,7 @@ final class ClientManager: ObservableObject {
             requestVideo: pendingRequestVideo,
             requestAudio: audioEnabled,
             preferLowLatency: true,
-            losslessVideo: !isRelay,
+            losslessVideo: useLosslessChunkRetransmit,
             pin: nil,
             authResponse: authResponse,
             sessionToken: savedSessionToken,  // Send saved token for reconnection
@@ -889,6 +844,7 @@ final class ClientManager: ObservableObject {
     }
     
     private func establishConnection(hostIP: String) {
+        usingPeerToPeerTransport = (connectionOption == .udpPeerToPeerAWDL)
         #if DEBUG
         debugConnectionStatus = "Connecting to \(hostIP)..."
         AirCatchLog.info(" Connecting to \(hostIP)")
@@ -984,6 +940,7 @@ final class ClientManager: ObservableObject {
             relay.send(type: type, payload: payload)
             return
         }
+
         networkManager.sendTCP(type: type, payload: payload)
     }
 
@@ -1033,7 +990,28 @@ final class ClientManager: ObservableObject {
             videoFrameQueue.async {
                 subject.value.send(frameData)
             }
-            setStreamingStateIfNeeded(debugStatus: "Streaming (TCP)")
+            setStreamingStateIfNeeded(debugStatus: usingPeerToPeerTransport ? "Streaming (AWDL)" : "Streaming (TCP)")
+        case .videoFrameChunk:
+            recordIncomingBytes(packet.payload.count)
+            reassembler.process(
+                chunk: packet.payload,
+                losslessEnabled: false,
+                onNack: { _, _ in },
+                onComplete: { [weak self] frameData in
+                    guard let self else { return }
+                    guard let decryptedData = self.crypto.decrypt(frameData) else { return }
+                    let subject = UncheckedSendable(self.videoFrameSubject)
+                    self.videoFrameQueue.async {
+                        subject.value.send(decryptedData)
+                    }
+                    self.setStreamingStateIfNeeded(debugStatus: self.usingPeerToPeerTransport ? "Streaming (AWDL)" : "Streaming (TCP)")
+                }
+            )
+        case .audioPCM:
+            if audioEnabledFlag.get() {
+                guard let audioData = crypto.decrypt(packet.payload) else { return }
+                audioPlayer.playAudioPacket(audioData)
+            }
         case .pairingFailed:
             // Wrong PIN - disconnect and show error
             #if DEBUG
@@ -1060,7 +1038,7 @@ final class ClientManager: ObservableObject {
             break
         }
     }
-    
+
     // MARK: - Relay Packet Handling
     
     /// PERFORMANCE: Handle relay video/audio packets without MainActor hop.
@@ -1072,23 +1050,25 @@ final class ClientManager: ObservableObject {
             return
         }
         
+        // SECURITY: Relay media must always be encrypted end-to-end.
+        guard crypto.isReady else {
+            #if DEBUG
+            AirCatchLog.debug("E2EE: Dropping relay media packet while key is not ready", category: .network)
+            #endif
+            return
+        }
+        
         let videoFrameQueue = videoFrameQueue
         let subject = UncheckedSendable(videoFrameSubject)
         
         switch packet.type {
         case .videoFrame:
             recordIncomingBytes(packet.payload.count)
-            let frameData: Data
-            if crypto.isReady {
-                guard let decrypted = crypto.decrypt(packet.payload) else {
-                    #if DEBUG
-                    AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
-                    #endif
-                    return
-                }
-                frameData = decrypted
-            } else {
-                frameData = packet.payload
+            guard let frameData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
+                #endif
+                return
             }
             videoFrameQueue.async {
                 subject.value.send(frameData)
@@ -1103,13 +1083,7 @@ final class ClientManager: ObservableObject {
                 onNack: { _, _ in },
                 onComplete: { [weak self] frameData in
                     guard let self else { return }
-                    let decryptedData: Data
-                    if self.crypto.isReady {
-                        guard let decrypted = self.crypto.decrypt(frameData) else { return }
-                        decryptedData = decrypted
-                    } else {
-                        decryptedData = frameData
-                    }
+                    guard let decryptedData = self.crypto.decrypt(frameData) else { return }
                     videoFrameQueue.async {
                         subject.value.send(decryptedData)
                     }
@@ -1119,13 +1093,7 @@ final class ClientManager: ObservableObject {
             
         case .audioPCM:
             if audioEnabledFlag.get() {
-                let audioData: Data
-                if crypto.isReady {
-                    guard let decrypted = crypto.decrypt(packet.payload) else { return }
-                    audioData = decrypted
-                } else {
-                    audioData = packet.payload
-                }
+                guard let audioData = crypto.decrypt(packet.payload) else { return }
                 audioPlayer.playAudioPacket(audioData)
             }
             
@@ -1144,18 +1112,18 @@ final class ClientManager: ObservableObject {
         case .videoFrame:
             if usingWebRTC { return }
             recordIncomingBytes(packet.payload.count)
-            // SECURITY: Decrypt relay video frames with PIN-derived key
-            let frameData: Data
-            if crypto.isReady {
-                guard let decrypted = crypto.decrypt(packet.payload) else {
-                    #if DEBUG
-                    AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
-                    #endif
-                    return
-                }
-                frameData = decrypted
-            } else {
-                frameData = packet.payload
+            // SECURITY: Relay media must always remain encrypted end-to-end.
+            guard crypto.isReady else {
+                #if DEBUG
+                AirCatchLog.debug("E2EE: Dropping relay video frame while key is not ready", category: .video)
+                #endif
+                return
+            }
+            guard let frameData = crypto.decrypt(packet.payload) else {
+                #if DEBUG
+                AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
+                #endif
+                return
             }
             videoFrameQueue.async {
                 videoFrameSubject.value.send(frameData)
@@ -1168,6 +1136,12 @@ final class ClientManager: ObservableObject {
         case .videoFrameChunk:
             if usingWebRTC { return }
             recordIncomingBytes(packet.payload.count)
+            guard crypto.isReady else {
+                #if DEBUG
+                AirCatchLog.debug("E2EE: Dropping relay video chunk while key is not ready", category: .video)
+                #endif
+                return
+            }
             // Handle chunked video via reassembler
             reassembler.process(
                 chunk: packet.payload,
@@ -1182,17 +1156,11 @@ final class ClientManager: ObservableObject {
                 onComplete: { [weak self] frameData in
                     guard let self = self else { return }
                     // SECURITY: Decrypt reassembled relay frame
-                    let decryptedData: Data
-                    if self.crypto.isReady {
-                        guard let decrypted = self.crypto.decrypt(frameData) else {
-                            #if DEBUG
-                            AirCatchLog.error("E2EE: Relay reassembled frame decryption failed", category: .video)
-                            #endif
-                            return
-                        }
-                        decryptedData = decrypted
-                    } else {
-                        decryptedData = frameData
+                    guard let decryptedData = self.crypto.decrypt(frameData) else {
+                        #if DEBUG
+                        AirCatchLog.error("E2EE: Relay reassembled frame decryption failed", category: .video)
+                        #endif
+                        return
                     }
                     videoFrameQueue.async {
                         videoFrameSubject.value.send(decryptedData)
@@ -1203,13 +1171,13 @@ final class ClientManager: ObservableObject {
         case .audioPCM:
             // SECURITY: Decrypt relay audio frames
             if audioEnabled {
-                let audioData: Data
-                if crypto.isReady {
-                    guard let decrypted = crypto.decrypt(packet.payload) else { return }
-                    audioData = decrypted
-                } else {
-                    audioData = packet.payload
+                guard crypto.isReady else {
+                    #if DEBUG
+                    AirCatchLog.debug("E2EE: Dropping relay audio while key is not ready", category: .video)
+                    #endif
+                    return
                 }
+                guard let audioData = crypto.decrypt(packet.payload) else { return }
                 audioPlayer.playAudioPacket(audioData)
             }
         case .authChallenge:
@@ -1251,7 +1219,6 @@ final class ClientManager: ObservableObject {
     }
     
     private func makeUDPStreamProcessor() -> UDPStreamProcessor {
-        let videoFrameQueue = videoFrameQueue
         let videoFrameSubject = UncheckedSendable(videoFrameSubject)
         let audioEnabledFlag = audioEnabledFlag
         let streamingFlag = streamingFlag
@@ -1262,7 +1229,7 @@ final class ClientManager: ObservableObject {
             receivedBytesCounter.add(count)
         }
         let onFrame: (Data) -> Void = { data in
-            videoFrameQueue.async {
+            DispatchQueue.main.async {
                 videoFrameSubject.value.send(data)
             }
         }
