@@ -26,6 +26,7 @@ struct ContentView: View {
 
     fileprivate enum SidebarItem: Hashable {
         case devices
+        case settings
         case about
     }
 
@@ -52,14 +53,20 @@ struct ContentView: View {
                                     clientManager.connect(to: host, requestVideo: true)
                                     return
                                 }
+                                // Unpaired host: ask the host to reveal its PIN on its own screen,
+                                // then prompt locally for it.
+                                clientManager.announcePairing(to: host)
                                 pinTargetHost = host
                                 clientManager.enteredPIN = ""
                                 showPINOverlay = true
                             },
                             onManualTapped: {
+                                manualPrefillAddress = ""
                                 showManualOverlay = true
                             }
                         )
+                    case .settings:
+                        ClientSettingsView()
                     case .about:
                         AboutScreen()
                     }
@@ -158,7 +165,8 @@ private struct Sidebar: View {
     var body: some View {
         List {
             Section {
-                sidebarRow(.devices, title: "Devices", systemImage: "display")
+                sidebarRow(.devices, title: "Connect a Device", systemImage: "display")
+                sidebarRow(.settings, title: "Settings", systemImage: "gear")
                 sidebarRow(.about, title: "About", systemImage: "info.circle")
             }
         }
@@ -194,7 +202,7 @@ private struct DevicesScreen: View {
                 VStack(alignment: .leading, spacing: 14) {
                     header
 
-                    // Manual Connect Button (direct IP / Tailscale)
+            // 2. Manual Connect — Direct IP / Tailscale (works remotely, via utun)
                     Button(action: onManualTapped) {
                         HStack {
                             Image(systemName: "point.3.connected.trianglepath.dotted")
@@ -202,7 +210,7 @@ private struct DevicesScreen: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Manual Connect")
                                     .font(.headline)
-                                Text("Direct IP or Tailscale address")
+                                Text("Direct IP or Tailscale address — works remotely")
                                     .font(.caption)
                                     .opacity(0.7)
                             }
@@ -221,6 +229,33 @@ private struct DevicesScreen: View {
                         }
                     }
                     .buttonStyle(.plain)
+
+                    // Pairing/transient status surface
+                    if case .error(let message) = clientManager.state {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    } else if clientManager.state == .connecting {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Connecting…")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    }
 
                     // Paired Hosts — one-tap reconnect, no PIN re-entry
                     if !clientManager.savedHosts.isEmpty {
@@ -244,16 +279,21 @@ private struct DevicesScreen: View {
                         }
                     }
 
-                    Text("Local Network")
+                    Text("Local Network (Bonjour / AWDL)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.5))
                         .padding(.top, 8)
 
                     if clientManager.discoveredHosts.isEmpty {
-                        Text("Searching for AirCatch Hosts…")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.vertical, 18)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Searching for AirCatch Hosts…")
+                                .font(.subheadline)
+                            Text("Makes sure your Mac is on the same Wi-Fi or create a Tailscale connection and use Manual Connect.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.vertical, 18)
                     } else {
                         ForEach(clientManager.discoveredHosts) { host in
                             HostCard(
@@ -275,9 +315,14 @@ private struct DevicesScreen: View {
     }
 
     private var header: some View {
-        Text("Devices")
-            .font(.title2.bold())
-            .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Connect a Device")
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+            Text("Pair a new Mac with its PIN, or tap a paired host to stream instantly.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.65))
+        }
     }
 }
 
@@ -288,11 +333,11 @@ private struct HostCard: View {
 
     private var subtitle: String {
         if host.mpcPeerName != nil && host.endpoint != nil {
-            return "P2P + Local network"
+            return "AWDL P2P + Wi-Fi"
         } else if host.mpcPeerName != nil {
-            return "P2P available"
+            return "AWDL Peer-to-Peer"
         }
-        return "Local network"
+        return "Wi-Fi (Bonjour)"
     }
 
     private var statusColor: Color {

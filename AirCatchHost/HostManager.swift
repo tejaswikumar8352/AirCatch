@@ -15,35 +15,39 @@ import CoreGraphics
 import Security
 
 /// Central manager for the AirCatch host functionality.
-@MainActor
-final class HostManager: ObservableObject {
-    static let shared = HostManager()
-    static let statusDidChange = Notification.Name("StreamingStatusChanged")
-    
-    private final class InputStateCache: @unchecked Sendable {
+nonisolated private final class InputStateCache: @unchecked Sendable {
         private let lock = NSLock()
         private var isVirtualDisplayActive = false
         private var clientDimensions: (width: Int, height: Int)?
 
-        func snapshot() -> (isVirtualDisplayActive: Bool, clientDimensions: (width: Int, height: Int)?) {
+    nonisolated init() {}
+
+
+        nonisolated func snapshot() -> (isVirtualDisplayActive: Bool, clientDimensions: (width: Int, height: Int)?) {
             lock.lock()
             let snapshot = (isVirtualDisplayActive, clientDimensions)
             lock.unlock()
             return snapshot
         }
 
-        func setVirtualDisplayActive(_ value: Bool) {
+        nonisolated func setVirtualDisplayActive(_ value: Bool) {
             lock.lock()
             isVirtualDisplayActive = value
             lock.unlock()
         }
 
-        func setClientDimensions(_ value: (width: Int, height: Int)?) {
+        nonisolated func setClientDimensions(_ value: (width: Int, height: Int)?) {
             lock.lock()
             clientDimensions = value
             lock.unlock()
         }
     }
+
+@MainActor
+final class HostManager: ObservableObject {
+    static let shared = HostManager()
+    static let statusDidChange = Notification.Name("StreamingStatusChanged")
+    
     
     // PERFORMANCE: Cached JSON coders to avoid allocation per touch event
     // nonisolated(unsafe): These are thread-safe reference types used from inputProcessingQueue
@@ -68,10 +72,23 @@ final class HostManager: ObservableObject {
     
     @Published private(set) var isRunning = false
     @Published private(set) var isStreaming = false
+    /// Becomes true when a client sends a pairing request (wants the PIN shown);
+    /// the Host UI surfaces the PIN only while this is set.
+    @Published private(set) var pairingRequested = false
     @Published private(set) var connectedClients = 0
     @Published private(set) var currentPIN: String = "------"
     @Published private(set) var currentBitrate: Int = AirCatchConfig.defaultBitrate
     @Published private(set) var currentFrameRate: Int = AirCatchConfig.defaultFrameRate
+
+    /// User preference from Settings: the target framerate new streams start with.
+    /// Adaptive logic may still step it down under congestion.
+    @Published var preferredFrameRate: Int = UserDefaults.standard.integer(forKey: "hostPreferredFrameRate") {
+        didSet { UserDefaults.standard.set(preferredFrameRate, forKey: "hostPreferredFrameRate") }
+    }
+
+    private var effectiveDefaultFrameRate: Int {
+        preferredFrameRate > 0 ? preferredFrameRate : AirCatchConfig.defaultFrameRate
+    }
     @Published var audioStreamingEnabled: Bool = false
     @Published private(set) var availableDisplays: [String] = []
     
@@ -160,6 +177,26 @@ final class HostManager: ObservableObject {
         guard let stored = UserDefaults.standard.dictionary(forKey: Self.sessionTokensDefaultsKey) as? [String: TimeInterval] else { return }
         trustedSessionTokens = stored
         pruneExpiredSessionTokens()  // Drop tokens that expired while the app was closed
+    }
+
+    /// User dismisses the pairing prompt (PIN shown) — hides it again.
+    func acknowledgePairingRequest() {
+        pairingRequested = false
+        postStatusChange()
+    }
+
+    /// Manually reveal the pairing PIN from the Host UI on demand.
+    func revealPINManually() {
+        pairingRequested = true
+        postStatusChange()
+    }
+
+    /// Forget everything: rotate the PIN (which already clears session tokens)
+    /// and return to an unpaired state. Pairing menu equivalent of factory reset.
+    func resetAllPairings() {
+        regeneratePIN()              // rotates PIN + clears session tokens
+        pairingRequested = false
+        postStatusChange()
     }
 
     // MARK: - Network Components
@@ -262,20 +299,20 @@ final class HostManager: ObservableObject {
         Task {
             do {
                 // Start UDP listener on fixed port
-                try networkManager.startUDPListener(port: AirCatchConfig.udpPort) { [weak self] packet, endpoint in
-                    self?.handleIncomingPacket(packet, from: endpoint)
+                try networkManager.startUDPListener(port: AirCatchConfig.udpPort) { packet, endpoint in
+                    self.handleIncomingPacket(packet, from: endpoint)
                 }
                 
                 // Start TCP listener on fixed port
                 try networkManager.startTCPListener(
                     port: AirCatchConfig.tcpPort,
-                    onConnection: { [weak self] connection in
+                    onConnection: { connection in
                         Task { @MainActor in
-                            self?.sendTCPAuthChallenge(to: connection)
+                            self.sendTCPAuthChallenge(to: connection)
                         }
                     },
-                    onPacket: { [weak self] packet, connection in
-                        self?.handleTCPPacket(packet, from: connection)
+                    onPacket: { packet, connection in
+                        self.handleTCPPacket(packet, from: connection)
                     }
                 )
                 
@@ -412,6 +449,12 @@ final class HostManager: ObservableObject {
         case .ping:
             Task { @MainActor in
                 self.handlePingPacket(packet.payload, from: connection)
+            }
+        case .pairingRequest:
+            Task { @MainActor in
+                self.pairingRequested = true
+                self.postStatusChange()
+                AirCatchLog.info("Pairing requested — revealing PIN in host UI", category: .network)
             }
         case .qualityReport:
             Task { @MainActor in
@@ -632,7 +675,7 @@ final class HostManager: ObservableObject {
         connectedClients += 1
 
         mpcSessionActive = true
-        currentFrameRate = AirCatchConfig.defaultFrameRate
+        currentFrameRate = effectiveDefaultFrameRate
         currentBitrate = AirCatchConfig.defaultBitrate
 
         self.preferLowLatency = handshakeRequest?.preferLowLatency ?? true
@@ -757,9 +800,10 @@ final class HostManager: ObservableObject {
             AirCatchLog.debug("Auth verified successfully for: \(connection.endpoint)", category: .network)
             #endif
             connectedClients += 1
+            pairingRequested = false  // Pairing prompt fulfilled — hide the PIN again
             
             mpcSessionActive = false
-            currentFrameRate = AirCatchConfig.defaultFrameRate
+            currentFrameRate = effectiveDefaultFrameRate
             currentBitrate = AirCatchConfig.defaultBitrate
 
             // Client transport preference
@@ -872,7 +916,7 @@ final class HostManager: ObservableObject {
 
         let minBitrate = BitrateCalculator.minimumBitrate
         let maxBitrate = BitrateCalculator.maximumBitrate
-        let maxFPS = AirCatchConfig.defaultFrameRate
+        let maxFPS = effectiveDefaultFrameRate
         let minFPS = 30
 
         let latencyThreshold = 150.0
@@ -954,7 +998,6 @@ final class HostManager: ObservableObject {
             #endif
             return
         }
-        let cachedState = cachedInputStateSnapshot()
         
         // Discard stale events based on host-side queue delay (not cross-device wall clock).
         let queueDelay = Date().timeIntervalSinceReferenceDate - receivedAt
@@ -974,6 +1017,7 @@ final class HostManager: ObservableObject {
             #endif
             return
         }
+        let cachedState = cachedInputStateSnapshot()
         
         // Get the target display frame - use main display bounds (thread-safe)
         let screenFrame = CGDisplayBounds(CGMainDisplayID())
@@ -1039,7 +1083,6 @@ final class HostManager: ObservableObject {
     
     // PERFORMANCE: nonisolated - runs on inputProcessingQueue
     private nonisolated func handleScrollEvent(_ payload: Data, receivedAt: TimeInterval) {
-        let cachedState = cachedInputStateSnapshot()
         let queueDelay = Date().timeIntervalSinceReferenceDate - receivedAt
         let maxQueueDelay = Self.maxInputQueueDelay
         if queueDelay > maxQueueDelay {
@@ -1194,7 +1237,7 @@ final class HostManager: ObservableObject {
         let captureDisplayID = virtualDisplayID ?? CGMainDisplayID()
         self.targetDisplayID = captureDisplayID
 
-        let targetFPS = AirCatchConfig.defaultFrameRate
+        let targetFPS = effectiveDefaultFrameRate
         currentFrameRate = targetFPS
         if let clientW = clientMaxWidth, let clientH = clientMaxHeight, clientW > 0, clientH > 0 {
             let initialBitrate = BitrateCalculator.calculateOptimal(

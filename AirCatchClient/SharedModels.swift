@@ -90,6 +90,7 @@ enum PacketType: UInt8 {
     case audioPCM = 0x0F
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
     case authResponse = 0x11   // SECURITY: Client responds with HMAC proof of PIN
+    case pairingRequest = 0x12  // Client asks the host to reveal its pairing PIN in the UI
 }
 
 // MARK: - Connection/Codec Preferences

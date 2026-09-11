@@ -171,23 +171,30 @@ final class ClientManager: ObservableObject {
         return String(data: data, encoding: .utf8)
     }
     
-    /// Connection mode for video/control.
-    @Published var connectionOption: ConnectionOption = .udpPeerToPeerAWDL
+    /// Connection mode for video/control. Persisted so the user's transport
+    /// choice (AWDL vs. Local Network) survives app restarts.
+    @Published var connectionOption: ConnectionOption =
+        ConnectionOption(rawValue: UserDefaults.standard.string(forKey: "defaultConnectionOption") ?? "") ?? .udpPeerToPeerAWDL {
+        didSet { UserDefaults.standard.set(connectionOption.rawValue, forKey: "defaultConnectionOption") }
+    }
 
     /// Whether the current/next handshake is requesting video streaming.
     @Published private(set) var videoRequested: Bool = false
-    
+
     /// User preference: Stream audio from host
-    @Published var audioEnabled: Bool = false {
+    @Published var audioEnabled: Bool = UserDefaults.standard.bool(forKey: "defaultStreamAudio") {
         didSet {
             audioEnabledFlag.set(audioEnabled)
+            UserDefaults.standard.set(audioEnabled, forKey: "defaultStreamAudio")
         }
     }
-    
+
     /// User preference: Optimize streaming for host display resolution
     /// When true, streams at host's native resolution (may require letterboxing on client).
     /// When false, scales to client's display resolution for pixel-perfect fit.
-    @Published var optimizeForHostDisplay: Bool = false
+    @Published var optimizeForHostDisplay: Bool = UserDefaults.standard.bool(forKey: "defaultOptimizeForHostDisplay") {
+        didSet { UserDefaults.standard.set(optimizeForHostDisplay, forKey: "defaultOptimizeForHostDisplay") }
+    }
     
     // MARK: - Saved Hosts (Sunshine/Moonlight-style pairing)
 
@@ -374,11 +381,13 @@ final class ClientManager: ObservableObject {
     
     func disconnect(shouldRetry: Bool = false) {
         usingPeerToPeerTransport = false
+        disarmConnectionWatchdog()
         networkManager.stopAll()
         stopTelemetry()
         audioPlayer.stop()
         streamingFlag.set(false)
         screenInfo = nil
+        videoRequested = false  // Tear down the stream overlay on every disconnect path
 
         if shouldRetry {
              attemptReconnect()
@@ -410,6 +419,7 @@ final class ClientManager: ObservableObject {
         videoRequested = requestVideo
         state = .connecting
         reconnectAttempts = 0
+        armConnectionWatchdog()
 
         // Manual/Tailscale connections run over the routable network (utun), not AWDL.
         connectionOption = .udpNetworkFramework
@@ -485,18 +495,126 @@ final class ClientManager: ObservableObject {
     }
 
     // MARK: - Auto-Connect Logic
-    
+
     private func setupAutoConnectLogic() {
         // Auto-connect logic removed as AR is disabled.
         // Users now select a host manually from the list.
     }
-    
+
+    // MARK: - Pairing Announcement
+
+    /// Notifies the host that we want to pair, so it reveals its PIN on its screen.
+    /// Opens a short-lived TCP connection just to deliver the pairing request — the
+    /// real connection is opened later by `connect(to:)` once the user has the PIN.
+    func announcePairing(to host: DiscoveredHost) {
+        // Manual entries: the address is the name. Bonjour entries: resolve the endpoint.
+        if host.id.hasPrefix("manual-") {
+            sendPairingRequest(to: host.name, name: host.name)
+            return
+        }
+        sendPairingRequest(to: nil, name: host.name, endpoint: host.endpoint)
+    }
+
+    private func sendPairingRequest(to address: String?, name: String, endpoint: NWEndpoint? = nil) {
+        let targetHost: String
+        if let address, !address.isEmpty {
+            targetHost = address
+        } else {
+            // Resolve from any Bonjour endpoint if we have one — best effort.
+            // If we can't resolve, we simply skip; the user can also show the PIN manually.
+            guard let endpoint else { return }
+            resolutionForPairing(endpoint: endpoint) { [weak self] resolvedIP in
+                guard let ip = resolvedIP else { return }
+                self?.sendPairingRequest(to: ip, name: name)
+            }
+            return
+        }
+
+        guard let port = NWEndpoint.Port(rawValue: AirCatchConfig.tcpPort) else { return }
+        let conn = NWConnection(host: NWEndpoint.Host(targetHost), port: port, using: .tcp)
+        let payload = Data()  // empty payload — type alone is the signal
+        var packet = Data()
+        packet.append(PacketType.pairingRequest.rawValue)
+        let length = UInt32(payload.count)
+        packet.append(UInt8((length >> 24) & 0xFF))
+        packet.append(UInt8((length >> 16) & 0xFF))
+        packet.append(UInt8((length >> 8) & 0xFF))
+        packet.append(UInt8(length & 0xFF))
+        packet.append(payload)
+
+        conn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                conn.send(content: packet, completion: .contentProcessed { _ in
+                    // Hit-and-run: the host only needed the signal, no response required.
+                    conn.cancel()
+                })
+            case .failed, .cancelled:
+                break
+            default:
+                break
+            }
+        }
+        conn.start(queue: DispatchQueue(label: "com.aircatch.pairing-announce", qos: .utility))
+    }
+
+    private func resolutionForPairing(endpoint: NWEndpoint, completion: @escaping (String?) -> Void) {
+        let probe = NWConnection(to: endpoint, using: .udp)
+        probe.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let ip: String?
+                if let path = probe.currentPath,
+                   case .hostPort(let resolvedHost, _) = path.remoteEndpoint {
+                    ip = "\(resolvedHost)"
+                } else {
+                    ip = nil
+                }
+                probe.stateUpdateHandler = nil
+                probe.cancel()
+                completion(ip)
+            case .failed:
+                probe.stateUpdateHandler = nil
+                probe.cancel()
+                completion(nil)
+            default:
+                break
+            }
+        }
+        probe.start(queue: .global(qos: .utility))
+    }
+
     // MARK: - Connection
-    
+
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
 
     private var pendingRequestVideo: Bool = true
+
+    // MARK: - Connection Watchdog
+
+    /// If a connection attempt stalls (network unreachable, host firewall, wrong IP),
+    /// surface an error and return to the home screen instead of hanging in "Connecting".
+    private var connectionWatchdog: Task<Void, Never>?
+
+    private func armConnectionWatchdog() {
+        connectionWatchdog?.cancel()
+        connectionWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self, !Task.isCancelled else { return }
+            if self.state == .connecting {
+                self.state = .error("Connection timed out")
+                self.videoRequested = false
+                self.connectedHost = nil
+                self.debugConnectionStatus = "Timed out"
+            }
+        }
+    }
+
+    private func disarmConnectionWatchdog() {
+        connectionWatchdog?.cancel()
+        connectionWatchdog = nil
+    }
 
     /// Connects to a host with the requested session features.
     func connect(
@@ -508,10 +626,11 @@ final class ClientManager: ObservableObject {
 
         pendingRequestVideo = requestVideo
         videoRequested = requestVideo
-        
+
         state = .connecting
         connectedHost = host
         reconnectAttempts = 0 // Reset on manual connect
+        armConnectionWatchdog()
         
         // E2EE: Derive encryption key from PIN
         crypto.deriveKey(from: enteredPIN)
@@ -1107,6 +1226,7 @@ final class ClientManager: ObservableObject {
             self.screenInfo = ack
             self.streamingFlag.set(false)
             self.state = .connected
+            self.disarmConnectionWatchdog()
             self.startTelemetry()
 
             // Pairing: after a successful PIN/auth handshake, persist the host so

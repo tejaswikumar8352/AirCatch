@@ -4,6 +4,7 @@ import SwiftUI
 struct HostView: View {
     @ObservedObject private var hostManager = HostManager.shared
     @State private var isStreaming = false
+    @State private var showSettings = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -34,8 +35,8 @@ struct HostView: View {
             Divider()
                 .padding(.horizontal)
 
-            // Local Mode UI (PIN)
-            localModeSection
+            // Pairing section — PIN is hidden by default; revealed on request or via the button
+            pairingSection
 
             // Connection status
             connectionStatusSection
@@ -45,13 +46,10 @@ struct HostView: View {
 
             // Controls
             HStack {
-                Button(action: {
-                    hostManager.regeneratePIN()
-                }) {
-                    Label("Reset PIN", systemImage: "arrow.clockwise")
+                Button(action: { showSettings = true }) {
+                    Label("Settings", systemImage: "gear")
                 }
                 .buttonStyle(.bordered)
-                .help("Rotate the PIN. Paired devices will need to pair again.")
 
                 Spacer()
 
@@ -66,40 +64,67 @@ struct HostView: View {
             .padding(.horizontal)
             .padding(.bottom, 20)
         }
-        .frame(width: 380)
+        .frame(width: 400)
         .background(Color(NSColor.windowBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: HostManager.statusDidChange)) { _ in
             isStreaming = HostManager.shared.isStreaming
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .frame(minWidth: 460, minHeight: 420)
         }
     }
 
     // MARK: - Subviews
 
-    private var localModeSection: some View {
-        VStack(spacing: 8) {
-            Text("Connection PIN")
-                .font(.headline)
-                .foregroundColor(.secondary)
-
-            HStack(spacing: 4) {
-                ForEach(Array(hostManager.currentPIN.enumerated()), id: \.offset) { index, char in
-                    Text(String(char))
-                        .font(.system(size: 32, weight: .bold, design: .monospaced))
-                        .frame(width: 36, height: 50)
-                        .background(Color.accentColor.opacity(0.1))
-                        .cornerRadius(8)
+    /// Pairing area: PIN hidden until a paired request arrives or the user presses "Show PIN".
+    private var pairingSection: some View {
+        VStack(spacing: 10) {
+            if hostManager.pairingRequested {
+                HStack(spacing: 6) {
+                    Image(systemName: "iphone.and.arrow.forward")
+                        .foregroundColor(.accentColor)
+                    Text("An iPad is asking to pair")
+                        .font(.subheadline.weight(.semibold))
                 }
+
+                pinDisplay
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                Button(action: { hostManager.acknowledgePairingRequest() }) {
+                    Text("Done")
+                        .frame(minWidth: 90)
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Text("Pairing PIN is hidden")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Text("To pair a new iPad, tap its entry on the iPad — the PIN appears here.\nYou can also reveal it manually below.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .multilineTextAlignment(.center)
+
+                Button(action: { hostManager.revealPINManually() }) {
+                    Text("Show PIN")
+                        .frame(minWidth: 110)
+                }
+                .buttonStyle(.bordered)
             }
-            .padding(.vertical, 8)
+        }
+        .padding(.vertical, 4)
+    }
 
-            Text("Enter this PIN on your iPad to pair once")
-                .font(.caption)
-                .foregroundColor(.secondary.opacity(0.7))
-
-            Text("PIN stays the same between app restarts — paired iPads reconnect without it")
-                .font(.caption2)
-                .foregroundColor(.secondary.opacity(0.6))
-                .multilineTextAlignment(.center)
+    private var pinDisplay: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(hostManager.currentPIN.enumerated()), id: \.offset) { _, char in
+                Text(String(char))
+                    .font(.system(size: 32, weight: .bold, design: .monospaced))
+                    .frame(width: 36, height: 50)
+                    .background(Color.accentColor.opacity(0.1))
+                    .cornerRadius(8)
+            }
         }
     }
 
@@ -121,7 +146,7 @@ struct HostView: View {
                 HStack {
                     ProgressView()
                         .scaleEffect(0.8)
-                    Text("Waiting for connection...")
+                    Text("Listening for connections…")
                         .foregroundColor(.secondary)
                 }
                 .padding()
