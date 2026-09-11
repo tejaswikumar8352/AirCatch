@@ -1,0 +1,284 @@
+{
+  "AirCatch.xcodeproj/xcshareddata/xcodecloud/manifest.json": {
+    "mtime": 1789075334.73673,
+    "seen": 1789076937.445428,
+    "ast_hash": "f267acb930c956d12393cee978177cc7",
+    "semantic_hash": "f267acb930c956d12393cee978177cc7"
+  },
+  "AirCatchClient/AirCatchClientApp.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.44543,
+    "ast_hash": "cec4796300da9f73ef5fcfe697f1a411",
+    "semantic_hash": "cec4796300da9f73ef5fcfe697f1a411"
+  },
+  "AirCatchClient/Assets.xcassets/AccentColor.colorset/Contents.json": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.44543,
+    "ast_hash": "55019f7265dde0a78318b0807f98e847",
+    "semantic_hash": "55019f7265dde0a78318b0807f98e847"
+  },
+  "AirCatchClient/Assets.xcassets/AppIcon.appiconset/Contents.json": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445431,
+    "ast_hash": "6d7ca7b2944f89a6f9d9eccb992c5c1f",
+    "semantic_hash": "6d7ca7b2944f89a6f9d9eccb992c5c1f"
+  },
+  "AirCatchClient/Assets.xcassets/Contents.json": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445432,
+    "ast_hash": "9deb2ada1cc834bbebf8bbad9c8978a1",
+    "semantic_hash": "9deb2ada1cc834bbebf8bbad9c8978a1"
+  },
+  "AirCatchClient/Assets.xcassets/bg.imageset/Contents.json": {
+    "mtime": 1770620395.0,
+    "seen": 1789076937.445432,
+    "ast_hash": "24a872b26b3f1f80719e1d7d53d10f8f",
+    "semantic_hash": "24a872b26b3f1f80719e1d7d53d10f8f"
+  },
+  "AirCatchClient/AudioPlayer.swift": {
+    "mtime": 1789075994.964836,
+    "seen": 1789076937.4454331,
+    "ast_hash": "0078ae91abb3e581d6ac3e9aa7c03169",
+    "semantic_hash": "0078ae91abb3e581d6ac3e9aa7c03169"
+  },
+  "AirCatchClient/BonjourBrowser.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445438,
+    "ast_hash": "30517716bf6754624fdfcdfe6c8d2e97",
+    "semantic_hash": "30517716bf6754624fdfcdfe6c8d2e97"
+  },
+  "AirCatchClient/ClientManager.swift": {
+    "mtime": 1789086764.3348584,
+    "seen": 1789087490.484353,
+    "ast_hash": "9fe492828a6075c29aff8beb063bc24a",
+    "semantic_hash": ""
+  },
+  "AirCatchClient/ContentView.swift": {
+    "mtime": 1789083468.3177829,
+    "seen": 1789085395.499389,
+    "ast_hash": "896f6f5642dc80dd0ca2c659b657d550",
+    "semantic_hash": ""
+  },
+  "AirCatchClient/CryptoManager.swift": {
+    "mtime": 1770638858.0,
+    "seen": 1789076937.44544,
+    "ast_hash": "35b8c18ba60c6a91b06b268ab7ca4ae1",
+    "semantic_hash": "35b8c18ba60c6a91b06b268ab7ca4ae1"
+  },
+  "AirCatchClient/MPCAirCatchClient.swift": {
+    "mtime": 1770649117.0,
+    "seen": 1789076937.445441,
+    "ast_hash": "6501b0b4b52bfaddf5f4e46118774f32",
+    "semantic_hash": "6501b0b4b52bfaddf5f4e46118774f32"
+  },
+  "AirCatchClient/MetalVideoView.swift": {
+    "mtime": 1770627226.0,
+    "seen": 1789076937.445441,
+    "ast_hash": "1efcadc00929c7335894f4c1fa8cfc0a",
+    "semantic_hash": "1efcadc00929c7335894f4c1fa8cfc0a"
+  },
+  "AirCatchClient/MouseInputView.swift": {
+    "mtime": 1789083108.5946453,
+    "seen": 1789085395.499392,
+    "ast_hash": "9a5234b69af9f359d1cb7a76bcc90a09",
+    "semantic_hash": ""
+  },
+  "AirCatchClient/NetworkManager.swift": {
+    "mtime": 1770626781.0,
+    "seen": 1789076937.445442,
+    "ast_hash": "8b1808aa69bf9e3b7c996d6f3923d118",
+    "semantic_hash": "8b1808aa69bf9e3b7c996d6f3923d118"
+  },
+  "AirCatchClient/SharedModels.swift": {
+    "mtime": 1789086773.6433005,
+    "seen": 1789087490.4843578,
+    "ast_hash": "5aaa177e50cd8c23bcb9d52935d2f6bf",
+    "semantic_hash": ""
+  },
+  "AirCatchClient/VideoDecoder.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445444,
+    "ast_hash": "f26632484da46544a5d1c433e42c5fe3",
+    "semantic_hash": "f26632484da46544a5d1c433e42c5fe3"
+  },
+  "AirCatchClient/VideoStreamOverlay.swift": {
+    "mtime": 1789083107.4467869,
+    "seen": 1789085395.499394,
+    "ast_hash": "909e639b0bcb109aba2f70ad61f46609",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/AirCatchHostApp.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.4454458,
+    "ast_hash": "08d6ae950686a926ea9ac5f5b9f9ff8f",
+    "semantic_hash": "08d6ae950686a926ea9ac5f5b9f9ff8f"
+  },
+  "AirCatchHost/Assets.xcassets/AccentColor.colorset/Contents.json": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445447,
+    "ast_hash": "55019f7265dde0a78318b0807f98e847",
+    "semantic_hash": "55019f7265dde0a78318b0807f98e847"
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/Contents.json": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445447,
+    "ast_hash": "cf2803efe484c1be719d7106d75e6137",
+    "semantic_hash": "cf2803efe484c1be719d7106d75e6137"
+  },
+  "AirCatchHost/Assets.xcassets/Contents.json": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445448,
+    "ast_hash": "9deb2ada1cc834bbebf8bbad9c8978a1",
+    "semantic_hash": "9deb2ada1cc834bbebf8bbad9c8978a1"
+  },
+  "AirCatchHost/BitrateCalculator.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445448,
+    "ast_hash": "1d4e1a8534e9f7e12576a8092f6dd121",
+    "semantic_hash": "1d4e1a8534e9f7e12576a8092f6dd121"
+  },
+  "AirCatchHost/BonjourAdvertiser.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.4454489,
+    "ast_hash": "b3953cc43ed37e0947fb336a741d0982",
+    "semantic_hash": "b3953cc43ed37e0947fb336a741d0982"
+  },
+  "AirCatchHost/CryptoManager.swift": {
+    "mtime": 1770638838.0,
+    "seen": 1789076937.4454489,
+    "ast_hash": "f2e57b2f8f0d55d62391cc0d23d01fdc",
+    "semantic_hash": "f2e57b2f8f0d55d62391cc0d23d01fdc"
+  },
+  "AirCatchHost/DisplayManager.swift": {
+    "mtime": 1770638889.0,
+    "seen": 1789076937.44545,
+    "ast_hash": "9119071b659fe9b4c6a8a2b730d8ec4d",
+    "semantic_hash": "9119071b659fe9b4c6a8a2b730d8ec4d"
+  },
+  "AirCatchHost/HostManager.swift": {
+    "mtime": 1789086757.1025002,
+    "seen": 1789087490.484364,
+    "ast_hash": "5677f58fdb6d0b963dafa1b515ecd797",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/HostView.swift": {
+    "mtime": 1789081107.3089807,
+    "seen": 1789085395.4994,
+    "ast_hash": "083575e69a7df61af77adc981c628e54",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/InputInjector.swift": {
+    "mtime": 1770623966.0,
+    "seen": 1789076937.445451,
+    "ast_hash": "060b5f42a7c899a5269e8fa137db2690",
+    "semantic_hash": "060b5f42a7c899a5269e8fa137db2690"
+  },
+  "AirCatchHost/MPCAirCatchHost.swift": {
+    "mtime": 1770649156.0,
+    "seen": 1789076937.445451,
+    "ast_hash": "8d410fecd2b43edf9407908269c2fbe4",
+    "semantic_hash": "8d410fecd2b43edf9407908269c2fbe4"
+  },
+  "AirCatchHost/NetworkHealthMonitor.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445452,
+    "ast_hash": "72b94948750c211b6db92bdea1b4b7e9",
+    "semantic_hash": "72b94948750c211b6db92bdea1b4b7e9"
+  },
+  "AirCatchHost/NetworkManager.swift": {
+    "mtime": 1789083253.4449246,
+    "seen": 1789085395.499403,
+    "ast_hash": "9c8b0f43d1418e771157ee5d6f1507cc",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/ScreenStreamer.swift": {
+    "mtime": 1789082927.9155192,
+    "seen": 1789085395.499403,
+    "ast_hash": "8da419312a20233fd3bdee1705efd13b",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/SharedModels.swift": {
+    "mtime": 1789086773.641981,
+    "seen": 1789087490.4843678,
+    "ast_hash": "767630cf3668d3cd0fe640f3e04005b6",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/VirtualDisplayManager.swift": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.4454541,
+    "ast_hash": "81f1136290f540cc689b0edfd26d3e9d",
+    "semantic_hash": "81f1136290f540cc689b0edfd26d3e9d"
+  },
+  "launch_retry.sh": {
+    "mtime": 1770617490.0,
+    "seen": 1789076937.445457,
+    "ast_hash": "11e10a65b256401d9e5dabd574004556",
+    "semantic_hash": "11e10a65b256401d9e5dabd574004556"
+  },
+  "AirCatchClient/Assets.xcassets/AppIcon.appiconset/IMG_0991.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.1036758,
+    "ast_hash": "5a1ae1eed1fef1d59bfb3acadd9d6c3d",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 1.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.1036758,
+    "ast_hash": "c70536cb130745b7d4153e22d0b9add6",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 2.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103677,
+    "ast_hash": "94c47232a13ad6bb5293152a0545876d",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 3.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103677,
+    "ast_hash": "08baed862528496013d52220d4cc9546",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 4.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103678,
+    "ast_hash": "08baed862528496013d52220d4cc9546",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 5.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103678,
+    "ast_hash": "b3e27dc01cdaa7a9ae8ac844f8e08449",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 6.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103679,
+    "ast_hash": "b3e27dc01cdaa7a9ae8ac844f8e08449",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 7.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103679,
+    "ast_hash": "654261336ab538a2450d56dbfa59eef6",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy 8.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.10368,
+    "ast_hash": "654261336ab538a2450d56dbfa59eef6",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991 copy.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.10368,
+    "ast_hash": "59951390250f6d097e71d762f137ca11",
+    "semantic_hash": ""
+  },
+  "AirCatchHost/Assets.xcassets/AppIcon.appiconset/IMG_0991.jpg": {
+    "mtime": 1770617490.0,
+    "seen": 1789078117.103681,
+    "ast_hash": "5a1ae1eed1fef1d59bfb3acadd9d6c3d",
+    "semantic_hash": ""
+  }
+}

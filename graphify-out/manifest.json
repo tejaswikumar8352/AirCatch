@@ -48,15 +48,15 @@
     "semantic_hash": "30517716bf6754624fdfcdfe6c8d2e97"
   },
   "AirCatchClient/ClientManager.swift": {
-    "mtime": 1789086764.3348584,
-    "seen": 1789087490.484353,
-    "ast_hash": "9fe492828a6075c29aff8beb063bc24a",
+    "mtime": 1789098676.7675922,
+    "seen": 1789099987.591903,
+    "ast_hash": "2fd65c15fd0fa11d9be2ce7dde588777",
     "semantic_hash": ""
   },
   "AirCatchClient/ContentView.swift": {
-    "mtime": 1789083468.3177829,
-    "seen": 1789085395.499389,
-    "ast_hash": "896f6f5642dc80dd0ca2c659b657d550",
+    "mtime": 1789098950.4493468,
+    "seen": 1789099987.591903,
+    "ast_hash": "29225ae52688262d39f0b0c72b1d5870",
     "semantic_hash": ""
   },
   "AirCatchClient/CryptoManager.swift": {
@@ -78,9 +78,9 @@
     "semantic_hash": "1efcadc00929c7335894f4c1fa8cfc0a"
   },
   "AirCatchClient/MouseInputView.swift": {
-    "mtime": 1789083108.5946453,
-    "seen": 1789085395.499392,
-    "ast_hash": "9a5234b69af9f359d1cb7a76bcc90a09",
+    "mtime": 1789095349.9847052,
+    "seen": 1789099987.591906,
+    "ast_hash": "6e8ffe7e5f5bc7432e2d917d777a2843",
     "semantic_hash": ""
   },
   "AirCatchClient/NetworkManager.swift": {
@@ -90,8 +90,8 @@
     "semantic_hash": "8b1808aa69bf9e3b7c996d6f3923d118"
   },
   "AirCatchClient/SharedModels.swift": {
-    "mtime": 1789086773.6433005,
-    "seen": 1789087490.4843578,
+    "mtime": 1789095448.748475,
+    "seen": 1789099987.591907,
     "ast_hash": "5aaa177e50cd8c23bcb9d52935d2f6bf",
     "semantic_hash": ""
   },
@@ -156,22 +156,22 @@
     "semantic_hash": "9119071b659fe9b4c6a8a2b730d8ec4d"
   },
   "AirCatchHost/HostManager.swift": {
-    "mtime": 1789086757.1025002,
-    "seen": 1789087490.484364,
-    "ast_hash": "5677f58fdb6d0b963dafa1b515ecd797",
+    "mtime": 1789098522.4216802,
+    "seen": 1789099987.591913,
+    "ast_hash": "91593e5c00fba276d24d6d8bc849093a",
     "semantic_hash": ""
   },
   "AirCatchHost/HostView.swift": {
-    "mtime": 1789081107.3089807,
-    "seen": 1789085395.4994,
-    "ast_hash": "083575e69a7df61af77adc981c628e54",
+    "mtime": 1789098573.122548,
+    "seen": 1789099987.591914,
+    "ast_hash": "75bd8b04622cdb14186680b904b67fed",
     "semantic_hash": ""
   },
   "AirCatchHost/InputInjector.swift": {
-    "mtime": 1770623966.0,
-    "seen": 1789076937.445451,
-    "ast_hash": "060b5f42a7c899a5269e8fa137db2690",
-    "semantic_hash": "060b5f42a7c899a5269e8fa137db2690"
+    "mtime": 1789095476.5650198,
+    "seen": 1789099987.591914,
+    "ast_hash": "ea9bb986344dc43132c70073e6538fe7",
+    "semantic_hash": ""
   },
   "AirCatchHost/MPCAirCatchHost.swift": {
     "mtime": 1770649156.0,
@@ -198,8 +198,8 @@
     "semantic_hash": ""
   },
   "AirCatchHost/SharedModels.swift": {
-    "mtime": 1789086773.641981,
-    "seen": 1789087490.4843678,
+    "mtime": 1789095385.5792236,
+    "seen": 1789099987.591917,
     "ast_hash": "767630cf3668d3cd0fe640f3e04005b6",
     "semantic_hash": ""
   },
