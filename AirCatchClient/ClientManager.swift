@@ -500,7 +500,10 @@ final class ClientManager: ObservableObject {
     }
 
     private func makeHandshakeRequest(authResponse: Data?, connectionMode: ConnectionMode?) -> HandshakeRequest {
-        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework
+        // Tailscale (direct IP/100.x.x.x) performs poorly with high-rate UDP chunking.
+        let isTailscale = connectedHost?.id.hasPrefix("manual-") == true || connectedHost?.name.starts(with: "100.") == true
+        let preferLowLatency = !isTailscale
+        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework && !isTailscale
         // Get iPad display properties for Sidecar-like hardware handshake
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -543,7 +546,7 @@ final class ClientManager: ObservableObject {
             displayConfig: nil,  // Mirror mode only (extend display removed)
             requestVideo: pendingRequestVideo,
             requestAudio: audioEnabled,
-            preferLowLatency: true,
+            preferLowLatency: preferLowLatency,
             losslessVideo: useLosslessChunkRetransmit,
             pin: nil,
             authResponse: authResponse,
@@ -1330,8 +1333,8 @@ nonisolated private final class VideoReassembler: @unchecked Sendable {
             guard let self else { return }
 
             let now = Date().timeIntervalSinceReferenceDate
-            let nackDelay: TimeInterval = 0.02
-            let nackMinInterval: TimeInterval = 0.03
+            let nackDelay: TimeInterval = 0.08
+            let nackMinInterval: TimeInterval = 0.10
             let maxMissingPerNack = 64
             
             // Cleanup old frames - collect keys first to avoid mutation during iteration

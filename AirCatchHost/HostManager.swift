@@ -51,7 +51,7 @@ final class HostManager: ObservableObject {
     private nonisolated static let jsonDecoder = JSONDecoder()
     
     // Input queue timing. Uses host receive time to avoid client/host clock skew issues.
-    private nonisolated static let maxInputQueueDelay: TimeInterval = 0.10
+    private nonisolated static let maxInputQueueDelay: TimeInterval = 0.50
     
     // PERFORMANCE: Dedicated high-priority queue for input processing
     // Avoids main thread latency for touch/scroll/key events
@@ -807,7 +807,7 @@ final class HostManager: ObservableObject {
         let maxFPS = AirCatchConfig.defaultFrameRate
         let minFPS = 30
 
-        let latencyThreshold = 80.0
+        let latencyThreshold = 150.0
         let droppedFrameThreshold = 0
         let decreaseStep = 2_000_000
         let increaseStep = 1_000_000
@@ -1139,6 +1139,12 @@ final class HostManager: ObservableObject {
             currentBitrate = initialBitrate
         } else {
             currentBitrate = AirCatchConfig.defaultBitrate
+        }
+
+        // Tailscale initial bitrate cap to avoid saturating DERP relays before feedback arrives.
+        // The client asks for TCP (preferLowLatency = false) when on Tailscale.
+        if !preferLowLatency {
+            currentBitrate = min(currentBitrate, 8_000_000)
         }
 
         AirCatchLog.info("Starting stream: \(currentBitrate / 1_000_000)Mbps @ \(currentFrameRate)fps, audio: \(audioEnabled), optimizeForHostDisplay: \(optimizeForHostDisplay), displayID: \(captureDisplayID)", category: .video)

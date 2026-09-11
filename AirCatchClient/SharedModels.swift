@@ -50,7 +50,7 @@ enum AirCatchConfig {
     // Master PIN removed - using session tokens for authentication
     
     // Network constants
-    static let maxUDPPayloadSize: Int = 1200  // Safe UDP payload size (below MTU)
+    static let maxUDPPayloadSize: Int = 1100  // Safe UDP payload size (below MTU)
     
     // Streaming defaults (optimized for HEVC on Apple Silicon)
     static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot

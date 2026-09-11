@@ -48,16 +48,16 @@
     "semantic_hash": "30517716bf6754624fdfcdfe6c8d2e97"
   },
   "AirCatchClient/ClientManager.swift": {
-    "mtime": 1789076258.501363,
-    "seen": 1789076937.4454389,
-    "ast_hash": "04e060e2add5378356a8e2c91ee8e172",
-    "semantic_hash": "04e060e2add5378356a8e2c91ee8e172"
+    "mtime": 1789083045.9122744,
+    "seen": 1789085395.499389,
+    "ast_hash": "5c03c2e4cc9f7d39eb86302246cc5e9f",
+    "semantic_hash": ""
   },
   "AirCatchClient/ContentView.swift": {
-    "mtime": 1770655622.0,
-    "seen": 1789076937.44544,
-    "ast_hash": "4651a8f7710f011d0374d4555d98d3ba",
-    "semantic_hash": "4651a8f7710f011d0374d4555d98d3ba"
+    "mtime": 1789083468.3177829,
+    "seen": 1789085395.499389,
+    "ast_hash": "896f6f5642dc80dd0ca2c659b657d550",
+    "semantic_hash": ""
   },
   "AirCatchClient/CryptoManager.swift": {
     "mtime": 1770638858.0,
@@ -78,10 +78,10 @@
     "semantic_hash": "1efcadc00929c7335894f4c1fa8cfc0a"
   },
   "AirCatchClient/MouseInputView.swift": {
-    "mtime": 1770625204.0,
-    "seen": 1789076937.445442,
-    "ast_hash": "10d6125c51028957e96a9ebda26cbd78",
-    "semantic_hash": "10d6125c51028957e96a9ebda26cbd78"
+    "mtime": 1789083108.5946453,
+    "seen": 1789085395.499392,
+    "ast_hash": "9a5234b69af9f359d1cb7a76bcc90a09",
+    "semantic_hash": ""
   },
   "AirCatchClient/NetworkManager.swift": {
     "mtime": 1770626781.0,
@@ -89,17 +89,11 @@
     "ast_hash": "8b1808aa69bf9e3b7c996d6f3923d118",
     "semantic_hash": "8b1808aa69bf9e3b7c996d6f3923d118"
   },
-  "AirCatchClient/RelayClient.swift": {
-    "mtime": 1770655583.0,
-    "seen": 1789076937.445444,
-    "ast_hash": "eec21b5b638048ff16348fe54562be36",
-    "semantic_hash": "eec21b5b638048ff16348fe54562be36"
-  },
   "AirCatchClient/SharedModels.swift": {
-    "mtime": 1770629348.0,
-    "seen": 1789076937.445444,
-    "ast_hash": "2bcce5747a74b40ef92f89b3ba8af433",
-    "semantic_hash": "2bcce5747a74b40ef92f89b3ba8af433"
+    "mtime": 1789083187.5406637,
+    "seen": 1789085395.499393,
+    "ast_hash": "783d0f88f482e66a17fe5eace78279c4",
+    "semantic_hash": ""
   },
   "AirCatchClient/VideoDecoder.swift": {
     "mtime": 1770617490.0,
@@ -108,22 +102,10 @@
     "semantic_hash": "f26632484da46544a5d1c433e42c5fe3"
   },
   "AirCatchClient/VideoStreamOverlay.swift": {
-    "mtime": 1770655665.0,
-    "seen": 1789076937.445445,
-    "ast_hash": "1ddae35415ae64b2a8ec29172b247f84",
-    "semantic_hash": "1ddae35415ae64b2a8ec29172b247f84"
-  },
-  "AirCatchClient/WebRTCClientSession.swift": {
-    "mtime": 1770629373.0,
-    "seen": 1789076937.445445,
-    "ast_hash": "7ab55bd8b450cee11b8d6fb691ce73f8",
-    "semantic_hash": "7ab55bd8b450cee11b8d6fb691ce73f8"
-  },
-  "AirCatchClient/WebRTCVideoView.swift": {
-    "mtime": 1770617490.0,
-    "seen": 1789076937.4454458,
-    "ast_hash": "5d43dbecd33a6179407b8f3138f141f7",
-    "semantic_hash": "5d43dbecd33a6179407b8f3138f141f7"
+    "mtime": 1789083107.4467869,
+    "seen": 1789085395.499394,
+    "ast_hash": "909e639b0bcb109aba2f70ad61f46609",
+    "semantic_hash": ""
   },
   "AirCatchHost/AirCatchHostApp.swift": {
     "mtime": 1770617490.0,
@@ -174,16 +156,16 @@
     "semantic_hash": "9119071b659fe9b4c6a8a2b730d8ec4d"
   },
   "AirCatchHost/HostManager.swift": {
-    "mtime": 1770655545.0,
-    "seen": 1789076937.44545,
-    "ast_hash": "5c96d97d38443840ece1f913421c5c6c",
-    "semantic_hash": "5c96d97d38443840ece1f913421c5c6c"
+    "mtime": 1789081028.3000386,
+    "seen": 1789085395.4994,
+    "ast_hash": "07dedc48cb32c1e43891b0160eca57aa",
+    "semantic_hash": ""
   },
   "AirCatchHost/HostView.swift": {
-    "mtime": 1770655632.0,
-    "seen": 1789076937.445451,
-    "ast_hash": "95d079283244f437d0c4b0f16c7b7803",
-    "semantic_hash": "95d079283244f437d0c4b0f16c7b7803"
+    "mtime": 1789081107.3089807,
+    "seen": 1789085395.4994,
+    "ast_hash": "083575e69a7df61af77adc981c628e54",
+    "semantic_hash": ""
   },
   "AirCatchHost/InputInjector.swift": {
     "mtime": 1770623966.0,
@@ -204,64 +186,28 @@
     "semantic_hash": "72b94948750c211b6db92bdea1b4b7e9"
   },
   "AirCatchHost/NetworkManager.swift": {
-    "mtime": 1770626786.0,
-    "seen": 1789076937.445452,
-    "ast_hash": "84cbc0dac7c3d8bff0fbbb98990657bd",
-    "semantic_hash": "84cbc0dac7c3d8bff0fbbb98990657bd"
-  },
-  "AirCatchHost/RelayClient.swift": {
-    "mtime": 1770655613.0,
-    "seen": 1789076937.4454532,
-    "ast_hash": "2b275447803baeb95171a03cbc14374c",
-    "semantic_hash": "2b275447803baeb95171a03cbc14374c"
+    "mtime": 1789083253.4449246,
+    "seen": 1789085395.499403,
+    "ast_hash": "9c8b0f43d1418e771157ee5d6f1507cc",
+    "semantic_hash": ""
   },
   "AirCatchHost/ScreenStreamer.swift": {
-    "mtime": 1770625162.0,
-    "seen": 1789076937.4454532,
-    "ast_hash": "c0d929a01391a9544a66317e37d8fd41",
-    "semantic_hash": "c0d929a01391a9544a66317e37d8fd41"
+    "mtime": 1789082927.9155192,
+    "seen": 1789085395.499403,
+    "ast_hash": "8da419312a20233fd3bdee1705efd13b",
+    "semantic_hash": ""
   },
   "AirCatchHost/SharedModels.swift": {
-    "mtime": 1770629367.0,
-    "seen": 1789076937.4454541,
-    "ast_hash": "3f71b89d6349ddcf1d9b11e994b70d89",
-    "semantic_hash": "3f71b89d6349ddcf1d9b11e994b70d89"
+    "mtime": 1789083174.5318184,
+    "seen": 1789085395.499404,
+    "ast_hash": "d88c07ac4bc706750171acf9814f0625",
+    "semantic_hash": ""
   },
   "AirCatchHost/VirtualDisplayManager.swift": {
     "mtime": 1770617490.0,
     "seen": 1789076937.4454541,
     "ast_hash": "81f1136290f540cc689b0edfd26d3e9d",
     "semantic_hash": "81f1136290f540cc689b0edfd26d3e9d"
-  },
-  "AirCatchHost/WebRTCHostSession.swift": {
-    "mtime": 1770629381.0,
-    "seen": 1789076937.4454541,
-    "ast_hash": "668a4691de9b3624daad8a5bc963d973",
-    "semantic_hash": "668a4691de9b3624daad8a5bc963d973"
-  },
-  "RemoteRelayServer/deploy.sh": {
-    "mtime": 1770617490.0,
-    "seen": 1789076937.445455,
-    "ast_hash": "893c02f57f95e5f9fbfed53940ffe04b",
-    "semantic_hash": "893c02f57f95e5f9fbfed53940ffe04b"
-  },
-  "RemoteRelayServer/deploy_domain_tls.sh": {
-    "mtime": 1770632358.0,
-    "seen": 1789076937.445455,
-    "ast_hash": "4f232ff7fa7ec1b7d7ddde97e6ef986d",
-    "semantic_hash": "4f232ff7fa7ec1b7d7ddde97e6ef986d"
-  },
-  "RemoteRelayServer/package.json": {
-    "mtime": 1770617490.0,
-    "seen": 1789076937.4454558,
-    "ast_hash": "8ab5455f4a589840b3e986cc817f5579",
-    "semantic_hash": "8ab5455f4a589840b3e986cc817f5579"
-  },
-  "RemoteRelayServer/server.js": {
-    "mtime": 1770645542.0,
-    "seen": 1789076937.4454558,
-    "ast_hash": "e67782dc9566497684fd7d3a53d62f83",
-    "semantic_hash": "e67782dc9566497684fd7d3a53d62f83"
   },
   "launch_retry.sh": {
     "mtime": 1770617490.0,

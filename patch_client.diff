@@ -1,0 +1,13 @@
+--- AirCatchClient/ClientManager.swift
++++ AirCatchClient/ClientManager.swift
+@@ -1318,8 +1318,8 @@
+             guard let self else { return }
+ 
+             let now = Date().timeIntervalSinceReferenceDate
+-            let nackDelay: TimeInterval = 0.02
+-            let nackMinInterval: TimeInterval = 0.03
++            let nackDelay: TimeInterval = 0.08
++            let nackMinInterval: TimeInterval = 0.10
+             let maxMissingPerNack = 64
+             
+             // Cleanup old frames - collect keys first to avoid mutation during iteration
