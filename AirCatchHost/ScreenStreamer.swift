@@ -150,7 +150,7 @@ final class ScreenStreamer: NSObject {
 
 
         
-        // 5. Setup compression session (optional, can be disabled for WebRTC-only)
+        // 5. Setup compression session (optional, can be disabled for raw-frame-only consumers)
         if encodeVideo {
             try setupCompressionSession(width: width, height: height)
         }
@@ -451,7 +451,7 @@ final class ScreenStreamer: NSObject {
         
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         
-        // Forward raw frames for WebRTC or external consumers
+        // Forward raw frames to external consumers (if any)
         if let rawFrameCallback {
             rawFrameCallback(imageBuffer, presentationTime)
         }

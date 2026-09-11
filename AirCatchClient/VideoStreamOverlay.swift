@@ -20,11 +20,8 @@ struct VideoStreamOverlay: View {
             ZStack {
                 // Solid black background for letterbox/pillarbox areas
                 Color.black
-                
-                let webRTCTrack = clientManager.webRTCVideoTrack
-                let hasVideo = webRTCTrack != nil || viewModel.hasFrame
 
-                if hasVideo {
+                if viewModel.hasFrame {
                     let videoSize: CGSize = {
                         if let frameSize = viewModel.frameSize {
                             return frameSize
@@ -34,28 +31,24 @@ struct VideoStreamOverlay: View {
                         }
                         return geometry.size
                     }()
-                    
+
                     // Calculate aspect-fit frame
                     let contentFrame = calculateAspectFitFrame(
                         videoSize: videoSize,
                         containerSize: geometry.size
                     )
-                    
+
                     // Video and touch layer
                     ZStack {
                         // Video layer
-                        if let webRTCTrack {
-                            WebRTCVideoView(track: webRTCTrack)
-                        } else {
-                            MetalVideoView(viewModel: viewModel)
-                        }
-                        
+                        MetalVideoView(viewModel: viewModel)
+
                         // Touch layer
                         MouseInputView()
                     }
                     .frame(width: contentFrame.width, height: contentFrame.height)
                     .position(x: contentFrame.midX, y: contentFrame.midY)
-                    
+
                 } else {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
@@ -63,15 +56,8 @@ struct VideoStreamOverlay: View {
                 }
             }
         }
-        .onReceive(clientManager.videoFrameSubject) { data in
-            if clientManager.webRTCVideoTrack == nil {
-                viewModel.decode(frameData: data)
-            }
-        }
-        .onChange(of: clientManager.webRTCVideoTrack) { _, newValue in
-            if newValue != nil {
-                viewModel.reset()
-            }
+        .onReceive(clientManager.videoFrameSubject.receive(on: DispatchQueue.main)) { data in
+            viewModel.decode(frameData: data)
         }
         .onChange(of: clientManager.state) { _, newState in
             if case .disconnected = newState {

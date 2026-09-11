@@ -48,21 +48,24 @@ final class NetworkManager {
         guard udpListener == nil else { return }
         udpReceiveHandler = onPacket
 
+        // Bind to ALL interfaces (wildcard 0.0.0.0 / ::): no requiredInterface or
+        // requiredInterfaceType is set, so the listener accepts connections on every
+        // interface — including the Tailscale `utun` interface, not just local Wi-Fi.
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
-        parameters.includePeerToPeer = true
+        parameters.includePeerToPeer = true  // Also accept AWDL peer-to-peer connections
         // Priority QoS for video streaming (like PS Remote Play)
         parameters.serviceClass = .interactiveVideo
 
         // Use NWEndpoint.Port(integerLiteral: 0) to get any available port
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
-        
+
         listener.stateUpdateHandler = { [weak self] (state: NWListener.State) in
             switch state {
             case .ready:
                 if let actualPort = listener.port?.rawValue {
                     self?.actualUDPPort = actualPort
-                    AirCatchLog.info("UDP listener ready on port \(actualPort)")
+                    AirCatchLog.info("UDP listener ready on port \(actualPort) (all interfaces, incl. Tailscale utun)")
                 }
             case .failed(let error):
                 AirCatchLog.info("UDP listener failed: \(error)")
@@ -103,9 +106,12 @@ final class NetworkManager {
         guard tcpListener == nil else { return }
         tcpReceiveHandler = onPacket
         
+        // Bind to ALL interfaces (wildcard 0.0.0.0 / ::): no requiredInterface or
+        // requiredInterfaceType is set, so the listener accepts connections on every
+        // interface — including the Tailscale `utun` interface, not just local Wi-Fi.
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
-        parameters.includePeerToPeer = true
+        parameters.includePeerToPeer = true  // Also accept AWDL peer-to-peer connections
         
         // Control/input path: favor low-latency small-packet delivery.
         parameters.serviceClass = .responsiveData

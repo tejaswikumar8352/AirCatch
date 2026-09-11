@@ -30,15 +30,13 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     private var activeTouchCount: Int = 0
     
     // PERFORMANCE: Throttle continuous events.
-    // Local mode can use higher rates, relay mode is capped lower to prevent control-path queueing.
     private var lastMoveTime: CFTimeInterval = 0
     private var lastPanTime: CFTimeInterval = 0
     private var lastPinchTime: CFTimeInterval = 0
     private let localThrottleInterval: CFTimeInterval = 1.0 / 120.0
-    private let relayThrottleInterval: CFTimeInterval = 1.0 / 60.0
 
     private func activeThrottleInterval() -> CFTimeInterval {
-        clientManager?.isRelaySessionActive == true ? relayThrottleInterval : localThrottleInterval
+        localThrottleInterval
     }
     
     override init(frame: CGRect) {

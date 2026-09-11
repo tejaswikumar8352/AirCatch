@@ -16,13 +16,9 @@ struct ContentView: View {
 
     @State private var showPINOverlay = false
     @State private var pinTargetHost: DiscoveredHost?
-    
-    // Relay connection state
-    @State private var showRelayOverlay = false
-    @AppStorage("relayServerURL") private var relayServerURL = "wss://relay.qai88.com"
-    @State private var relayRoomCode = ""
-    @StateObject private var relayClient = RelayClient()
-    @State private var relayError: String?
+
+    // Manual direct-IP connection state (e.g., Tailscale address)
+    @State private var showManualOverlay = false
 
 
     fileprivate enum SidebarItem: Hashable {
@@ -50,8 +46,8 @@ struct ContentView: View {
                                 clientManager.enteredPIN = ""
                                 showPINOverlay = true
                             },
-                            onRelayTapped: {
-                                showRelayOverlay = true
+                            onManualTapped: {
+                                showManualOverlay = true
                             }
                         )
                     case .about:
@@ -94,89 +90,24 @@ struct ContentView: View {
             }
         }
         .overlay {
-            if showRelayOverlay {
-                RelayConnectOverlay(
-                    serverURL: $relayServerURL,
-                    roomCode: $relayRoomCode,
+            if showManualOverlay {
+                ManualConnectOverlay(
+                    pin: $clientManager.enteredPIN,
                     audioEnabled: $clientManager.audioEnabled,
-                    error: relayError,
-                    isConnecting: relayClient.isConnected && !relayClient.hostConnected,
-                    onConnect: {
-                        relayError = nil
-                        clientManager.relayPINOverride = relayRoomCode
-                        relayClient.connect(to: relayServerURL, roomCode: relayRoomCode)
+                    onConnect: { ipAddress in
+                        showManualOverlay = false
+                        clientManager.connectManually(toIPAddress: ipAddress, requestVideo: true)
                     },
                     onCancel: {
-                        showRelayOverlay = false
-                        relayClient.disconnect()
-                        relayRoomCode = ""
-                        relayError = nil
-                        clientManager.stopRelaySession(shouldRestartDiscovery: false)
+                        showManualOverlay = false
+                        clientManager.enteredPIN = ""
                     }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
         }
         .animation(.snappy(duration: 0.25), value: showPINOverlay)
-        .animation(.snappy(duration: 0.25), value: showRelayOverlay)
-        .onAppear {
-            setupRelayCallbacks()
-        }
-    }
-    
-    private func setupRelayCallbacks() {
-        relayClient.onHostConnected = { [self] in
-            Task { @MainActor in
-                showRelayOverlay = false
-                clientManager.startRelaySession(with: relayClient)
-                AirCatchLog.info("Host connected via relay - ready to stream")
-            }
-        }
-
-        relayClient.onHostDisconnected = { [self] in
-            Task { @MainActor in
-                clientManager.stopRelaySession()
-            }
-        }
-
-        relayClient.onDisconnected = { [self] _ in
-            Task { @MainActor in
-                clientManager.stopRelaySession(shouldRestartDiscovery: false)
-            }
-        }
-        
-        relayClient.onError = { error in
-            Task { @MainActor in
-                relayError = error
-            }
-        }
-        
-        relayClient.onDataReceived = { data in
-            // Forward received data to ClientManager for video/audio processing
-            guard data.count >= 5 else { return }
-            let type = data[0]
-            let length = Int(UInt32(data[1]) << 24 | UInt32(data[2]) << 16 | UInt32(data[3]) << 8 | UInt32(data[4]))
-            let payloadStart = 5
-            let payloadEnd = min(data.count, payloadStart + length)
-            guard payloadEnd >= payloadStart else { return }
-            // SECURITY: Bounds check - reject oversized payloads (max 16MB)
-            guard length <= 16_777_216 else { return }
-            let payload = data[payloadStart..<payloadEnd]
-            
-            if let packetType = PacketType(rawValue: type) {
-                let packet = Packet(type: packetType, payload: Data(payload))
-                // PERFORMANCE: Route video/audio directly to background processing,
-                // only hop to MainActor for control packets that update UI state
-                switch packetType {
-                case .videoFrame, .videoFrameChunk, .audioPCM:
-                    ClientManager.shared.handleRelayMediaPacket(packet)
-                default:
-                    Task { @MainActor in
-                        ClientManager.shared.handleRelayPacket(packet)
-                    }
-                }
-            }
-        }
+        .animation(.snappy(duration: 0.25), value: showManualOverlay)
     }
 }
 
@@ -214,7 +145,7 @@ private struct DevicesScreen: View {
     @Binding var selectedHostId: DiscoveredHost.ID?
 
     let onConnectTapped: (DiscoveredHost) -> Void
-    let onRelayTapped: () -> Void
+    let onManualTapped: () -> Void
 
     var body: some View {
         ZStack {
@@ -223,16 +154,16 @@ private struct DevicesScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header
-                    
-                    // Remote Relay Button
-                    Button(action: onRelayTapped) {
+
+                    // Manual Connect Button (direct IP / Tailscale)
+                    Button(action: onManualTapped) {
                         HStack {
-                            Image(systemName: "globe")
+                            Image(systemName: "point.3.connected.trianglepath.dotted")
                                 .font(.title2)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Remote Relay")
+                                Text("Manual Connect")
                                     .font(.headline)
-                                Text("Connect via cloud server")
+                                Text("Direct IP or Tailscale address")
                                     .font(.caption)
                                     .opacity(0.7)
                             }
@@ -251,7 +182,7 @@ private struct DevicesScreen: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    
+
                     Text("Local Network")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.5))
@@ -302,7 +233,7 @@ private struct HostCard: View {
         }
         return "Local network"
     }
-    
+
     private var statusColor: Color {
         if host.mpcPeerName != nil {
             return .green
@@ -399,20 +330,20 @@ private struct AboutScreen: View {
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
-                
+
                 Divider()
                     .background(.white.opacity(0.3))
                     .padding(.horizontal, 40)
-                
+
                 VStack(alignment: .leading, spacing: 12) {
                     featureRow(icon: "bolt.fill", text: "Ultra-low latency HEVC streaming")
                     featureRow(icon: "lock.shield.fill", text: "End-to-end encrypted (AES-256-GCM)")
                     featureRow(icon: "display.2", text: "Pixel-perfect display matching")
-                    featureRow(icon: "globe", text: "Local network and P2P modes")
+                    featureRow(icon: "point.3.connected.trianglepath.dotted", text: "Local network and direct IP (Tailscale) modes")
                     featureRow(icon: "hand.tap.fill", text: "Full touch & keyboard support")
                 }
                 .padding(.horizontal, 20)
-                
+
                 Text("Version 1.0")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.5))
@@ -423,7 +354,7 @@ private struct AboutScreen: View {
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
     }
-    
+
     private func featureRow(icon: String, text: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
@@ -486,7 +417,7 @@ private struct PINEntryOverlay: View {
                             .pickerStyle(.menu)
                         }
                     }
-                    
+
                     // Audio toggle available for all modes
                     Toggle("Stream Audio", isOn: $audioEnabled)
                         .toggleStyle(.switch)
@@ -510,68 +441,79 @@ private struct PINEntryOverlay: View {
     }
 }
 
-// MARK: - Relay Connect Overlay
+// MARK: - Manual Connect Overlay
 
-private struct RelayConnectOverlay: View {
-    @Binding var serverURL: String
-    @Binding var roomCode: String
+private struct ManualConnectOverlay: View {
+    @Binding var pin: String
     @Binding var audioEnabled: Bool
-    let error: String?
-    let isConnecting: Bool
-    let onConnect: () -> Void
+    let onConnect: (String) -> Void
     let onCancel: () -> Void
-    
+
+    @State private var ipAddress = ""
     @FocusState private var focusedField: Field?
-    
+
     enum Field {
-        case serverURL, roomCode
+        case address, pin
     }
-    
+
+    /// Accepts IPv4 (100.12.34.56), IPv6 (fd7a:...), and dotted hostnames.
+    private var sanitizedAddress: String {
+        ipAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isValidAddress: Bool {
+        let address = sanitizedAddress
+        guard !address.isEmpty else { return false }
+        let allowed = CharacterSet(charactersIn: "0123456789abcdefABCDEF.:")
+        return address.rangeOfCharacter(from: allowed.inverted) == nil
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.25)
                 .ignoresSafeArea()
                 .onTapGesture { onCancel() }
-            
+
             VStack(spacing: 16) {
-                Image(systemName: "globe")
+                Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 36))
                     .foregroundStyle(.purple)
-                
-                Text("Remote Relay Connection")
+
+                Text("Manual Connect")
                     .font(.headline)
                     .foregroundStyle(.primary)
-                
-                Text("Connect to your Mac through a relay server when not on the same network.")
+
+                Text("Enter your Mac's IP address (e.g., its Tailscale address like 100.x.y.z) and connection PIN.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
-                
+
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Relay Server")
+                        Text("Host Address")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("wss://relay.qai88.com", text: $serverURL)
+                        TextField("100.12.34.56", text: $ipAddress)
                             .textFieldStyle(.roundedBorder)
-                            .keyboardType(.URL)
+                            .keyboardType(.numbersAndPunctuation)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                            .focused($focusedField, equals: .serverURL)
+                            .focused($focusedField, equals: .address)
                     }
-                    
+
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Room Code / Master Code")
+                        Text("PIN")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("XXXXXX", text: $roomCode)
+                        TextField("XXXXXX", text: $pin)
                             .textFieldStyle(.roundedBorder)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
-                            .focused($focusedField, equals: .roomCode)
-                            .onChange(of: roomCode) { _, newValue in
-                                roomCode = String(newValue.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
+                            .textContentType(.oneTimeCode)
+                            .focused($focusedField, equals: .pin)
+                            .onChange(of: pin) { _, newValue in
+                                pin = String(newValue.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
                             }
                     }
 
@@ -579,40 +521,22 @@ private struct RelayConnectOverlay: View {
                         .toggleStyle(.switch)
                 }
                 .frame(maxWidth: 280)
-                
-                if let error = error {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-                
-                if isConnecting {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Connecting...")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
+
                 HStack(spacing: 12) {
                     Button("Cancel", action: onCancel)
                         .buttonStyle(.bordered)
-                    
-                    let hasRoomCode = roomCode.count == 6
-                    Button("Connect", action: onConnect)
+
+                    Button("Connect", action: { onConnect(sanitizedAddress) })
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
-                        .disabled(serverURL.count < 10 || !hasRoomCode || isConnecting)
+                        .disabled(!isValidAddress || pin.count != 6)
                 }
             }
             .padding(24)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .frame(maxWidth: 380)
         }
-        .onAppear { focusedField = .roomCode }
+        .onAppear { focusedField = .address }
     }
 }
 

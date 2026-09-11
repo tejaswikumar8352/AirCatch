@@ -38,18 +38,6 @@ enum AirCatchLog {
 
 // MARK: - Configuration Constants
 
-nonisolated struct WebRTCIceServerConfig: Sendable {
-    let urlStrings: [String]
-    let username: String?
-    let credential: String?
-
-    init(urlStrings: [String], username: String? = nil, credential: String? = nil) {
-        self.urlStrings = urlStrings
-        self.username = username
-        self.credential = credential
-    }
-}
-
 enum AirCatchConfig {
     nonisolated static let udpPort: UInt16 = 5555
     nonisolated static let tcpPort: UInt16 = 5556
@@ -67,80 +55,19 @@ enum AirCatchConfig {
     // Streaming defaults (optimized for HEVC on Apple Silicon)
     static let defaultBitrate: Int = 16_000_000  // 16 Mbps - HEVC sweet spot
     static let defaultFrameRate: Int = 60        // General default
-    static let relayInitialBitrate: Int = 4_000_000  // 4 Mbps starting point for relay
-    static let relayMaxBitrate: Int = 8_000_000      // 8 Mbps cap for relay
-    static let relayInitialFrameRate: Int = 30       // 30 FPS starting point for relay
-    static let relayMaxFrameRate: Int = 45           // 45 FPS cap for relay
     static let maxTouchEventsPerSecond: Int = 120
     static let reconnectMaxAttempts = 5
     static let reconnectBaseDelay: TimeInterval = 1.0
-    
+
     // SECURITY: Maximum TCP payload length to prevent memory exhaustion attacks (16MB)
     static let maxTCPPayloadLength: Int = 16_777_216
 
-    // WebRTC ICE servers. Includes STUN defaults and optional TURN from env/UserDefaults.
-    static let webrtcIceServers: [WebRTCIceServerConfig] = {
-        var servers: [WebRTCIceServerConfig] = [
-            WebRTCIceServerConfig(
-                urlStrings: [
-                    "stun:stun.l.google.com:19302",
-                    "stun:stun1.l.google.com:19302"
-                ]
-            )
-        ]
-
-        let env = ProcessInfo.processInfo.environment
-        let defaults = UserDefaults.standard
-        let combinedTurnURLs = parseIceURLList(env["AIRCATCH_TURN_URLS"])
-            + parseIceURLList(env["AIRCATCH_TURN_URL"])
-            + parseIceURLList(defaults.string(forKey: "relayTURNURLs"))
-            + parseIceURLList(defaults.string(forKey: "relayTURNURL"))
-
-        var turnURLs: [String] = []
-        for url in combinedTurnURLs where !turnURLs.contains(url) {
-            turnURLs.append(url)
-        }
-
-        if !turnURLs.isEmpty {
-            let username = nonEmptyString(env["AIRCATCH_TURN_USERNAME"] ?? defaults.string(forKey: "relayTURNUsername"))
-            let credential = nonEmptyString(env["AIRCATCH_TURN_CREDENTIAL"] ?? defaults.string(forKey: "relayTURNCredential"))
-            servers.append(
-                WebRTCIceServerConfig(
-                    urlStrings: turnURLs,
-                    username: username,
-                    credential: credential
-                )
-            )
-        }
-
-        return servers
-    }()
-    static let webrtcMinBitrate: Int = 4_000_000  // 4 Mbps floor
-    static let webrtcMaxBitrate: Int = 16_000_000 // 16 Mbps ceiling
-    static let webrtcMaxFrameRate: Int = 30       // Prefer 30 fps for stability
-    
-    
     // Resolution limits
     static let maxRenderPixels: Double = 8_000_000  // ~8MP cap for render resolution
-    
+
     // Frame cache settings
     nonisolated static let frameCacheTTL: TimeInterval = 1.0  // Seconds before cached frames expire
     nonisolated static let cachePruneInterval: Int = 60       // Prune every N frames
-    
-    private static func parseIceURLList(_ raw: String?) -> [String] {
-        guard let raw else { return [] }
-        return raw
-            .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\n" || $0 == "\t" })
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private static func nonEmptyString(_ raw: String?) -> String? {
-        guard let raw else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-    
 }
 
 // MARK: - Packet Types
@@ -163,7 +90,6 @@ enum PacketType: UInt8 {
     case audioPCM = 0x0F
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
     case authResponse = 0x11   // SECURITY: Client responds with HMAC proof of PIN
-    case webrtcSignal = 0x12   // WebRTC offer/answer/ICE candidate exchange
 }
 
 // MARK: - Connection/Codec Preferences
@@ -182,34 +108,6 @@ enum CodecPreference: String, Codable {
 struct Packet {
     let type: PacketType
     let payload: Data
-}
-
-// MARK: - WebRTC Signaling
-
-enum WebRTCSignalType: String, Codable {
-    case offer
-    case answer
-    case candidate
-}
-
-struct WebRTCSignalMessage: Codable {
-    let type: WebRTCSignalType
-    let sdp: String?
-    let candidate: String?
-    let sdpMid: String?
-    let sdpMLineIndex: Int32?
-    
-    init(type: WebRTCSignalType,
-         sdp: String? = nil,
-         candidate: String? = nil,
-         sdpMid: String? = nil,
-         sdpMLineIndex: Int32? = nil) {
-        self.type = type
-        self.sdp = sdp
-        self.candidate = candidate
-        self.sdpMid = sdpMid
-        self.sdpMLineIndex = sdpMLineIndex
-    }
 }
 
 // MARK: - Authentication (Challenge-Response)

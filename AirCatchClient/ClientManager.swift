@@ -9,7 +9,6 @@ import Foundation
 import Network
 @preconcurrency import Combine
 import UIKit
-@preconcurrency import WebRTC
 
 /// Connection state machine
 enum ConnectionState: Equatable {
@@ -109,20 +108,13 @@ final class ClientManager: ObservableObject {
         label: "com.aircatch.udp.processing",
         qos: .userInitiated
     )
-    private nonisolated let videoFrameQueue = DispatchQueue(
-        label: "com.aircatch.video.frames",
-        qos: .userInitiated
-    )
     private nonisolated let streamingFlag: AtomicBool = .init(false)
     private nonisolated let audioEnabledFlag: AtomicBool = .init(false)
-    private nonisolated let webRTCActiveFlag: AtomicBool = .init(false)  // Thread-safe WebRTC state mirror
-    private nonisolated let relaySessionActiveFlag: AtomicBool = .init(false)
     private nonisolated let lastStreamingStateUpdate: AtomicUInt64 = .init(0)
     
     @Published var discoveredHosts: [DiscoveredHost] = []
     @Published private(set) var connectedHost: DiscoveredHost?
     @Published var screenInfo: HandshakeAck?
-    @Published var webRTCVideoTrack: RTCVideoTrack?
     
     /// Debug: Distance to detected surface
     @Published var debugDistance: Float?
@@ -132,7 +124,6 @@ final class ClientManager: ObservableObject {
     
     /// PIN entered by user for pairing
     @Published var enteredPIN: String = ""
-    @Published var relayPINOverride: String = ""
     
     /// SECURITY: Challenge received from host for PIN verification
     private var pendingAuthChallenge: Data?
@@ -207,14 +198,7 @@ final class ClientManager: ObservableObject {
     private nonisolated let audioPlayer = AudioPlayer()
 
     private nonisolated let crypto = CryptoManager()  // E2EE decryption
-    private var relayClient: RelayClient?
-    private var webRTCSession: WebRTCClientSession?
-    private var webRTCActive: Bool = false
-    private var relayHandshakeSent = false
-    private var lastRelayHandshakeAt: TimeInterval = 0
     private var usingPeerToPeerTransport = false
-    private var lastTouchMoveSentAt: CFTimeInterval = 0
-    private var lastScrollSentAt: CFTimeInterval = 0
     private var cancellables = Set<AnyCancellable>()
 
     
@@ -264,10 +248,7 @@ final class ClientManager: ObservableObject {
         audioPlayer.stop()
         streamingFlag.set(false)
         screenInfo = nil
-        relayClient = nil
-        relaySessionActiveFlag.set(false)
-        stopWebRTCSession()
-        
+
         if shouldRetry {
              attemptReconnect()
         } else {
@@ -281,159 +262,44 @@ final class ClientManager: ObservableObject {
         }
     }
 
-    // MARK: - Relay Mode
+    // MARK: - Manual Direct-IP Connection
 
-    func startRelaySession(with relayClient: RelayClient) {
-        stopDiscovery()
-        stopWebRTCSession()
-        usingPeerToPeerTransport = false
-        self.relayClient = relayClient
-        relaySessionActiveFlag.set(true)
-        relayHandshakeSent = false
-        lastRelayHandshakeAt = 0
-        pendingRequestVideo = true
-        videoRequested = true
-        streamingFlag.set(false)
-        state = .connected
-        debugConnectionStatus = "Connected (Relay)"
-        // SECURITY: Derive E2EE key from room code for relay encryption
-        let relayPIN = relayPINOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !relayPIN.isEmpty {
-            crypto.deriveKey(from: relayPIN)
-        }
-        if audioEnabled {
-            audioPlayer.start()
-        }
-        sendRelayHandshake()
-    }
-
-    func stopRelaySession(shouldRestartDiscovery: Bool = true) {
-        relayClient = nil
-        relaySessionActiveFlag.set(false)
-        audioPlayer.stop()
-        streamingFlag.set(false)
-        stopWebRTCSession()
-        relayHandshakeSent = false
-        lastRelayHandshakeAt = 0
-        videoRequested = false
-        state = .disconnected
-        debugConnectionStatus = "Disconnected (Relay)"
-        if shouldRestartDiscovery {
-            startDiscovery()
-        }
-    }
-
-    nonisolated var isRelaySessionActive: Bool {
-        relaySessionActiveFlag.get()
-    }
-
-    private func sendRelayHandshake() {
-        let now = Date().timeIntervalSince1970
-        if relayHandshakeSent, now - lastRelayHandshakeAt < 1.0 {
-            #if DEBUG
-            AirCatchLog.info("Skipping duplicate relay handshake", category: .network)
-            #endif
+    /// Connects directly to a host at a manually entered IP address (e.g., the Mac's
+    /// Tailscale IP `100.x.y.z`), bypassing Bonjour discovery entirely. Tailscale blocks
+    /// mDNS broadcasts, so remote hosts are unreachable via `BonjourBrowser` — the user
+    /// enters the address explicitly instead.
+    func connectManually(toIPAddress ipAddress: String, requestVideo: Bool = true) {
+        let host = ipAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            state = .error("No host address entered")
             return
         }
-        relayHandshakeSent = true
-        lastRelayHandshakeAt = now
-        AirCatchLog.info("📤 Sending relay handshake to host", category: .network)
-        let request = makeHandshakeRequest(authResponse: nil, connectionMode: nil)
-        if let data = try? JSONEncoder().encode(request) {
-            AirCatchLog.info("📤 Handshake data size: \(data.count) bytes", category: .network)
-            sendControl(type: .handshake, payload: data)
-        }
+
+        pendingRequestVideo = requestVideo
+        videoRequested = requestVideo
+        state = .connecting
+        reconnectAttempts = 0
+
+        // Manual/Tailscale connections run over the routable network (utun), not AWDL.
+        connectionOption = .udpNetworkFramework
+
+        connectedHost = DiscoveredHost(
+            id: "manual-\(host)",
+            name: host,
+            endpoint: nil,
+            udpPort: AirCatchConfig.udpPort,
+            tcpPort: AirCatchConfig.tcpPort,
+            mpcPeerName: nil,
+            hostId: nil
+        )
+        debugConnectionStatus = "Connecting to \(host)..."
+
+        // SECURITY: Derive E2EE key from the entered PIN — direct-IP sessions use the
+        // same AES-256-GCM + challenge-response PIN authentication as discovered hosts.
+        crypto.deriveKey(from: enteredPIN)
+
+        establishConnection(hostIP: host)
     }
-
-    // MARK: - WebRTC (Relay Video)
-
-    private func ensureWebRTCSession() -> WebRTCClientSession {
-        if let session = webRTCSession {
-            return session
-        }
-
-        let session = WebRTCClientSession(iceServerConfigs: AirCatchConfig.webrtcIceServers)
-        session.onSignal = { [weak self] message in
-            self?.sendWebRTCSignal(message)
-        }
-        session.onRemoteVideoTrack = { [weak self] track in
-            Task { @MainActor in
-                self?.webRTCVideoTrack = track
-                self?.setStreamingStateIfNeeded(debugStatus: "Streaming (WebRTC)")
-            }
-        }
-        session.onConnectionStateChange = { [weak self] state in
-            Task { @MainActor in
-                self?.handleWebRTCStateChange(state)
-            }
-        }
-        
-        session.onDataReceived = { [weak self] data in
-            guard let self else { return }
-             // PERFORMANCE: Received audio/control via WebRTC Data Channel (UDP)
-             // Parsing manual packet format: [Type: 1] [Length: 4] [Payload: N]
-             guard data.count >= 5 else { return }
-             
-             let typeVal = data[0]
-             guard let type = PacketType(rawValue: typeVal) else { return }
-             
-             // Parse BigEndian length
-             // Parse BigEndian length
-             let b1 = UInt32(data[1])
-             let b2 = UInt32(data[2])
-             let b3 = UInt32(data[3])
-             let b4 = UInt32(data[4])
-             let length = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4
-             
-             guard data.count >= 5 + Int(length) else { return }
-             let payload = data.subdata(in: 5..<5+Int(length))
-             
-             // Process exactly like a TCP/UDP packet
-             let packet = Packet(type: type, payload: payload)
-             self.udpStreamProcessor.handle(packet)
-        }
-
-        webRTCSession = session
-        return session
-    }
-
-    private func handleWebRTCSignal(_ payload: Data) {
-        guard let message = try? JSONDecoder().decode(WebRTCSignalMessage.self, from: payload) else {
-            AirCatchLog.error("WebRTC: Failed to decode signal", category: .network)
-            return
-        }
-        let session = ensureWebRTCSession()
-        session.handleRemoteSignal(message)
-    }
-
-    private func sendWebRTCSignal(_ message: WebRTCSignalMessage) {
-        guard let relay = relayClient, relay.isConnected else { return }
-        guard let data = try? JSONEncoder().encode(message) else { return }
-        relay.send(type: .webrtcSignal, payload: data)
-    }
-
-    private func handleWebRTCStateChange(_ state: RTCPeerConnectionState) {
-        switch state {
-        case .connected:
-            webRTCActive = true
-            webRTCActiveFlag.set(true)
-        case .failed, .disconnected, .closed:
-            webRTCActive = false
-            webRTCActiveFlag.set(false)
-            webRTCVideoTrack = nil
-        default:
-            break
-        }
-    }
-
-    private func stopWebRTCSession() {
-        webRTCSession?.close()
-        webRTCSession = nil
-        webRTCVideoTrack = nil
-        webRTCActive = false
-        webRTCActiveFlag.set(false)
-    }
-
 
     // MARK: - Bonjour Setup
     
@@ -551,9 +417,7 @@ final class ClientManager: ObservableObject {
         AirCatchLog.info("E2EE: Received auth challenge (v\(authChallenge.version)), sending response", category: .network)
         #endif
         
-        let pin = relayClient != nil
-            ? relayPINOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-            : enteredPIN
+        let pin = enteredPIN
         guard !pin.isEmpty else {
             state = .error("Authentication failed")
             return
@@ -636,8 +500,7 @@ final class ClientManager: ObservableObject {
     }
 
     private func makeHandshakeRequest(authResponse: Data?, connectionMode: ConnectionMode?) -> HandshakeRequest {
-        let isRelay = relayClient != nil
-        let useLosslessChunkRetransmit = !isRelay && connectionOption == .udpNetworkFramework
+        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework
         // Get iPad display properties for Sidecar-like hardware handshake
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -735,7 +598,6 @@ final class ClientManager: ObservableObject {
     }
 
     private func sendPingAndReport() {
-        let usingWebRTC = webRTCActive || webRTCVideoTrack != nil
         let now = Date().timeIntervalSince1970
         lastPingTimestamp = now
         let ping = PingPacket(timestamp: now)
@@ -754,10 +616,6 @@ final class ClientManager: ObservableObject {
         }
 
         lastReportTimestamp = now
-
-        if usingWebRTC {
-            return
-        }
 
         let report = QualityReport(
             droppedFrames: 0,
@@ -785,7 +643,13 @@ final class ClientManager: ObservableObject {
         state = .connecting // Updates UI to "Connecting..."
         
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.resolveAndConnect(host: host)
+            guard let self else { return }
+            // Manual direct-IP hosts have no Bonjour endpoint to resolve.
+            if host.id.hasPrefix("manual-") {
+                self.establishConnection(hostIP: host.name)
+            } else {
+                self.resolveAndConnect(host: host)
+            }
         }
     }
     
@@ -899,7 +763,7 @@ final class ClientManager: ObservableObject {
             return
         }
 
-        let mode: ConnectionMode? = relayClient == nil ? currentConnectionMode() : nil
+        let mode: ConnectionMode? = currentConnectionMode()
         let request = makeHandshakeRequest(authResponse: authResponse, connectionMode: mode)
         
         if let data = try? JSONEncoder().encode(request) {
@@ -920,27 +784,6 @@ final class ClientManager: ObservableObject {
     }
 
     private func sendControl(type: PacketType, payload: Data) {
-        // PERFORMANCE: Prefer WebRTC Data Channel (UDP) for lowest latency
-        if let webrtc = webRTCSession, webrtc.isDataChannelOpen {
-            // Reconstruct packet with headers (Type + Length) to match Host's expected format
-            var packet = Data()
-            packet.append(type.rawValue)
-            let length = UInt32(payload.count)
-            packet.append(UInt8((length >> 24) & 0xFF))
-            packet.append(UInt8((length >> 16) & 0xFF))
-            packet.append(UInt8((length >> 8) & 0xFF))
-            packet.append(UInt8(length & 0xFF))
-            packet.append(payload)
-            
-            webrtc.sendData(packet)
-            return
-        }
-
-        if let relay = relayClient, relay.isConnected {
-            relay.send(type: type, payload: payload)
-            return
-        }
-
         networkManager.sendTCP(type: type, payload: payload)
     }
 
@@ -974,7 +817,9 @@ final class ClientManager: ObservableObject {
     private func handleTCPPacket(_ packet: Packet) {
         switch packet.type {
         case .authChallenge:
-            handleAuthChallenge(packet.payload)
+            DispatchQueue.main.async { [weak self] in
+                self?.handleAuthChallenge(packet.payload)
+            }
         case .handshakeAck:
             handleHandshakeAck(packet.payload)
         case .videoFrame:
@@ -987,7 +832,7 @@ final class ClientManager: ObservableObject {
                 return
             }
             let subject = UncheckedSendable(videoFrameSubject)
-            videoFrameQueue.async {
+            DispatchQueue.main.async {
                 subject.value.send(frameData)
             }
             setStreamingStateIfNeeded(debugStatus: usingPeerToPeerTransport ? "Streaming (AWDL)" : "Streaming (TCP)")
@@ -1001,7 +846,7 @@ final class ClientManager: ObservableObject {
                     guard let self else { return }
                     guard let decryptedData = self.crypto.decrypt(frameData) else { return }
                     let subject = UncheckedSendable(self.videoFrameSubject)
-                    self.videoFrameQueue.async {
+                    DispatchQueue.main.async {
                         subject.value.send(decryptedData)
                     }
                     self.setStreamingStateIfNeeded(debugStatus: self.usingPeerToPeerTransport ? "Streaming (AWDL)" : "Streaming (TCP)")
@@ -1039,172 +884,6 @@ final class ClientManager: ObservableObject {
         }
     }
 
-    // MARK: - Relay Packet Handling
-    
-    /// PERFORMANCE: Handle relay video/audio packets without MainActor hop.
-    /// Called directly from the WebSocket receive callback thread.
-    nonisolated func handleRelayMediaPacket(_ packet: Packet) {
-        // PERFORMANCE: Skip relay video if WebRTC is handling video delivery
-        // Prevents duplicate decode/render of frames already arriving via WebRTC
-        if webRTCActiveFlag.get() && (packet.type == .videoFrame || packet.type == .videoFrameChunk) {
-            return
-        }
-        
-        // SECURITY: Relay media must always be encrypted end-to-end.
-        guard crypto.isReady else {
-            #if DEBUG
-            AirCatchLog.debug("E2EE: Dropping relay media packet while key is not ready", category: .network)
-            #endif
-            return
-        }
-        
-        let videoFrameQueue = videoFrameQueue
-        let subject = UncheckedSendable(videoFrameSubject)
-        
-        switch packet.type {
-        case .videoFrame:
-            recordIncomingBytes(packet.payload.count)
-            guard let frameData = crypto.decrypt(packet.payload) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
-                #endif
-                return
-            }
-            videoFrameQueue.async {
-                subject.value.send(frameData)
-            }
-            setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
-            
-        case .videoFrameChunk:
-            recordIncomingBytes(packet.payload.count)
-            reassembler.process(
-                chunk: packet.payload,
-                losslessEnabled: false,
-                onNack: { _, _ in },
-                onComplete: { [weak self] frameData in
-                    guard let self else { return }
-                    guard let decryptedData = self.crypto.decrypt(frameData) else { return }
-                    videoFrameQueue.async {
-                        subject.value.send(decryptedData)
-                    }
-                    self.setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
-                }
-            )
-            
-        case .audioPCM:
-            if audioEnabledFlag.get() {
-                guard let audioData = crypto.decrypt(packet.payload) else { return }
-                audioPlayer.playAudioPacket(audioData)
-            }
-            
-        default:
-            break
-        }
-    }
-    
-    /// Handle packets received from the relay server (video/audio from Host)
-    /// SECURITY: Relay packets are now encrypted with PIN-derived key (E2EE)
-    func handleRelayPacket(_ packet: Packet) {
-        let videoFrameQueue = videoFrameQueue
-        let videoFrameSubject = UncheckedSendable(videoFrameSubject)
-        let usingWebRTC = webRTCVideoTrack != nil || webRTCActive
-        switch packet.type {
-        case .videoFrame:
-            if usingWebRTC { return }
-            recordIncomingBytes(packet.payload.count)
-            // SECURITY: Relay media must always remain encrypted end-to-end.
-            guard crypto.isReady else {
-                #if DEBUG
-                AirCatchLog.debug("E2EE: Dropping relay video frame while key is not ready", category: .video)
-                #endif
-                return
-            }
-            guard let frameData = crypto.decrypt(packet.payload) else {
-                #if DEBUG
-                AirCatchLog.error("E2EE: Relay video frame decryption failed - dropping", category: .video)
-                #endif
-                return
-            }
-            videoFrameQueue.async {
-                videoFrameSubject.value.send(frameData)
-            }
-            setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
-        case .pong:
-            handlePongPacket(packet.payload)
-        case .ping:
-            handlePingPacket(packet.payload)
-        case .videoFrameChunk:
-            if usingWebRTC { return }
-            recordIncomingBytes(packet.payload.count)
-            guard crypto.isReady else {
-                #if DEBUG
-                AirCatchLog.debug("E2EE: Dropping relay video chunk while key is not ready", category: .video)
-                #endif
-                return
-            }
-            // Handle chunked video via reassembler
-            reassembler.process(
-                chunk: packet.payload,
-                losslessEnabled: false,
-                onNack: { [weak self] frameId, missingChunks in
-                    guard let self else { return }
-                    let request = VideoChunkNackRequest(frameId: frameId, missingChunkIndices: missingChunks)
-                    if let data = try? JSONEncoder().encode(request) {
-                        self.sendControl(type: .videoFrameChunkNack, payload: data)
-                    }
-                },
-                onComplete: { [weak self] frameData in
-                    guard let self = self else { return }
-                    // SECURITY: Decrypt reassembled relay frame
-                    guard let decryptedData = self.crypto.decrypt(frameData) else {
-                        #if DEBUG
-                        AirCatchLog.error("E2EE: Relay reassembled frame decryption failed", category: .video)
-                        #endif
-                        return
-                    }
-                    videoFrameQueue.async {
-                        videoFrameSubject.value.send(decryptedData)
-                    }
-                    self.setStreamingStateIfNeeded(debugStatus: "Streaming (Relay)")
-                }
-            )
-        case .audioPCM:
-            // SECURITY: Decrypt relay audio frames
-            if audioEnabled {
-                guard crypto.isReady else {
-                    #if DEBUG
-                    AirCatchLog.debug("E2EE: Dropping relay audio while key is not ready", category: .video)
-                    #endif
-                    return
-                }
-                guard let audioData = crypto.decrypt(packet.payload) else { return }
-                audioPlayer.playAudioPacket(audioData)
-            }
-        case .authChallenge:
-            handleAuthChallenge(packet.payload)
-        case .handshakeAck:
-            handleHandshakeAck(packet.payload)
-        case .webrtcSignal:
-            handleWebRTCSignal(packet.payload)
-        case .pairingFailed:
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.state = .error("Wrong PIN")
-                self.enteredPIN = ""
-                self.stopRelaySession(shouldRestartDiscovery: false)
-            }
-        case .disconnect:
-            // Host disconnected from relay
-            DispatchQueue.main.async { [weak self] in
-                self?.stopRelaySession()
-            }
-        default:
-            #if DEBUG
-            AirCatchLog.debug("Relay: Unhandled packet type \(packet.type)", category: .network)
-            #endif
-        }
-    }
-    
     private func startStreamingIfNeeded() {
         guard state == .connected else {
             streamingFlag.set(false)
@@ -1301,16 +980,6 @@ final class ClientManager: ObservableObject {
     func sendTouchEvent(normalizedX: Double, normalizedY: Double, eventType: TouchEventType) {
         guard state == .connected || state == .streaming else { return }
 
-        if relayClient != nil {
-            let isContinuousMove = (eventType == .moved || eventType == .dragMoved)
-            if isContinuousMove {
-                let now = CACurrentMediaTime()
-                let minInterval: CFTimeInterval = 1.0 / 60.0
-                guard now - lastTouchMoveSentAt >= minInterval else { return }
-                lastTouchMoveSentAt = now
-            }
-        }
-        
         // NOTE: No throttling for local modes - user wants lowest latency possible
         
         // Timestamp is critical for detecting stale events on host side
@@ -1343,12 +1012,6 @@ final class ClientManager: ObservableObject {
     /// Sends a scroll event to the Mac host (for two-finger scroll on iPad).
     func sendScrollEvent(deltaX: Double, deltaY: Double) {
         guard state == .connected || state == .streaming else { return }
-        if relayClient != nil {
-            let now = CACurrentMediaTime()
-            let minInterval: CFTimeInterval = 1.0 / 60.0
-            guard now - lastScrollSentAt >= minInterval else { return }
-            lastScrollSentAt = now
-        }
         let event = ScrollEvent(deltaX: deltaX, deltaY: deltaY)
         // PERFORMANCE: Use cached encoder
         if let data = try? Self.jsonEncoder.encode(event) {
