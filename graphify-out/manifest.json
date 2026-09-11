@@ -48,9 +48,9 @@
     "semantic_hash": "30517716bf6754624fdfcdfe6c8d2e97"
   },
   "AirCatchClient/ClientManager.swift": {
-    "mtime": 1789083045.9122744,
-    "seen": 1789085395.499389,
-    "ast_hash": "5c03c2e4cc9f7d39eb86302246cc5e9f",
+    "mtime": 1789086764.3348584,
+    "seen": 1789087490.484353,
+    "ast_hash": "9fe492828a6075c29aff8beb063bc24a",
     "semantic_hash": ""
   },
   "AirCatchClient/ContentView.swift": {
@@ -90,9 +90,9 @@
     "semantic_hash": "8b1808aa69bf9e3b7c996d6f3923d118"
   },
   "AirCatchClient/SharedModels.swift": {
-    "mtime": 1789083187.5406637,
-    "seen": 1789085395.499393,
-    "ast_hash": "783d0f88f482e66a17fe5eace78279c4",
+    "mtime": 1789086773.6433005,
+    "seen": 1789087490.4843578,
+    "ast_hash": "5aaa177e50cd8c23bcb9d52935d2f6bf",
     "semantic_hash": ""
   },
   "AirCatchClient/VideoDecoder.swift": {
@@ -156,9 +156,9 @@
     "semantic_hash": "9119071b659fe9b4c6a8a2b730d8ec4d"
   },
   "AirCatchHost/HostManager.swift": {
-    "mtime": 1789081028.3000386,
-    "seen": 1789085395.4994,
-    "ast_hash": "07dedc48cb32c1e43891b0160eca57aa",
+    "mtime": 1789086757.1025002,
+    "seen": 1789087490.484364,
+    "ast_hash": "5677f58fdb6d0b963dafa1b515ecd797",
     "semantic_hash": ""
   },
   "AirCatchHost/HostView.swift": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "AirCatchHost/SharedModels.swift": {
-    "mtime": 1789083174.5318184,
-    "seen": 1789085395.499404,
-    "ast_hash": "d88c07ac4bc706750171acf9814f0625",
+    "mtime": 1789086773.641981,
+    "seen": 1789087490.4843678,
+    "ast_hash": "767630cf3668d3cd0fe640f3e04005b6",
     "semantic_hash": ""
   },
   "AirCatchHost/VirtualDisplayManager.swift": {

@@ -48,9 +48,10 @@ struct HostView: View {
                 Button(action: {
                     hostManager.regeneratePIN()
                 }) {
-                    Label("New PIN", systemImage: "arrow.clockwise")
+                    Label("Reset PIN", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
+                .help("Rotate the PIN. Paired devices will need to pair again.")
 
                 Spacer()
 
@@ -91,9 +92,14 @@ struct HostView: View {
             }
             .padding(.vertical, 8)
 
-            Text("Enter this PIN on your iPad")
+            Text("Enter this PIN on your iPad to pair once")
                 .font(.caption)
                 .foregroundColor(.secondary.opacity(0.7))
+
+            Text("PIN stays the same between app restarts — paired iPads reconnect without it")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.6))
+                .multilineTextAlignment(.center)
         }
     }
 

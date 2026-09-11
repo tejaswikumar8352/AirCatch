@@ -1,16 +1,16 @@
 # Graph Report - AirCatch  (2026-09-10)
 
 ## Corpus Check
-- 36 files · ~51,818 words
+- 36 files · ~51,878 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1089 nodes · 2120 edges · 158 communities (42 shown, 116 thin omitted)
+- 1094 nodes · 2120 edges · 157 communities (37 shown, 120 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 66 edges (avg confidence: 0.82)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `26659972`
+- Built from commit: `af8deeb1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -28,7 +28,7 @@
 - MetalVideoRenderer
 - Bool
 - Bool
-- AirCatchClientApp
+- DiscoveredHost
 - AirCatchClient/SharedModels.swift
 - InputInjector
 - ClientManager
@@ -39,20 +39,20 @@
 - String
 - VideoDecoder
 - Int
-- HostView
+- PacketType
 - PacketType
 - Bool
 - RTCPeerConnectionState
-- DisplayManager
+- Set
 - CryptoManager
 - AirCatchHost/SharedModels.swift
-- ScreenStreamer.swift
+- Void
 - AudioPlayer
 - CryptoManager
 - Codable
 - ExtendedDisplayPosition
 - UDPStreamProcessor
-- AppKit
+- CGDirectDisplayID
 - ExtendedDisplayResolution
 - .handleTCPPacket
 - Int
@@ -64,7 +64,7 @@
 - Float
 - ConnectionState
 - .setStreamingStateIfNeeded
-- ConnectionOption
+- String
 - manifest.json
 - launch_retry.sh
 - RelayClient
@@ -151,7 +151,7 @@
 - Void
 - WebRTCIceServerConfig
 - WebRTCSignalMessage
-- CGDirectDisplayID
+- CGRect
 - CGPoint
 - CMTime
 - CVPixelBuffer
@@ -167,7 +167,6 @@
 - RTCVideoCapturer
 - RTCVideoSource
 - RTCVideoTrack
-- ScreenStreamer
 - TouchEventType
 - UInt16
 - URLSessionWebSocketDelegate
@@ -177,43 +176,43 @@
 ## God Nodes (most connected - your core abstractions)
 1. `ClientManager` - 66 edges
 2. `HostManager` - 64 edges
-3. `ScreenStreamer` - 39 edges
+3. `ScreenStreamer` - 37 edges
 4. `NetworkManager` - 32 edges
 5. `MetalVideoRenderer` - 28 edges
 6. `VirtualDisplayManager` - 27 edges
 7. `MouseHandlingView` - 24 edges
 8. `VideoStreamViewModel` - 22 edges
 9. `MPCAirCatchHost` - 22 edges
-10. `NetworkManager` - 21 edges
+10. `InputInjector` - 21 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `DiscoveredHost` --references--> `Network`  [EXTRACTED]
   AirCatchClient/SharedModels.swift → AirCatchHost/SharedModels.swift
-- `.body` --calls--> `ContentView`  [INFERRED]
-  AirCatchClient/AirCatchClientApp.swift → AirCatchClient/ContentView.swift
 - `.localModeSection` --references--> `HostManager`  [INFERRED]
   AirCatchHost/HostView.swift → AirCatchHost/HostManager.swift
-- `.body` --calls--> `HostView`  [INFERRED]
-  AirCatchHost/AirCatchHostApp.swift → AirCatchHost/HostView.swift
 - `ClientManager` --calls--> `BonjourBrowser`  [INFERRED]
   AirCatchClient/ClientManager.swift → AirCatchClient/BonjourBrowser.swift
+- `.body` --references--> `ClientManager`  [INFERRED]
+  AirCatchClient/VideoStreamOverlay.swift → AirCatchClient/ClientManager.swift
+- `HostManager` --calls--> `MPCAirCatchHost`  [INFERRED]
+  AirCatchHost/HostManager.swift → AirCatchHost/MPCAirCatchHost.swift
 
 ## Import Cycles
 - None detected.
 
-## Communities (158 total, 116 thin omitted)
+## Communities (157 total, 120 thin omitted)
 
 ### Community 0 - "HostManager"
 Cohesion: 0.08
-Nodes (23): BonjourAdvertiser, NWListener, String, UInt16, CachedFrame, HostManager, .statusDescription, InputStateCache (+15 more)
+Nodes (24): BonjourAdvertiser, NWListener, String, UInt16, CachedFrame, HostManager, .statusDescription, InputStateCache (+16 more)
 
 ### Community 1 - "NetworkManager"
 Cohesion: 0.18
 Nodes (10): NetworkManager, Data, NWConnection, NWEndpoint, Packet, PacketType, String, UInt16 (+2 more)
 
 ### Community 2 - "Foundation"
-Cohesion: 0.19
-Nodes (6): Combine, CommonCrypto, Foundation, MultipeerConnectivity, Network, Security
+Cohesion: 0.06
+Nodes (27): Accelerate, OSStatus, VideoDecoderError, decodeFailed, formatDescriptionCreationFailed, sessionCreationFailed, DisplayManager, Double (+19 more)
 
 ### Community 4 - "ScreenStreamer"
 Cohesion: 0.09
@@ -229,31 +228,27 @@ Nodes (26): CGVirtualDisplay, CGVirtualDisplayDescriptor, CGVirtualDisplayMode, 
 
 ### Community 8 - "MouseHandlingView"
 Cohesion: 0.10
-Nodes (21): MouseHandlingView, MouseInputView, Bool, CGPoint, CGRect, Int, Set, TouchEventType (+13 more)
+Nodes (22): MouseHandlingView, MouseInputView, Bool, CGPoint, CGRect, Int, Set, TouchEventType (+14 more)
 
 ### Community 9 - "View"
-Cohesion: 0.10
-Nodes (34): AboutScreen, .body, ContentView, .body, DevicesBackground, .body, DevicesScreen, .body (+26 more)
+Cohesion: 0.05
+Nodes (53): AirCatchClientApp, .body, Scene, AboutScreen, .body, ContentView, .body, DevicesBackground (+45 more)
 
 ### Community 10 - "MetalVideoRenderer"
 Cohesion: 0.07
-Nodes (34): MetalVideoRenderer, MetalVideoView, CGSize, Context, CVPixelBuffer, Float, Int, ObjectIdentifier (+26 more)
-
-### Community 13 - "AirCatchClientApp"
-Cohesion: 0.17
-Nodes (10): AirCatchClientApp, .body, Scene, AirCatchHostApp, .body, HostAppDelegate, Scene, App (+2 more)
+Nodes (33): MetalVideoRenderer, MetalVideoView, CGSize, Context, CVPixelBuffer, Float, Int, ObjectIdentifier (+25 more)
 
 ### Community 14 - "AirCatchClient/SharedModels.swift"
 Cohesion: 0.07
-Nodes (45): AirCatchConfig, AuthChallenge, AuthResponse, CodecPreference, auto, h264, hevc, ConnectionMode (+37 more)
+Nodes (46): AirCatchConfig, AuthChallenge, AuthResponse, CodecPreference, auto, h264, hevc, ConnectionMode (+38 more)
 
 ### Community 15 - "InputInjector"
 Cohesion: 0.14
 Nodes (13): InputInjector, .hasAccessibilityPermission, Bool, CGPoint, CGRect, Double, Int32, Int64 (+5 more)
 
 ### Community 16 - "ClientManager"
-Cohesion: 0.11
-Nodes (13): ClientManager, .savedSessionToken, Double, Int32, PacketType, String, TouchEventType, ConnectionMode (+5 more)
+Cohesion: 0.12
+Nodes (10): ClientManager, Double, Int32, TouchEventType, ConnectionMode, Float, HandshakeAck, HandshakeRequest (+2 more)
 
 ### Community 17 - "MPCAirCatchClient"
 Cohesion: 0.13
@@ -276,16 +271,12 @@ Cohesion: 0.18
 Nodes (13): AirCatchLog, Category, general, input, network, video, AirCatchLog, Category (+5 more)
 
 ### Community 22 - "VideoDecoder"
-Cohesion: 0.11
-Nodes (19): Bool, CMTime, CVPixelBuffer, Data, Int, OSStatus, UInt8, VideoDecoder (+11 more)
+Cohesion: 0.14
+Nodes (13): Bool, CMTime, CVPixelBuffer, Data, Int, UInt8, VideoDecoder, VideoDecoderDelegate (+5 more)
 
 ### Community 23 - "Int"
 Cohesion: 0.16
 Nodes (18): AuthChallenge, AuthResponse, CodecPreference, auto, h264, hevc, ConnectionMode, localNetwork (+10 more)
-
-### Community 24 - "HostView"
-Cohesion: 0.25
-Nodes (8): HostView, .body, .connectionStatusSection, .localModeSection, .statusColor, .statusDescription, Color, String
 
 ### Community 25 - "PacketType"
 Cohesion: 0.05
@@ -295,10 +286,6 @@ Nodes (37): PacketType, audioPCM, authChallenge, authResponse, disconnect, hands
 Cohesion: 0.25
 Nodes (4): AtomicBool, .audioEnabled, Bool, DiscoveredHost
 
-### Community 28 - "DisplayManager"
-Cohesion: 0.32
-Nodes (4): DisplayManager, Double, Int, CGDisplayMode
-
 ### Community 29 - "CryptoManager"
 Cohesion: 0.23
 Nodes (8): CryptoManager, .isReady, Bool, Data, Int, String, SymmetricKey, UInt32
@@ -306,10 +293,6 @@ Nodes (8): CryptoManager, .isReady, Bool, Data, Int, String, SymmetricKey, UInt3
 ### Community 30 - "AirCatchHost/SharedModels.swift"
 Cohesion: 0.19
 Nodes (15): AirCatchConfig, DiscoveredHost, MediaKeyEvent, PingPacket, PongPacket, QualityReport, ScrollEvent, Double (+7 more)
-
-### Community 31 - "ScreenStreamer.swift"
-Cohesion: 0.16
-Nodes (9): Accelerate, AVFoundation, CoreMedia, CoreVideo, IOSurface, MetalKit, ScreenCaptureKit, SwiftUI (+1 more)
 
 ### Community 32 - "AudioPlayer"
 Cohesion: 0.22
@@ -329,11 +312,7 @@ Nodes (13): ExtendedDisplayConfig, ExtendedDisplayPosition, above, below, .displ
 
 ### Community 36 - "UDPStreamProcessor"
 Cohesion: 0.25
-Nodes (13): ChunkSlice, FrameAssembly, Data, Set, TimeInterval, UInt16, UInt32, Void (+5 more)
-
-### Community 37 - "AppKit"
-Cohesion: 0.50
-Nodes (3): AppKit, CoreGraphics, IOKit.hidsystem
+Nodes (13): ChunkSlice, FrameAssembly, Data, TimeInterval, UInt16, UInt32, UDPStreamProcessor, VideoReassembler (+5 more)
 
 ### Community 38 - "ExtendedDisplayResolution"
 Cohesion: 0.33
@@ -367,24 +346,24 @@ Nodes (10): TouchEventType, began, cancelled, doubleClick, dragBegan, dragEnded,
 Cohesion: 0.25
 Nodes (8): ConnectionState, connected, connecting, disconnected, discovering, .displayDescription, .isConnected, streaming
 
-### Community 49 - "ConnectionOption"
-Cohesion: 0.29
-Nodes (7): ConnectionOption, .displayName, .id, .includePeerToPeer, udpNetworkFramework, udpPeerToPeerAWDL, Identifiable
+### Community 49 - "String"
+Cohesion: 0.18
+Nodes (9): .savedSessionToken, ConnectionOption, .displayName, .id, .includePeerToPeer, udpNetworkFramework, udpPeerToPeerAWDL, String (+1 more)
 
 ## Knowledge Gaps
 - **176 isolated node(s):** `disconnected`, `discovering`, `connecting`, `connected`, `streaming` (+171 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 417 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **116 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 421 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **120 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Foundation` connect `Foundation` to `AppKit`, `VirtualDisplayManager`, `AirCatchClient/SharedModels.swift`, `NetworkHealthMonitor`, `VideoDecoder`, `AirCatchHost/SharedModels.swift`, `ScreenStreamer.swift`?**
-  _High betweenness centrality (0.278) - this node is a cross-community bridge._
-- **Why does `ClientManager` connect `ClientManager` to `Foundation`, `UDPStreamProcessor`, `.handleTCPPacket`, `Int`, `MouseHandlingView`, `View`, `BonjourBrowser`, `MetalVideoRenderer`, `AirCatchClient/SharedModels.swift`, `ConnectionState`, `.setStreamingStateIfNeeded`, `ConnectionOption`, `NetworkHealthMonitor`, `Bool`?**
-  _High betweenness centrality (0.197) - this node is a cross-community bridge._
-- **Why does `HostManager` connect `HostManager` to `Foundation`, `ScreenStreamer`, `NetworkHealthMonitor`, `MPCAirCatchHost`, `HostView`?**
-  _High betweenness centrality (0.117) - this node is a cross-community bridge._
+- **Why does `Foundation` connect `Foundation` to `NetworkHealthMonitor`, `VirtualDisplayManager`, `AirCatchClient/SharedModels.swift`, `AirCatchHost/SharedModels.swift`?**
+  _High betweenness centrality (0.301) - this node is a cross-community bridge._
+- **Why does `ClientManager` connect `ClientManager` to `Foundation`, `UDPStreamProcessor`, `.handleTCPPacket`, `Int`, `View`, `MouseHandlingView`, `BonjourBrowser`, `MetalVideoRenderer`, `ConnectionState`, `.setStreamingStateIfNeeded`, `String`, `NetworkHealthMonitor`, `Bool`?**
+  _High betweenness centrality (0.182) - this node is a cross-community bridge._
+- **Why does `HostManager` connect `HostManager` to `NetworkHealthMonitor`, `View`, `Foundation`, `MPCAirCatchHost`?**
+  _High betweenness centrality (0.091) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `ClientManager` (e.g. with `BonjourBrowser` and `.body`) actually correct?**
   _`ClientManager` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 3 inferred relationships involving `HostManager` (e.g. with `BonjourAdvertiser` and `MPCAirCatchHost`) actually correct?**
@@ -392,4 +371,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **What connects `disconnected`, `discovering`, `connecting` to the rest of the system?**
   _176 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `HostManager` be split into smaller, more focused modules?**
-  _Cohesion score 0.08 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07859649122807018 - nodes in this community are weakly interconnected._

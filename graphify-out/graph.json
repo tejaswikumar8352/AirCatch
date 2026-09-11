@@ -131,45 +131,6 @@
       "source_location": "L106"
     },
     {
-      "id": "aircatchclient_aircatchclientapp_aircatchclientapp",
-      "label": "AirCatchClientApp",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "aircatchclientapp",
-      "source_file": "AirCatchClient/AirCatchClientApp.swift",
-      "source_location": "L10"
-    },
-    {
-      "id": "aircatchhost_aircatchhostapp_aircatchhostapp",
-      "label": "AirCatchHostApp",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "aircatchhostapp",
-      "source_file": "AirCatchHost/AirCatchHostApp.swift",
-      "source_location": "L10"
-    },
-    {
-      "id": "aircatchhost_aircatchhostapp_hostappdelegate",
-      "label": "HostAppDelegate",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "hostappdelegate",
-      "source_file": "AirCatchHost/AirCatchHostApp.swift",
-      "source_location": "L43"
-    },
-    {
       "id": "aircatchclient_sharedmodels_aircatchconfig",
       "label": "AirCatchConfig",
       "_callable": true,
@@ -469,6 +430,32 @@
       "source_location": "L11"
     },
     {
+      "id": "aircatchclient_videodecoder_videodecodererror",
+      "label": "VideoDecoderError",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "videodecodererror",
+      "source_file": "AirCatchClient/VideoDecoder.swift",
+      "source_location": "L523"
+    },
+    {
+      "id": "aircatchhost_displaymanager_displaymanager",
+      "label": "DisplayManager",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "displaymanager",
+      "source_file": "AirCatchHost/DisplayManager.swift",
+      "source_location": "L14"
+    },
+    {
       "id": "aircatchclient_sharedmodels_extendeddisplayconfig",
       "label": "ExtendedDisplayConfig",
       "_callable": true,
@@ -599,19 +586,6 @@
       "source_location": "L14"
     },
     {
-      "id": "aircatchclient_videodecoder_videodecodererror",
-      "label": "VideoDecoderError",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "videodecodererror",
-      "source_file": "AirCatchClient/VideoDecoder.swift",
-      "source_location": "L523"
-    },
-    {
       "id": "aircatchhost_sharedmodels_authchallenge",
       "label": "AuthChallenge",
       "_callable": true,
@@ -703,19 +677,6 @@
       "source_location": "L108"
     },
     {
-      "id": "aircatchhost_hostview_hostview",
-      "label": "HostView",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": "hostview",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L4"
-    },
-    {
       "id": "aircatchclient_sharedmodels_packettype",
       "label": "PacketType",
       "_callable": true,
@@ -752,20 +713,7 @@
       "file_type": "code",
       "norm_label": "atomicbool",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1094"
-    },
-    {
-      "id": "aircatchhost_displaymanager_displaymanager",
-      "label": "DisplayManager",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": "displaymanager",
-      "source_file": "AirCatchHost/DisplayManager.swift",
-      "source_location": "L14"
+      "source_location": "L1097"
     },
     {
       "id": "aircatchhost_cryptomanager_cryptomanager",
@@ -1025,7 +973,7 @@
       "file_type": "code",
       "norm_label": "chunkslice",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1288"
+      "source_location": "L1291"
     },
     {
       "id": "aircatchclient_clientmanager_frameassembly",
@@ -1038,7 +986,7 @@
       "file_type": "code",
       "norm_label": "frameassembly",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1293"
+      "source_location": "L1296"
     },
     {
       "id": "aircatchclient_clientmanager_udpstreamprocessor",
@@ -1051,7 +999,7 @@
       "file_type": "code",
       "norm_label": "udpstreamprocessor",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1175"
+      "source_location": "L1178"
     },
     {
       "id": "aircatchclient_clientmanager_videoreassembler",
@@ -1064,7 +1012,7 @@
       "file_type": "code",
       "norm_label": "videoreassembler",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1287"
+      "source_location": "L1290"
     },
     {
       "id": "aircatchhost_sharedmodels_extendeddisplayresolution",
@@ -1090,7 +1038,7 @@
       "file_type": "code",
       "norm_label": "uncheckedsendable",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1089"
+      "source_location": "L1092"
     },
     {
       "id": "aircatchhost_screenstreamer_screenstreamer",
@@ -1142,7 +1090,7 @@
       "file_type": "code",
       "norm_label": "atomicint",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1126"
+      "source_location": "L1129"
     },
     {
       "id": "aircatchclient_sharedmodels_videochunknackrequest",
@@ -1233,7 +1181,7 @@
       "file_type": "code",
       "norm_label": "atomicuint64",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1149"
+      "source_location": "L1152"
     },
     {
       "id": "aircatchclient_clientmanager_connectionoption",
@@ -1242,7 +1190,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
       "norm_label": "connectionoption",
       "source_file": "AirCatchClient/ClientManager.swift",
@@ -1351,6 +1299,19 @@
       "norm_label": "mouseinputview",
       "source_file": "AirCatchClient/MouseInputView.swift",
       "source_location": "L11"
+    },
+    {
+      "id": "aircatchclient_aircatchclientapp_aircatchclientapp",
+      "label": "AirCatchClientApp",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "aircatchclientapp",
+      "source_file": "AirCatchClient/AirCatchClientApp.swift",
+      "source_location": "L10"
     },
     {
       "id": "aircatchclient_contentview_aboutscreen",
@@ -1483,6 +1444,45 @@
       "source_location": "L24"
     },
     {
+      "id": "aircatchhost_aircatchhostapp_aircatchhostapp",
+      "label": "AirCatchHostApp",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "aircatchhostapp",
+      "source_file": "AirCatchHost/AirCatchHostApp.swift",
+      "source_location": "L10"
+    },
+    {
+      "id": "aircatchhost_aircatchhostapp_hostappdelegate",
+      "label": "HostAppDelegate",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "hostappdelegate",
+      "source_file": "AirCatchHost/AirCatchHostApp.swift",
+      "source_location": "L43"
+    },
+    {
+      "id": "aircatchhost_hostview_hostview",
+      "label": "HostView",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "hostview",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L4"
+    },
+    {
       "id": "aircatchhost_bonjouradvertiser_bonjouradvertiser_createtxtrecord",
       "label": ".createTXTRecord()",
       "_callable": true,
@@ -1566,7 +1566,7 @@
       "file_type": "code",
       "norm_label": ".broadcastaudioframe()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1342"
+      "source_location": "L1348"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_broadcastvideoframe",
@@ -1578,7 +1578,7 @@
       "file_type": "code",
       "norm_label": ".broadcastvideoframe()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1244"
+      "source_location": "L1250"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_cachedinputstatesnapshot",
@@ -1602,7 +1602,7 @@
       "file_type": "code",
       "norm_label": ".cacheframeforretransmit()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1219"
+      "source_location": "L1225"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_cleartcpauthchallenge",
@@ -1636,7 +1636,7 @@
       "file_type": "code",
       "norm_label": ".constanttimecompare()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1456"
+      "source_location": "L1462"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_enqueuekeyevent",
@@ -1696,7 +1696,7 @@
       "file_type": "code",
       "norm_label": ".generatesecuretoken()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1445"
+      "source_location": "L1451"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_handleclientdisconnect",
@@ -1924,7 +1924,7 @@
       "file_type": "code",
       "norm_label": ".handlevideochunknack()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1368"
+      "source_location": "L1374"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_init",
@@ -1948,7 +1948,7 @@
       "file_type": "code",
       "norm_label": ".istrustedsessiontoken()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1420"
+      "source_location": "L1426"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_mainscreenframe",
@@ -1972,7 +1972,7 @@
       "file_type": "code",
       "norm_label": ".poststatuschange()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1410"
+      "source_location": "L1416"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_prunecachedframesifneeded",
@@ -1984,7 +1984,7 @@
       "file_type": "code",
       "norm_label": ".prunecachedframesifneeded()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1209"
+      "source_location": "L1215"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_pruneexpiredsessiontokens",
@@ -1996,7 +1996,7 @@
       "file_type": "code",
       "norm_label": ".pruneexpiredsessiontokens()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1416"
+      "source_location": "L1422"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_regeneratepin",
@@ -2136,19 +2136,19 @@
             "callee": "addButton",
             "receiver_type": "NSAlert",
             "lang": "swift",
-            "line": "L1182"
+            "line": "L1188"
           },
           {
             "callee": "runModal",
             "receiver_type": "NSAlert",
             "lang": "swift",
-            "line": "L1185"
+            "line": "L1191"
           },
           {
             "callee": "open",
             "receiver_type": "NSWorkspace",
             "lang": "swift",
-            "line": "L1188"
+            "line": "L1194"
           }
         ]
       },
@@ -2188,7 +2188,7 @@
       "file_type": "code",
       "norm_label": ".stopstreaming()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1196"
+      "source_location": "L1202"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_stopstreamingandrestore",
@@ -2212,7 +2212,7 @@
       "file_type": "code",
       "norm_label": ".storetrustedsessiontoken()",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1431"
+      "source_location": "L1437"
     },
     {
       "id": "aircatchhost_hostmanager_hostmanager_targetdisplayframe",
@@ -3189,42 +3189,6 @@
       "source_location": "L126"
     },
     {
-      "id": "aircatchhost_aircatchhostapp_hostappdelegate_applicationdidfinishlaunching",
-      "label": ".applicationDidFinishLaunching()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": ".applicationdidfinishlaunching()",
-      "source_file": "AirCatchHost/AirCatchHostApp.swift",
-      "source_location": "L44"
-    },
-    {
-      "id": "aircatchclient_clientmanager_clientmanager_handlepingpacket",
-      "label": ".handlePingPacket()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "AirCatchClient/SharedModels.swift",
-      "file_type": "code",
-      "norm_label": ".handlepingpacket()",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L556"
-    },
-    {
-      "id": "aircatchclient_clientmanager_clientmanager_sendpingandreport",
-      "label": ".sendPingAndReport()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "AirCatchClient/SharedModels.swift",
-      "file_type": "code",
-      "norm_label": ".sendpingandreport()",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L600"
-    },
-    {
       "id": "aircatchclient_sharedmodels_authchallenge_init",
       "label": ".init()",
       "_callable": true,
@@ -3592,7 +3556,7 @@
       "file_type": "code",
       "norm_label": ".currentconnectionmode()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L777"
+      "source_location": "L780"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_detaileddevicemodel",
@@ -3626,7 +3590,19 @@
       "file_type": "code",
       "norm_label": ".handlehandshakeack()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L944"
+      "source_location": "L947"
+    },
+    {
+      "id": "aircatchclient_clientmanager_clientmanager_handlepingpacket",
+      "label": ".handlePingPacket()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 16,
+      "community_name": "ClientManager",
+      "file_type": "code",
+      "norm_label": ".handlepingpacket()",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L559"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_init",
@@ -3641,18 +3617,6 @@
       "source_location": "L216"
     },
     {
-      "id": "aircatchclient_clientmanager_clientmanager_loadtokenfromkeychain",
-      "label": ".loadTokenFromKeychain()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "ClientManager",
-      "file_type": "code",
-      "norm_label": ".loadtokenfromkeychain()",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L160"
-    },
-    {
       "id": "aircatchclient_clientmanager_clientmanager_makehandshakerequest",
       "label": ".makeHandshakeRequest()",
       "_callable": true,
@@ -3665,18 +3629,6 @@
       "source_location": "L502"
     },
     {
-      "id": "aircatchclient_clientmanager_clientmanager_savetokentokeychain",
-      "label": ".saveTokenToKeychain()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "ClientManager",
-      "file_type": "code",
-      "norm_label": ".savetokentokeychain()",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L141"
-    },
-    {
       "id": "aircatchclient_clientmanager_clientmanager_sendcontrol",
       "label": ".sendControl()",
       "_callable": true,
@@ -3686,7 +3638,7 @@
       "file_type": "code",
       "norm_label": ".sendcontrol()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L786"
+      "source_location": "L789"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_sendhandshake",
@@ -3698,29 +3650,7 @@
       "file_type": "code",
       "norm_label": ".sendhandshake()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L760"
-    },
-    {
-      "id": "aircatchclient_clientmanager_clientmanager_sendkeyevent",
-      "label": ".sendKeyEvent()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "ClientManager",
-      "file_type": "code",
-      "metadata": {
-        "unresolved_calls": [
-          {
-            "callee": "encode",
-            "receiver_type": "Self",
-            "lang": "swift",
-            "line": "L1032"
-          }
-        ]
-      },
-      "norm_label": ".sendkeyevent()",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1023"
+      "source_location": "L763"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_sendmediakeyevent",
@@ -3736,13 +3666,13 @@
             "callee": "encode",
             "receiver_type": "Self",
             "lang": "swift",
-            "line": "L1059"
+            "line": "L1062"
           }
         ]
       },
       "norm_label": ".sendmediakeyevent()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1055"
+      "source_location": "L1058"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_sendpinchevent",
@@ -3758,13 +3688,47 @@
             "callee": "encode",
             "receiver_type": "Self",
             "lang": "swift",
-            "line": "L1007"
+            "line": "L1010"
           }
         ]
       },
       "norm_label": ".sendpinchevent()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1000"
+      "source_location": "L1003"
+    },
+    {
+      "id": "aircatchclient_clientmanager_clientmanager_sendpingandreport",
+      "label": ".sendPingAndReport()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 16,
+      "community_name": "ClientManager",
+      "file_type": "code",
+      "norm_label": ".sendpingandreport()",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L603"
+    },
+    {
+      "id": "aircatchclient_clientmanager_clientmanager_sendscrollevent",
+      "label": ".sendScrollEvent()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 16,
+      "community_name": "ClientManager",
+      "file_type": "code",
+      "metadata": {
+        "unresolved_calls": [
+          {
+            "callee": "encode",
+            "receiver_type": "Self",
+            "lang": "swift",
+            "line": "L1020"
+          }
+        ]
+      },
+      "norm_label": ".sendscrollevent()",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L1016"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_sendtextinjection",
@@ -3780,13 +3744,13 @@
             "callee": "encode",
             "receiver_type": "Self",
             "lang": "swift",
-            "line": "L1049"
+            "line": "L1052"
           }
         ]
       },
       "norm_label": ".sendtextinjection()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1039"
+      "source_location": "L1042"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_sendtouchevent",
@@ -3802,13 +3766,13 @@
             "callee": "encode",
             "receiver_type": "Self",
             "lang": "swift",
-            "line": "L994"
+            "line": "L997"
           }
         ]
       },
       "norm_label": ".sendtouchevent()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L980"
+      "source_location": "L983"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_setupautoconnectlogic",
@@ -3848,13 +3812,13 @@
             "callee": "scheduledTimer",
             "receiver_type": "Timer",
             "lang": "swift",
-            "line": "L584"
+            "line": "L587"
           }
         ]
       },
       "norm_label": ".starttelemetry()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L579"
+      "source_location": "L582"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_stoptelemetry",
@@ -3870,13 +3834,13 @@
             "callee": "invalidate",
             "receiver_type": "Timer",
             "lang": "swift",
-            "line": "L592"
+            "line": "L595"
           }
         ]
       },
       "norm_label": ".stoptelemetry()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L591"
+      "source_location": "L594"
     },
     {
       "id": "aircatchclient_mpcaircatchclient_mpcaircatchclient_browser",
@@ -4325,6 +4289,54 @@
       "source_location": "L50"
     },
     {
+      "id": "aircatchhost_displaymanager_displaymanager_applyhidpimirroring",
+      "label": ".applyHiDPIMirroring()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": ".applyhidpimirroring()",
+      "source_file": "AirCatchHost/DisplayManager.swift",
+      "source_location": "L26"
+    },
+    {
+      "id": "aircatchhost_displaymanager_displaymanager_init",
+      "label": ".init()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": ".init()",
+      "source_file": "AirCatchHost/DisplayManager.swift",
+      "source_location": "L22"
+    },
+    {
+      "id": "aircatchhost_displaymanager_displaymanager_matchclientresolution",
+      "label": ".matchClientResolution()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": ".matchclientresolution()",
+      "source_file": "AirCatchHost/DisplayManager.swift",
+      "source_location": "L89"
+    },
+    {
+      "id": "aircatchhost_displaymanager_displaymanager_restoreoriginalresolution",
+      "label": ".restoreOriginalResolution()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": ".restoreoriginalresolution()",
+      "source_file": "AirCatchHost/DisplayManager.swift",
+      "source_location": "L172"
+    },
+    {
       "id": "aircatchclient_sharedmodels_extendeddisplayconfig_init",
       "label": ".init()",
       "_callable": true,
@@ -4618,7 +4630,7 @@
       "file_type": "code",
       "norm_label": ".compareandset()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1115"
+      "source_location": "L1118"
     },
     {
       "id": "aircatchclient_clientmanager_atomicbool_get",
@@ -4630,7 +4642,7 @@
       "file_type": "code",
       "norm_label": ".get()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1102"
+      "source_location": "L1105"
     },
     {
       "id": "aircatchclient_clientmanager_atomicbool_init",
@@ -4642,7 +4654,7 @@
       "file_type": "code",
       "norm_label": ".init()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1098"
+      "source_location": "L1101"
     },
     {
       "id": "aircatchclient_clientmanager_atomicbool_set",
@@ -4654,7 +4666,7 @@
       "file_type": "code",
       "norm_label": ".set()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1109"
+      "source_location": "L1112"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_attemptreconnect",
@@ -4666,7 +4678,7 @@
       "file_type": "code",
       "norm_label": ".attemptreconnect()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L631"
+      "source_location": "L634"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_connect",
@@ -4718,13 +4730,13 @@
             "callee": "sleep",
             "receiver_type": "Task",
             "lang": "swift",
-            "line": "L752"
+            "line": "L755"
           }
         ]
       },
       "norm_label": ".establishconnection()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L710"
+      "source_location": "L713"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_resolveandconnect",
@@ -4740,19 +4752,19 @@
             "callee": "cancel",
             "receiver_type": "NWConnection",
             "lang": "swift",
-            "line": "L689"
+            "line": "L692"
           },
           {
             "callee": "start",
             "receiver_type": "NWConnection",
             "lang": "swift",
-            "line": "L707"
+            "line": "L710"
           }
         ]
       },
       "norm_label": ".resolveandconnect()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L656"
+      "source_location": "L659"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_startdiscovery",
@@ -4765,54 +4777,6 @@
       "norm_label": ".startdiscovery()",
       "source_file": "AirCatchClient/ClientManager.swift",
       "source_location": "L225"
-    },
-    {
-      "id": "aircatchhost_displaymanager_displaymanager_applyhidpimirroring",
-      "label": ".applyHiDPIMirroring()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": ".applyhidpimirroring()",
-      "source_file": "AirCatchHost/DisplayManager.swift",
-      "source_location": "L26"
-    },
-    {
-      "id": "aircatchhost_displaymanager_displaymanager_init",
-      "label": ".init()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": ".init()",
-      "source_file": "AirCatchHost/DisplayManager.swift",
-      "source_location": "L22"
-    },
-    {
-      "id": "aircatchhost_displaymanager_displaymanager_matchclientresolution",
-      "label": ".matchClientResolution()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": ".matchclientresolution()",
-      "source_file": "AirCatchHost/DisplayManager.swift",
-      "source_location": "L89"
-    },
-    {
-      "id": "aircatchhost_displaymanager_displaymanager_restoreoriginalresolution",
-      "label": ".restoreOriginalResolution()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": ".restoreoriginalresolution()",
-      "source_file": "AirCatchHost/DisplayManager.swift",
-      "source_location": "L172"
     },
     {
       "id": "aircatchhost_cryptomanager_cryptomanager_clearchallenge",
@@ -5314,7 +5278,7 @@
       "file_type": "code",
       "norm_label": ".handle()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1209"
+      "source_location": "L1212"
     },
     {
       "id": "aircatchclient_clientmanager_udpstreamprocessor_handlevideochunk",
@@ -5326,7 +5290,7 @@
       "file_type": "code",
       "norm_label": ".handlevideochunk()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1255"
+      "source_location": "L1258"
     },
     {
       "id": "aircatchclient_clientmanager_udpstreamprocessor_init",
@@ -5338,7 +5302,7 @@
       "file_type": "code",
       "norm_label": ".init()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187"
+      "source_location": "L1190"
     },
     {
       "id": "aircatchclient_clientmanager_udpstreamprocessor_markstreamingifneeded",
@@ -5350,7 +5314,7 @@
       "file_type": "code",
       "norm_label": ".markstreamingifneeded()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1249"
+      "source_location": "L1252"
     },
     {
       "id": "aircatchclient_clientmanager_videoreassembler_process",
@@ -5362,7 +5326,7 @@
       "file_type": "code",
       "norm_label": ".process()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306"
+      "source_location": "L1309"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_handleauthchallenge",
@@ -5386,7 +5350,7 @@
       "file_type": "code",
       "norm_label": ".handlepongpacket()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L565"
+      "source_location": "L568"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_handletcppacket",
@@ -5398,7 +5362,7 @@
       "file_type": "code",
       "norm_label": ".handletcppacket()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L817"
+      "source_location": "L820"
     },
     {
       "id": "aircatchclient_clientmanager_uncheckedsendable_init",
@@ -5410,7 +5374,7 @@
       "file_type": "code",
       "norm_label": ".init()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1091"
+      "source_location": "L1094"
     },
     {
       "id": "aircatchhost_screenstreamer_screenstreamer_cacheparametersetsifneeded",
@@ -5764,7 +5728,7 @@
       "file_type": "code",
       "norm_label": ".add()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1134"
+      "source_location": "L1137"
     },
     {
       "id": "aircatchclient_clientmanager_atomicint_init",
@@ -5776,7 +5740,7 @@
       "file_type": "code",
       "norm_label": ".init()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1130"
+      "source_location": "L1133"
     },
     {
       "id": "aircatchclient_clientmanager_atomicint_swap",
@@ -5788,7 +5752,7 @@
       "file_type": "code",
       "norm_label": ".swap()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1140"
+      "source_location": "L1143"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_caprenderresolution",
@@ -5800,7 +5764,7 @@
       "file_type": "code",
       "norm_label": ".caprenderresolution()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L794"
+      "source_location": "L797"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_makeudpstreamprocessor",
@@ -5812,7 +5776,7 @@
       "file_type": "code",
       "norm_label": ".makeudpstreamprocessor()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L900"
+      "source_location": "L903"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_recordincomingbytes",
@@ -5824,7 +5788,7 @@
       "file_type": "code",
       "norm_label": ".recordincomingbytes()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1064"
+      "source_location": "L1067"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_startstreamingifneeded",
@@ -5836,7 +5800,7 @@
       "file_type": "code",
       "norm_label": ".startstreamingifneeded()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L887"
+      "source_location": "L890"
     },
     {
       "id": "aircatchhost_sharedmodels_ipaddisplaypreset_detect",
@@ -5934,7 +5898,7 @@
       "file_type": "code",
       "norm_label": ".compareandswap()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1164"
+      "source_location": "L1167"
     },
     {
       "id": "aircatchclient_clientmanager_atomicuint64_init",
@@ -5946,7 +5910,7 @@
       "file_type": "code",
       "norm_label": ".init()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1153"
+      "source_location": "L1156"
     },
     {
       "id": "aircatchclient_clientmanager_atomicuint64_load",
@@ -5958,7 +5922,7 @@
       "file_type": "code",
       "norm_label": ".load()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1157"
+      "source_location": "L1160"
     },
     {
       "id": "aircatchclient_clientmanager_clientmanager_setstreamingstateifneeded",
@@ -5974,13 +5938,59 @@
             "callee": "now",
             "receiver_type": "DispatchTime",
             "lang": "swift",
-            "line": "L1071"
+            "line": "L1074"
           }
         ]
       },
       "norm_label": ".setstreamingstateifneeded()",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1068"
+      "source_location": "L1071"
+    },
+    {
+      "id": "aircatchclient_clientmanager_clientmanager_loadtokenfromkeychain",
+      "label": ".loadTokenFromKeychain()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "String",
+      "file_type": "code",
+      "norm_label": ".loadtokenfromkeychain()",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L160"
+    },
+    {
+      "id": "aircatchclient_clientmanager_clientmanager_savetokentokeychain",
+      "label": ".saveTokenToKeychain()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "String",
+      "file_type": "code",
+      "norm_label": ".savetokentokeychain()",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L141"
+    },
+    {
+      "id": "aircatchclient_clientmanager_clientmanager_sendkeyevent",
+      "label": ".sendKeyEvent()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "String",
+      "file_type": "code",
+      "metadata": {
+        "unresolved_calls": [
+          {
+            "callee": "encode",
+            "receiver_type": "Self",
+            "lang": "swift",
+            "line": "L1035"
+          }
+        ]
+      },
+      "norm_label": ".sendkeyevent()",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L1026"
     },
     {
       "id": "aircatchclient_networkmanager_networkmanager_builddatagram",
@@ -6459,28 +6469,6 @@
       "source_location": "L479"
     },
     {
-      "id": "aircatchclient_clientmanager_clientmanager_sendscrollevent",
-      "label": ".sendScrollEvent()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 8,
-      "community_name": "MouseHandlingView",
-      "file_type": "code",
-      "metadata": {
-        "unresolved_calls": [
-          {
-            "callee": "encode",
-            "receiver_type": "Self",
-            "lang": "swift",
-            "line": "L1017"
-          }
-        ]
-      },
-      "norm_label": ".sendscrollevent()",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1013"
-    },
-    {
       "id": "aircatchclient_mouseinputview_mousehandlingview_activethrottleinterval",
       "label": ".activeThrottleInterval()",
       "_callable": true,
@@ -6755,6 +6743,18 @@
       "source_location": "L130"
     },
     {
+      "id": "aircatchhost_aircatchhostapp_hostappdelegate_applicationdidfinishlaunching",
+      "label": ".applicationDidFinishLaunching()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".applicationdidfinishlaunching()",
+      "source_file": "AirCatchHost/AirCatchHostApp.swift",
+      "source_location": "L44"
+    },
+    {
       "id": "aircatchhost_bonjouradvertiser_swift_nwlistener",
       "label": "NWListener",
       "_origin": "ast",
@@ -6810,28 +6810,6 @@
       "source_location": ""
     },
     {
-      "id": "aircatchhost_hostmanager_swift_cgdirectdisplayid",
-      "label": "CGDirectDisplayID",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "HostManager",
-      "file_type": "code",
-      "norm_label": "cgdirectdisplayid",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchhost_hostmanager_swift_cgrect",
-      "label": "CGRect",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "HostManager",
-      "file_type": "code",
-      "norm_label": "cgrect",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
       "id": "aircatchhost_hostmanager_swift_data",
       "label": "Data",
       "_origin": "ast",
@@ -6861,28 +6839,6 @@
       "community_name": "HostManager",
       "file_type": "code",
       "norm_label": "int",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchhost_hostmanager_swift_nwconnection",
-      "label": "NWConnection",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "HostManager",
-      "file_type": "code",
-      "norm_label": "nwconnection",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchhost_hostmanager_swift_nwendpoint",
-      "label": "NWEndpoint",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "HostManager",
-      "file_type": "code",
-      "norm_label": "nwendpoint",
       "source_file": "",
       "source_location": ""
     },
@@ -6931,6 +6887,28 @@
       "source_location": ""
     },
     {
+      "id": "cgdirectdisplayid",
+      "label": "CGDirectDisplayID",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "HostManager",
+      "file_type": "code",
+      "norm_label": "cgdirectdisplayid",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "cgrect",
+      "label": "CGRect",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "HostManager",
+      "file_type": "code",
+      "norm_label": "cgrect",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "mcpeerid",
       "label": "MCPeerID",
       "_origin": "ast",
@@ -6938,6 +6916,28 @@
       "community_name": "HostManager",
       "file_type": "code",
       "norm_label": "mcpeerid",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "nwconnection",
+      "label": "NWConnection",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "HostManager",
+      "file_type": "code",
+      "norm_label": "nwconnection",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "nwendpoint",
+      "label": "NWEndpoint",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "HostManager",
+      "file_type": "code",
+      "norm_label": "nwendpoint",
       "source_file": "",
       "source_location": ""
     },
@@ -6960,6 +6960,17 @@
       "community_name": "HostManager",
       "file_type": "code",
       "norm_label": "objectidentifier",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "screenstreamer",
+      "label": "ScreenStreamer",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "HostManager",
+      "file_type": "code",
+      "norm_label": "screenstreamer",
       "source_file": "",
       "source_location": ""
     },
@@ -7360,17 +7371,6 @@
       "source_location": ""
     },
     {
-      "id": "uiviewrepresentable",
-      "label": "UIViewRepresentable",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "MetalVideoRenderer",
-      "file_type": "code",
-      "norm_label": "uiviewrepresentable",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
       "id": "videodecoder",
       "label": "VideoDecoder",
       "_origin": "ast",
@@ -7745,106 +7745,13 @@
       "source_location": ""
     },
     {
-      "id": "aircatchclient_aircatchclientapp_aircatchclientapp_body",
-      "label": ".body",
+      "id": "aircatchclient_clientmanager_swift_discoveredhost",
+      "label": "DiscoveredHost",
       "_origin": "ast",
       "community": 13,
-      "community_name": "AirCatchClientApp",
+      "community_name": "DiscoveredHost",
       "file_type": "code",
-      "norm_label": ".body",
-      "source_file": "AirCatchClient/AirCatchClientApp.swift",
-      "source_location": "L12"
-    },
-    {
-      "id": "aircatchclient_aircatchclientapp_swift_scene",
-      "label": "Scene",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "scene",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchhost_aircatchhostapp",
-      "label": "AirCatchHostApp.swift",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "aircatchhostapp.swift",
-      "source_file": "AirCatchHost/AirCatchHostApp.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "aircatchhost_aircatchhostapp_aircatchhostapp_body",
-      "label": ".body",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "metadata": {
-        "unresolved_calls": [
-          {
-            "callee": "activate",
-            "receiver_type": "NSApp",
-            "lang": "swift",
-            "line": "L29"
-          },
-          {
-            "callee": "terminate",
-            "receiver_type": "NSApplication",
-            "lang": "swift",
-            "line": "L36"
-          }
-        ]
-      },
-      "norm_label": ".body",
-      "source_file": "AirCatchHost/AirCatchHostApp.swift",
-      "source_location": "L14"
-    },
-    {
-      "id": "aircatchhost_aircatchhostapp_swift_scene",
-      "label": "Scene",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "scene",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "app",
-      "label": "App",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "app",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "notification",
-      "label": "Notification",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "notification",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "nsapplicationdelegate",
-      "label": "NSApplicationDelegate",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "AirCatchClientApp",
-      "file_type": "code",
-      "norm_label": "nsapplicationdelegate",
+      "norm_label": "discoveredhost",
       "source_file": "",
       "source_location": ""
     },
@@ -7915,13 +7822,13 @@
       "source_location": ""
     },
     {
-      "id": "cgdirectdisplayid",
-      "label": "CGDirectDisplayID",
+      "id": "aircatchhost_hostmanager_swift_cgrect",
+      "label": "CGRect",
       "_origin": "ast",
       "community": 136,
-      "community_name": "CGDirectDisplayID",
+      "community_name": "CGRect",
       "file_type": "code",
-      "norm_label": "cgdirectdisplayid",
+      "norm_label": "cgrect",
       "source_file": "",
       "source_location": ""
     },
@@ -8278,6 +8185,17 @@
       "source_location": ""
     },
     {
+      "id": "identifiable",
+      "label": "Identifiable",
+      "_origin": "ast",
+      "community": 14,
+      "community_name": "AirCatchClient/SharedModels.swift",
+      "file_type": "code",
+      "norm_label": "identifiable",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "os",
       "label": "os",
       "_origin": "ast",
@@ -8301,7 +8219,7 @@
       "source_location": ""
     },
     {
-      "id": "nwconnection",
+      "id": "aircatchhost_hostmanager_swift_nwconnection",
       "label": "NWConnection",
       "_origin": "ast",
       "community": 141,
@@ -8312,7 +8230,7 @@
       "source_location": ""
     },
     {
-      "id": "nwendpoint",
+      "id": "aircatchhost_hostmanager_swift_nwendpoint",
       "label": "NWEndpoint",
       "_origin": "ast",
       "community": 142,
@@ -8554,17 +8472,6 @@
       "source_location": ""
     },
     {
-      "id": "screenstreamer",
-      "label": "ScreenStreamer",
-      "_origin": "ast",
-      "community": 152,
-      "community_name": "ScreenStreamer",
-      "file_type": "code",
-      "norm_label": "screenstreamer",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
       "id": "toucheventtype",
       "label": "TouchEventType",
       "_origin": "ast",
@@ -8620,17 +8527,6 @@
       "source_location": ""
     },
     {
-      "id": "aircatchclient_clientmanager_clientmanager_savedsessiontoken",
-      "label": ".savedSessionToken",
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "ClientManager",
-      "file_type": "code",
-      "norm_label": ".savedsessiontoken",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L132"
-    },
-    {
       "id": "aircatchclient_clientmanager_swift_double",
       "label": "Double",
       "_origin": "ast",
@@ -8649,28 +8545,6 @@
       "community_name": "ClientManager",
       "file_type": "code",
       "norm_label": "int32",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchclient_clientmanager_swift_packettype",
-      "label": "PacketType",
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "ClientManager",
-      "file_type": "code",
-      "norm_label": "packettype",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchclient_clientmanager_swift_string",
-      "label": "String",
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "ClientManager",
-      "file_type": "code",
-      "norm_label": "string",
       "source_file": "",
       "source_location": ""
     },
@@ -8730,13 +8604,13 @@
       "source_location": ""
     },
     {
-      "id": "keymodifiers",
-      "label": "KeyModifiers",
+      "id": "packettype",
+      "label": "PacketType",
       "_origin": "ast",
       "community": 16,
       "community_name": "ClientManager",
       "file_type": "code",
-      "norm_label": "keymodifiers",
+      "norm_label": "packettype",
       "source_file": "",
       "source_location": ""
     },
@@ -9291,6 +9165,29 @@
       "source_location": ""
     },
     {
+      "id": "accelerate",
+      "label": "Accelerate",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "accelerate",
+      "source_file": "AirCatchHost/ScreenStreamer.swift",
+      "source_location": "L14",
+      "type": "module"
+    },
+    {
+      "id": "aircatchclient_audioplayer",
+      "label": "AudioPlayer.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "audioplayer.swift",
+      "source_file": "AirCatchClient/AudioPlayer.swift",
+      "source_location": "L1"
+    },
+    {
       "id": "aircatchclient_bonjourbrowser",
       "label": "BonjourBrowser.swift",
       "_origin": "ast",
@@ -9324,6 +9221,17 @@
       "source_location": "L1"
     },
     {
+      "id": "aircatchclient_metalvideoview",
+      "label": "MetalVideoView.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "metalvideoview.swift",
+      "source_file": "AirCatchClient/MetalVideoView.swift",
+      "source_location": "L1"
+    },
+    {
       "id": "aircatchclient_mpcaircatchclient",
       "label": "MPCAirCatchClient.swift",
       "_origin": "ast",
@@ -9343,6 +9251,72 @@
       "file_type": "code",
       "norm_label": "aircatchclient/networkmanager.swift",
       "source_file": "AirCatchClient/NetworkManager.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchclient_videodecoder",
+      "label": "VideoDecoder.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "videodecoder.swift",
+      "source_file": "AirCatchClient/VideoDecoder.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchclient_videodecoder_swift_osstatus",
+      "label": "OSStatus",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "osstatus",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "aircatchclient_videodecoder_videodecodererror_decodefailed",
+      "label": "decodeFailed",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "decodefailed",
+      "source_file": "AirCatchClient/VideoDecoder.swift",
+      "source_location": "L526"
+    },
+    {
+      "id": "aircatchclient_videodecoder_videodecodererror_formatdescriptioncreationfailed",
+      "label": "formatDescriptionCreationFailed",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "formatdescriptioncreationfailed",
+      "source_file": "AirCatchClient/VideoDecoder.swift",
+      "source_location": "L524"
+    },
+    {
+      "id": "aircatchclient_videodecoder_videodecodererror_sessioncreationfailed",
+      "label": "sessionCreationFailed",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "sessioncreationfailed",
+      "source_file": "AirCatchClient/VideoDecoder.swift",
+      "source_location": "L525"
+    },
+    {
+      "id": "aircatchclient_videostreamoverlay",
+      "label": "VideoStreamOverlay.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "videostreamoverlay.swift",
+      "source_file": "AirCatchClient/VideoStreamOverlay.swift",
       "source_location": "L1"
     },
     {
@@ -9368,6 +9342,39 @@
       "source_location": "L1"
     },
     {
+      "id": "aircatchhost_displaymanager",
+      "label": "DisplayManager.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "displaymanager.swift",
+      "source_file": "AirCatchHost/DisplayManager.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchhost_displaymanager_swift_double",
+      "label": "Double",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "double",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "aircatchhost_displaymanager_swift_int",
+      "label": "Int",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "int",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "aircatchhost_hostmanager",
       "label": "HostManager.swift",
       "_origin": "ast",
@@ -9376,6 +9383,17 @@
       "file_type": "code",
       "norm_label": "hostmanager.swift",
       "source_file": "AirCatchHost/HostManager.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchhost_inputinjector",
+      "label": "InputInjector.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "inputinjector.swift",
+      "source_file": "AirCatchHost/InputInjector.swift",
       "source_location": "L1"
     },
     {
@@ -9412,6 +9430,52 @@
       "source_location": "L1"
     },
     {
+      "id": "aircatchhost_screenstreamer",
+      "label": "ScreenStreamer.swift",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "screenstreamer.swift",
+      "source_file": "AirCatchHost/ScreenStreamer.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "appkit",
+      "label": "AppKit",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "appkit",
+      "source_file": "AirCatchHost/HostManager.swift",
+      "source_location": "L11",
+      "type": "module"
+    },
+    {
+      "id": "avfoundation",
+      "label": "AVFoundation",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "avfoundation",
+      "source_file": "AirCatchClient/AudioPlayer.swift",
+      "source_location": "L9",
+      "type": "module"
+    },
+    {
+      "id": "cgdisplaymode",
+      "label": "CGDisplayMode",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "cgdisplaymode",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "combine",
       "label": "Combine",
       "_origin": "ast",
@@ -9436,6 +9500,53 @@
       "type": "module"
     },
     {
+      "id": "coregraphics",
+      "label": "CoreGraphics",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "coregraphics",
+      "source_file": "AirCatchHost/HostManager.swift",
+      "source_location": "L14",
+      "type": "module"
+    },
+    {
+      "id": "coremedia",
+      "label": "CoreMedia",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "coremedia",
+      "source_file": "AirCatchHost/ScreenStreamer.swift",
+      "source_location": "L11",
+      "type": "module"
+    },
+    {
+      "id": "corevideo",
+      "label": "CoreVideo",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "corevideo",
+      "source_file": "AirCatchClient/VideoStreamOverlay.swift",
+      "source_location": "L10",
+      "type": "module"
+    },
+    {
+      "id": "error",
+      "label": "Error",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "error",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "foundation",
       "label": "Foundation",
       "_origin": "ast",
@@ -9445,6 +9556,42 @@
       "norm_label": "foundation",
       "source_file": "AirCatchHost/SharedModels.swift",
       "source_location": "L8",
+      "type": "module"
+    },
+    {
+      "id": "iokit_hidsystem",
+      "label": "IOKit.hidsystem",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "iokit.hidsystem",
+      "source_file": "AirCatchHost/InputInjector.swift",
+      "source_location": "L11",
+      "type": "module"
+    },
+    {
+      "id": "iosurface",
+      "label": "IOSurface",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "iosurface",
+      "source_file": "AirCatchHost/ScreenStreamer.swift",
+      "source_location": "L13",
+      "type": "module"
+    },
+    {
+      "id": "metalkit",
+      "label": "MetalKit",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "metalkit",
+      "source_file": "AirCatchClient/MetalVideoView.swift",
+      "source_location": "L9",
       "type": "module"
     },
     {
@@ -9472,6 +9619,18 @@
       "type": "module"
     },
     {
+      "id": "screencapturekit",
+      "label": "ScreenCaptureKit",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "screencapturekit",
+      "source_file": "AirCatchHost/HostManager.swift",
+      "source_location": "L10",
+      "type": "module"
+    },
+    {
       "id": "security",
       "label": "Security",
       "_origin": "ast",
@@ -9481,6 +9640,18 @@
       "norm_label": "security",
       "source_file": "AirCatchHost/HostManager.swift",
       "source_location": "L15",
+      "type": "module"
+    },
+    {
+      "id": "videotoolbox",
+      "label": "VideoToolbox",
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "Foundation",
+      "file_type": "code",
+      "norm_label": "videotoolbox",
+      "source_file": "AirCatchHost/ScreenStreamer.swift",
+      "source_location": "L10",
       "type": "module"
     },
     {
@@ -9759,17 +9930,6 @@
       "source_location": ""
     },
     {
-      "id": "aircatchclient_videodecoder",
-      "label": "VideoDecoder.swift",
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "videodecoder.swift",
-      "source_file": "AirCatchClient/VideoDecoder.swift",
-      "source_location": "L1"
-    },
-    {
       "id": "aircatchclient_videodecoder_swift_bool",
       "label": "Bool",
       "_origin": "ast",
@@ -9825,17 +9985,6 @@
       "source_location": ""
     },
     {
-      "id": "aircatchclient_videodecoder_swift_osstatus",
-      "label": "OSStatus",
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "osstatus",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
       "id": "aircatchclient_videodecoder_swift_uint8",
       "label": "UInt8",
       "_origin": "ast",
@@ -9845,39 +9994,6 @@
       "norm_label": "uint8",
       "source_file": "",
       "source_location": ""
-    },
-    {
-      "id": "aircatchclient_videodecoder_videodecodererror_decodefailed",
-      "label": "decodeFailed",
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "decodefailed",
-      "source_file": "AirCatchClient/VideoDecoder.swift",
-      "source_location": "L526"
-    },
-    {
-      "id": "aircatchclient_videodecoder_videodecodererror_formatdescriptioncreationfailed",
-      "label": "formatDescriptionCreationFailed",
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "formatdescriptioncreationfailed",
-      "source_file": "AirCatchClient/VideoDecoder.swift",
-      "source_location": "L524"
-    },
-    {
-      "id": "aircatchclient_videodecoder_videodecodererror_sessioncreationfailed",
-      "label": "sessionCreationFailed",
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "sessioncreationfailed",
-      "source_file": "AirCatchClient/VideoDecoder.swift",
-      "source_location": "L525"
     },
     {
       "id": "anyobject",
@@ -9909,17 +10025,6 @@
       "community_name": "VideoDecoder",
       "file_type": "code",
       "norm_label": "cmvideocodectype",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "error",
-      "label": "Error",
-      "_origin": "ast",
-      "community": 22,
-      "community_name": "VideoDecoder",
-      "file_type": "code",
-      "norm_label": "error",
       "source_file": "",
       "source_location": ""
     },
@@ -10067,79 +10172,13 @@
       "source_location": ""
     },
     {
-      "id": "aircatchhost_hostview_hostview_body",
-      "label": ".body",
+      "id": "aircatchclient_clientmanager_swift_packettype",
+      "label": "PacketType",
       "_origin": "ast",
       "community": 24,
-      "community_name": "HostView",
+      "community_name": "PacketType",
       "file_type": "code",
-      "norm_label": ".body",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L8"
-    },
-    {
-      "id": "aircatchhost_hostview_hostview_connectionstatussection",
-      "label": ".connectionStatusSection",
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": ".connectionstatussection",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L100"
-    },
-    {
-      "id": "aircatchhost_hostview_hostview_localmodesection",
-      "label": ".localModeSection",
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": ".localmodesection",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L77"
-    },
-    {
-      "id": "aircatchhost_hostview_hostview_statuscolor",
-      "label": ".statusColor",
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": ".statuscolor",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L132"
-    },
-    {
-      "id": "aircatchhost_hostview_hostview_statusdescription",
-      "label": ".statusDescription",
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": ".statusdescription",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L139"
-    },
-    {
-      "id": "aircatchhost_hostview_swift_color",
-      "label": "Color",
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": "color",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchhost_hostview_swift_string",
-      "label": "String",
-      "_origin": "ast",
-      "community": 24,
-      "community_name": "HostView",
-      "file_type": "code",
-      "norm_label": "string",
+      "norm_label": "packettype",
       "source_file": "",
       "source_location": ""
     },
@@ -10551,7 +10590,7 @@
       "source_location": ""
     },
     {
-      "id": "aircatchclient_clientmanager_swift_discoveredhost",
+      "id": "discoveredhost",
       "label": "DiscoveredHost",
       "_origin": "ast",
       "community": 26,
@@ -10573,35 +10612,13 @@
       "source_location": ""
     },
     {
-      "id": "aircatchhost_displaymanager_swift_double",
-      "label": "Double",
+      "id": "aircatchclient_clientmanager_swift_set",
+      "label": "Set",
       "_origin": "ast",
       "community": 28,
-      "community_name": "DisplayManager",
+      "community_name": "Set",
       "file_type": "code",
-      "norm_label": "double",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchhost_displaymanager_swift_int",
-      "label": "Int",
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": "int",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "cgdisplaymode",
-      "label": "CGDisplayMode",
-      "_origin": "ast",
-      "community": 28,
-      "community_name": "DisplayManager",
-      "file_type": "code",
-      "norm_label": "cgdisplaymode",
+      "norm_label": "set",
       "source_file": "",
       "source_location": ""
     },
@@ -10771,178 +10788,15 @@
       "source_location": ""
     },
     {
-      "id": "accelerate",
-      "label": "Accelerate",
+      "id": "aircatchclient_clientmanager_swift_void",
+      "label": "Void",
       "_origin": "ast",
       "community": 31,
-      "community_name": "ScreenStreamer.swift",
+      "community_name": "Void",
       "file_type": "code",
-      "norm_label": "accelerate",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L14",
-      "type": "module"
-    },
-    {
-      "id": "aircatchclient_aircatchclientapp",
-      "label": "AirCatchClientApp.swift",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "aircatchclientapp.swift",
-      "source_file": "AirCatchClient/AirCatchClientApp.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "aircatchclient_audioplayer",
-      "label": "AudioPlayer.swift",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "audioplayer.swift",
-      "source_file": "AirCatchClient/AudioPlayer.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "aircatchclient_metalvideoview",
-      "label": "MetalVideoView.swift",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "metalvideoview.swift",
-      "source_file": "AirCatchClient/MetalVideoView.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "aircatchclient_videostreamoverlay",
-      "label": "VideoStreamOverlay.swift",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "videostreamoverlay.swift",
-      "source_file": "AirCatchClient/VideoStreamOverlay.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "aircatchhost_hostview",
-      "label": "HostView.swift",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "hostview.swift",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "aircatchhost_screenstreamer",
-      "label": "ScreenStreamer.swift",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "screenstreamer.swift",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L1"
-    },
-    {
-      "id": "avfoundation",
-      "label": "AVFoundation",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "avfoundation",
-      "source_file": "AirCatchClient/AudioPlayer.swift",
-      "source_location": "L9",
-      "type": "module"
-    },
-    {
-      "id": "coremedia",
-      "label": "CoreMedia",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "coremedia",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L11",
-      "type": "module"
-    },
-    {
-      "id": "corevideo",
-      "label": "CoreVideo",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "corevideo",
-      "source_file": "AirCatchClient/VideoStreamOverlay.swift",
-      "source_location": "L10",
-      "type": "module"
-    },
-    {
-      "id": "iosurface",
-      "label": "IOSurface",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "iosurface",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L13",
-      "type": "module"
-    },
-    {
-      "id": "metalkit",
-      "label": "MetalKit",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "metalkit",
-      "source_file": "AirCatchClient/MetalVideoView.swift",
-      "source_location": "L9",
-      "type": "module"
-    },
-    {
-      "id": "screencapturekit",
-      "label": "ScreenCaptureKit",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "screencapturekit",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L9",
-      "type": "module"
-    },
-    {
-      "id": "swiftui",
-      "label": "SwiftUI",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "swiftui",
-      "source_file": "AirCatchHost/HostView.swift",
-      "source_location": "L2",
-      "type": "module"
-    },
-    {
-      "id": "videotoolbox",
-      "label": "VideoToolbox",
-      "_origin": "ast",
-      "community": 31,
-      "community_name": "ScreenStreamer.swift",
-      "file_type": "code",
-      "norm_label": "videotoolbox",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L10",
-      "type": "module"
+      "norm_label": "void",
+      "source_file": "",
+      "source_location": ""
     },
     {
       "id": "aircatchclient_audioplayer_swift_data",
@@ -11231,17 +11085,6 @@
       "source_location": ""
     },
     {
-      "id": "aircatchclient_clientmanager_swift_set",
-      "label": "Set",
-      "_origin": "ast",
-      "community": 36,
-      "community_name": "UDPStreamProcessor",
-      "file_type": "code",
-      "norm_label": "set",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
       "id": "aircatchclient_clientmanager_swift_timeinterval",
       "label": "TimeInterval",
       "_origin": "ast",
@@ -11271,17 +11114,6 @@
       "community_name": "UDPStreamProcessor",
       "file_type": "code",
       "norm_label": "uint32",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "aircatchclient_clientmanager_swift_void",
-      "label": "Void",
-      "_origin": "ast",
-      "community": 36,
-      "community_name": "UDPStreamProcessor",
-      "file_type": "code",
-      "norm_label": "void",
       "source_file": "",
       "source_location": ""
     },
@@ -11319,62 +11151,37 @@
       "source_location": ""
     },
     {
-      "id": "aircatchhost_displaymanager",
-      "label": "DisplayManager.swift",
+      "id": "set",
+      "label": "Set",
       "_origin": "ast",
-      "community": 37,
-      "community_name": "AppKit",
+      "community": 36,
+      "community_name": "UDPStreamProcessor",
       "file_type": "code",
-      "norm_label": "displaymanager.swift",
-      "source_file": "AirCatchHost/DisplayManager.swift",
-      "source_location": "L1"
+      "norm_label": "set",
+      "source_file": "",
+      "source_location": ""
     },
     {
-      "id": "aircatchhost_inputinjector",
-      "label": "InputInjector.swift",
+      "id": "void",
+      "label": "Void",
       "_origin": "ast",
-      "community": 37,
-      "community_name": "AppKit",
+      "community": 36,
+      "community_name": "UDPStreamProcessor",
       "file_type": "code",
-      "norm_label": "inputinjector.swift",
-      "source_file": "AirCatchHost/InputInjector.swift",
-      "source_location": "L1"
+      "norm_label": "void",
+      "source_file": "",
+      "source_location": ""
     },
     {
-      "id": "appkit",
-      "label": "AppKit",
+      "id": "aircatchhost_hostmanager_swift_cgdirectdisplayid",
+      "label": "CGDirectDisplayID",
       "_origin": "ast",
       "community": 37,
-      "community_name": "AppKit",
+      "community_name": "CGDirectDisplayID",
       "file_type": "code",
-      "norm_label": "appkit",
-      "source_file": "AirCatchHost/ScreenStreamer.swift",
-      "source_location": "L12",
-      "type": "module"
-    },
-    {
-      "id": "coregraphics",
-      "label": "CoreGraphics",
-      "_origin": "ast",
-      "community": 37,
-      "community_name": "AppKit",
-      "file_type": "code",
-      "norm_label": "coregraphics",
-      "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L14",
-      "type": "module"
-    },
-    {
-      "id": "iokit_hidsystem",
-      "label": "IOKit.hidsystem",
-      "_origin": "ast",
-      "community": 37,
-      "community_name": "AppKit",
-      "file_type": "code",
-      "norm_label": "iokit.hidsystem",
-      "source_file": "AirCatchHost/InputInjector.swift",
-      "source_location": "L11",
-      "type": "module"
+      "norm_label": "cgdirectdisplayid",
+      "source_file": "",
+      "source_location": ""
     },
     {
       "id": "aircatchhost_sharedmodels_extendeddisplayresolution_displayname",
@@ -12213,11 +12020,22 @@
       "source_location": ""
     },
     {
+      "id": "aircatchclient_clientmanager_clientmanager_savedsessiontoken",
+      "label": ".savedSessionToken",
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "String",
+      "file_type": "code",
+      "norm_label": ".savedsessiontoken",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L132"
+    },
+    {
       "id": "aircatchclient_clientmanager_connectionoption_displayname",
       "label": ".displayName",
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
       "norm_label": ".displayname",
       "source_file": "AirCatchClient/ClientManager.swift",
@@ -12228,7 +12046,7 @@
       "label": ".id",
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
       "norm_label": ".id",
       "source_file": "AirCatchClient/ClientManager.swift",
@@ -12239,7 +12057,7 @@
       "label": ".includePeerToPeer",
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
       "norm_label": ".includepeertopeer",
       "source_file": "AirCatchClient/ClientManager.swift",
@@ -12250,7 +12068,7 @@
       "label": "udpNetworkFramework",
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
       "norm_label": "udpnetworkframework",
       "source_file": "AirCatchClient/ClientManager.swift",
@@ -12261,20 +12079,31 @@
       "label": "udpPeerToPeerAWDL",
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
       "norm_label": "udppeertopeerawdl",
       "source_file": "AirCatchClient/ClientManager.swift",
       "source_location": "L75"
     },
     {
-      "id": "identifiable",
-      "label": "Identifiable",
+      "id": "aircatchclient_clientmanager_swift_string",
+      "label": "String",
       "_origin": "ast",
       "community": 49,
-      "community_name": "ConnectionOption",
+      "community_name": "String",
       "file_type": "code",
-      "norm_label": "identifiable",
+      "norm_label": "string",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "keymodifiers",
+      "label": "KeyModifiers",
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "String",
+      "file_type": "code",
+      "norm_label": "keymodifiers",
       "source_file": "",
       "source_location": ""
     },
@@ -13185,8 +13014,8 @@
       "community_name": "MouseHandlingView",
       "file_type": "code",
       "norm_label": "uikit",
-      "source_file": "AirCatchClient/MouseInputView.swift",
-      "source_location": "L9",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L11",
       "type": "module"
     },
     {
@@ -13252,6 +13081,17 @@
       "community_name": "MouseHandlingView",
       "file_type": "code",
       "norm_label": "uiview",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "uiviewrepresentable",
+      "label": "UIViewRepresentable",
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "MouseHandlingView",
+      "file_type": "code",
+      "norm_label": "uiviewrepresentable",
       "source_file": "",
       "source_location": ""
     },
@@ -13362,6 +13202,39 @@
       "community_name": "WebRTCSignalMessage",
       "file_type": "code",
       "norm_label": "webrtcsignalmessage",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "aircatchclient_aircatchclientapp",
+      "label": "AirCatchClientApp.swift",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "aircatchclientapp.swift",
+      "source_file": "AirCatchClient/AirCatchClientApp.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchclient_aircatchclientapp_aircatchclientapp_body",
+      "label": ".body",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".body",
+      "source_file": "AirCatchClient/AirCatchClientApp.swift",
+      "source_location": "L12"
+    },
+    {
+      "id": "aircatchclient_aircatchclientapp_swift_scene",
+      "label": "Scene",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "scene",
       "source_file": "",
       "source_location": ""
     },
@@ -13619,6 +13492,154 @@
       "source_location": ""
     },
     {
+      "id": "aircatchhost_aircatchhostapp",
+      "label": "AirCatchHostApp.swift",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "aircatchhostapp.swift",
+      "source_file": "AirCatchHost/AirCatchHostApp.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchhost_aircatchhostapp_aircatchhostapp_body",
+      "label": ".body",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "metadata": {
+        "unresolved_calls": [
+          {
+            "callee": "activate",
+            "receiver_type": "NSApp",
+            "lang": "swift",
+            "line": "L29"
+          },
+          {
+            "callee": "terminate",
+            "receiver_type": "NSApplication",
+            "lang": "swift",
+            "line": "L36"
+          }
+        ]
+      },
+      "norm_label": ".body",
+      "source_file": "AirCatchHost/AirCatchHostApp.swift",
+      "source_location": "L14"
+    },
+    {
+      "id": "aircatchhost_aircatchhostapp_swift_scene",
+      "label": "Scene",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "scene",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "aircatchhost_hostview",
+      "label": "HostView.swift",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "hostview.swift",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L1"
+    },
+    {
+      "id": "aircatchhost_hostview_hostview_body",
+      "label": ".body",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".body",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L8"
+    },
+    {
+      "id": "aircatchhost_hostview_hostview_connectionstatussection",
+      "label": ".connectionStatusSection",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".connectionstatussection",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L100"
+    },
+    {
+      "id": "aircatchhost_hostview_hostview_localmodesection",
+      "label": ".localModeSection",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".localmodesection",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L77"
+    },
+    {
+      "id": "aircatchhost_hostview_hostview_statuscolor",
+      "label": ".statusColor",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".statuscolor",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L132"
+    },
+    {
+      "id": "aircatchhost_hostview_hostview_statusdescription",
+      "label": ".statusDescription",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": ".statusdescription",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L139"
+    },
+    {
+      "id": "aircatchhost_hostview_swift_color",
+      "label": "Color",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "color",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "aircatchhost_hostview_swift_string",
+      "label": "String",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "string",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "app",
+      "label": "App",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "app",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "hashable",
       "label": "Hashable",
       "_origin": "ast",
@@ -13628,6 +13649,40 @@
       "norm_label": "hashable",
       "source_file": "",
       "source_location": ""
+    },
+    {
+      "id": "notification",
+      "label": "Notification",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "notification",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "nsapplicationdelegate",
+      "label": "NSApplicationDelegate",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "nsapplicationdelegate",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "swiftui",
+      "label": "SwiftUI",
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "View",
+      "file_type": "code",
+      "norm_label": "swiftui",
+      "source_file": "AirCatchHost/HostView.swift",
+      "source_location": "L2",
+      "type": "module"
     },
     {
       "id": "view",
@@ -13917,7 +13972,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L634",
+      "source_location": "L637",
       "weight": 1.0
     },
     {
@@ -13929,7 +13984,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L649",
+      "source_location": "L652",
       "weight": 1.0
     },
     {
@@ -13941,7 +13996,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L651",
+      "source_location": "L654",
       "weight": 1.0
     },
     {
@@ -13958,7 +14013,7 @@
     },
     {
       "source": "aircatchclient_clientmanager_clientmanager_connectmanually",
-      "target": "aircatchclient_clientmanager_swift_discoveredhost",
+      "target": "discoveredhost",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -14025,7 +14080,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L732",
+      "source_location": "L735",
       "weight": 1.0
     },
     {
@@ -14037,7 +14092,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L745",
+      "source_location": "L748",
       "weight": 1.0
     },
     {
@@ -14073,7 +14128,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L965",
+      "source_location": "L968",
       "weight": 1.0
     },
     {
@@ -14085,7 +14140,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L561",
+      "source_location": "L564",
       "weight": 1.0
     },
     {
@@ -14097,7 +14152,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L821",
+      "source_location": "L824",
       "weight": 1.0
     },
     {
@@ -14109,7 +14164,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L824",
+      "source_location": "L827",
       "weight": 1.0
     },
     {
@@ -14121,7 +14176,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L826",
+      "source_location": "L829",
       "weight": 1.0
     },
     {
@@ -14133,7 +14188,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L830",
+      "source_location": "L833",
       "weight": 1.0
     },
     {
@@ -14145,7 +14200,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L834",
+      "source_location": "L837",
       "weight": 1.0
     },
     {
@@ -14157,7 +14212,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L838",
+      "source_location": "L841",
       "weight": 1.0
     },
     {
@@ -14169,7 +14224,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L841",
+      "source_location": "L844",
       "weight": 1.0
     },
     {
@@ -14181,7 +14236,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L856",
+      "source_location": "L859",
       "weight": 1.0
     },
     {
@@ -14193,7 +14248,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L872",
+      "source_location": "L875",
       "weight": 1.0
     },
     {
@@ -14205,7 +14260,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L874",
+      "source_location": "L877",
       "weight": 1.0
     },
     {
@@ -14217,7 +14272,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L880",
+      "source_location": "L883",
       "weight": 1.0
     },
     {
@@ -14253,7 +14308,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L522",
+      "source_location": "L525",
       "weight": 1.0
     },
     {
@@ -14265,7 +14320,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L531",
+      "source_location": "L534",
       "weight": 1.0
     },
     {
@@ -14277,7 +14332,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L901",
+      "source_location": "L904",
       "weight": 1.0
     },
     {
@@ -14289,7 +14344,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L908",
+      "source_location": "L911",
       "weight": 1.0
     },
     {
@@ -14301,7 +14356,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L917",
+      "source_location": "L920",
       "weight": 1.0
     },
     {
@@ -14313,7 +14368,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L926",
+      "source_location": "L929",
       "weight": 1.0
     },
     {
@@ -14325,7 +14380,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L930",
+      "source_location": "L933",
       "weight": 1.0
     },
     {
@@ -14337,7 +14392,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1065",
+      "source_location": "L1068",
       "weight": 1.0
     },
     {
@@ -14349,7 +14404,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L665",
+      "source_location": "L668",
       "weight": 1.0
     },
     {
@@ -14361,7 +14416,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L692",
+      "source_location": "L695",
       "weight": 1.0
     },
     {
@@ -14397,7 +14452,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L766",
+      "source_location": "L769",
       "weight": 1.0
     },
     {
@@ -14409,7 +14464,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L767",
+      "source_location": "L770",
       "weight": 1.0
     },
     {
@@ -14421,7 +14476,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L770",
+      "source_location": "L773",
       "weight": 1.0
     },
     {
@@ -14433,7 +14488,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1033",
+      "source_location": "L1036",
       "weight": 1.0
     },
     {
@@ -14445,7 +14500,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1060",
+      "source_location": "L1063",
       "weight": 1.0
     },
     {
@@ -14457,7 +14512,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1008",
+      "source_location": "L1011",
       "weight": 1.0
     },
     {
@@ -14469,7 +14524,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L605",
+      "source_location": "L608",
       "weight": 1.0
     },
     {
@@ -14481,7 +14536,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L608",
+      "source_location": "L611",
       "weight": 1.0
     },
     {
@@ -14493,7 +14548,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1018",
+      "source_location": "L1021",
       "weight": 1.0
     },
     {
@@ -14505,7 +14560,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1050",
+      "source_location": "L1053",
       "weight": 1.0
     },
     {
@@ -14517,7 +14572,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L995",
+      "source_location": "L998",
       "weight": 1.0
     },
     {
@@ -14529,7 +14584,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1072",
+      "source_location": "L1075",
       "weight": 1.0
     },
     {
@@ -14541,12 +14596,12 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1075",
+      "source_location": "L1078",
       "weight": 1.0
     },
     {
       "source": "aircatchclient_clientmanager_clientmanager_setupbonjourcallbacks",
-      "target": "aircatchclient_clientmanager_swift_discoveredhost",
+      "target": "discoveredhost",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -14565,7 +14620,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L580",
+      "source_location": "L583",
       "weight": 1.0
     },
     {
@@ -14577,7 +14632,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L586",
+      "source_location": "L589",
       "weight": 1.0
     },
     {
@@ -14589,7 +14644,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L597",
+      "source_location": "L600",
       "weight": 1.0
     },
     {
@@ -14601,7 +14656,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1219",
+      "source_location": "L1222",
       "weight": 1.0
     },
     {
@@ -14613,7 +14668,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1222",
+      "source_location": "L1225",
       "weight": 1.0
     },
     {
@@ -14625,7 +14680,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1227",
+      "source_location": "L1230",
       "weight": 1.0
     },
     {
@@ -14637,7 +14692,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1231",
+      "source_location": "L1234",
       "weight": 1.0
     },
     {
@@ -14649,7 +14704,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1235",
+      "source_location": "L1238",
       "weight": 1.0
     },
     {
@@ -14661,7 +14716,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1264",
+      "source_location": "L1267",
       "weight": 1.0
     },
     {
@@ -14673,7 +14728,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1274",
+      "source_location": "L1277",
       "weight": 1.0
     },
     {
@@ -14685,7 +14740,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1279",
+      "source_location": "L1282",
       "weight": 1.0
     },
     {
@@ -14697,7 +14752,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1250",
+      "source_location": "L1253",
       "weight": 1.0
     },
     {
@@ -14709,7 +14764,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1350",
+      "source_location": "L1353",
       "weight": 1.0
     },
     {
@@ -14721,7 +14776,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1360",
+      "source_location": "L1363",
       "weight": 1.0
     },
     {
@@ -15993,7 +16048,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1335",
+      "source_location": "L1341",
       "weight": 1.0
     },
     {
@@ -16017,7 +16072,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1229",
+      "source_location": "L1235",
       "weight": 1.0
     },
     {
@@ -16029,7 +16084,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1234",
+      "source_location": "L1240",
       "weight": 1.0
     },
     {
@@ -16605,7 +16660,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1397",
+      "source_location": "L1403",
       "weight": 1.0
     },
     {
@@ -16617,7 +16672,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1421",
+      "source_location": "L1427",
       "weight": 1.0
     },
     {
@@ -16862,14 +16917,14 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_startstreaming",
-      "target": "aircatchhost_screenstreamer_screenstreamer",
+      "target": "screenstreamer",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1145",
+      "source_location": "L1151",
       "weight": 1.0
     },
     {
@@ -16881,7 +16936,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1155",
+      "source_location": "L1161",
       "weight": 1.0
     },
     {
@@ -16893,7 +16948,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1159",
+      "source_location": "L1165",
       "weight": 1.0
     },
     {
@@ -16905,7 +16960,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1165",
+      "source_location": "L1171",
       "weight": 1.0
     },
     {
@@ -16917,7 +16972,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1167",
+      "source_location": "L1173",
       "weight": 1.0
     },
     {
@@ -16941,7 +16996,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1197",
+      "source_location": "L1203",
       "weight": 1.0
     },
     {
@@ -16953,7 +17008,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1201",
+      "source_location": "L1207",
       "weight": 1.0
     },
     {
@@ -17001,7 +17056,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1432",
+      "source_location": "L1438",
       "weight": 1.0
     },
     {
@@ -18117,7 +18172,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L900",
+      "source_location": "L903",
       "weight": 1.0
     },
     {
@@ -18225,7 +18280,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1096",
+      "source_location": "L1099",
       "weight": 1.0
     },
     {
@@ -18237,7 +18292,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1128",
+      "source_location": "L1131",
       "weight": 1.0
     },
     {
@@ -18249,7 +18304,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1151",
+      "source_location": "L1154",
       "weight": 1.0
     },
     {
@@ -18261,7 +18316,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1290",
+      "source_location": "L1293",
       "weight": 1.0
     },
     {
@@ -18302,7 +18357,7 @@
     },
     {
       "source": "aircatchclient_clientmanager_clientmanager",
-      "target": "aircatchclient_clientmanager_swift_discoveredhost",
+      "target": "discoveredhost",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -18465,7 +18520,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1295",
+      "source_location": "L1298",
       "weight": 1.0
     },
     {
@@ -18477,19 +18532,19 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1297",
+      "source_location": "L1300",
       "weight": 1.0
     },
     {
       "source": "aircatchclient_clientmanager_frameassembly",
-      "target": "aircatchclient_clientmanager_swift_set",
+      "target": "set",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1298",
+      "source_location": "L1301",
       "weight": 1.0
     },
     {
@@ -18501,7 +18556,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1176",
+      "source_location": "L1179",
       "weight": 1.0
     },
     {
@@ -18513,7 +18568,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1177",
+      "source_location": "L1180",
       "weight": 1.0
     },
     {
@@ -18525,7 +18580,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1178",
+      "source_location": "L1181",
       "weight": 1.0
     },
     {
@@ -18537,7 +18592,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1180",
+      "source_location": "L1183",
       "weight": 1.0
     },
     {
@@ -18549,7 +18604,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1181",
+      "source_location": "L1184",
       "weight": 1.0
     },
     {
@@ -18561,7 +18616,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1182",
+      "source_location": "L1185",
       "weight": 1.0
     },
     {
@@ -18573,7 +18628,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1184",
+      "source_location": "L1187",
       "weight": 1.0
     },
     {
@@ -18585,19 +18640,19 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1184",
+      "source_location": "L1187",
       "weight": 1.0
     },
     {
       "source": "aircatchclient_clientmanager_udpstreamprocessor",
-      "target": "aircatchclient_clientmanager_swift_void",
+      "target": "void",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1184",
+      "source_location": "L1187",
       "weight": 1.0
     },
     {
@@ -18609,7 +18664,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1090",
+      "source_location": "L1093",
       "weight": 1.0
     },
     {
@@ -18621,7 +18676,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1301",
+      "source_location": "L1304",
       "weight": 1.0
     },
     {
@@ -20258,7 +20313,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager",
-      "target": "aircatchhost_screenstreamer_screenstreamer",
+      "target": "screenstreamer",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -20318,7 +20373,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager",
-      "target": "aircatchhost_hostmanager_swift_cgdirectdisplayid",
+      "target": "cgdirectdisplayid",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -20330,7 +20385,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager",
-      "target": "aircatchhost_hostmanager_swift_cgrect",
+      "target": "cgrect",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -21705,7 +21760,7 @@
       "confidence_score": 1.0,
       "context": "generic_arg",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1290",
+      "source_location": "L1293",
       "weight": 1.0
     },
     {
@@ -21717,7 +21772,7 @@
       "confidence_score": 1.0,
       "context": "generic_arg",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1298",
+      "source_location": "L1301",
       "weight": 1.0
     },
     {
@@ -22797,7 +22852,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1098",
+      "source_location": "L1101",
       "weight": 1.0
     },
     {
@@ -22809,7 +22864,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1109",
+      "source_location": "L1112",
       "weight": 1.0
     },
     {
@@ -22821,7 +22876,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1134",
+      "source_location": "L1137",
       "weight": 1.0
     },
     {
@@ -22833,7 +22888,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1130",
+      "source_location": "L1133",
       "weight": 1.0
     },
     {
@@ -22845,7 +22900,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1164",
+      "source_location": "L1167",
       "weight": 1.0
     },
     {
@@ -22857,7 +22912,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1153",
+      "source_location": "L1156",
       "weight": 1.0
     },
     {
@@ -22874,7 +22929,7 @@
     },
     {
       "source": "aircatchclient_clientmanager_clientmanager_connect",
-      "target": "aircatchclient_clientmanager_swift_discoveredhost",
+      "target": "discoveredhost",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -22929,7 +22984,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L710",
+      "source_location": "L713",
       "weight": 1.0
     },
     {
@@ -22953,7 +23008,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L944",
+      "source_location": "L947",
       "weight": 1.0
     },
     {
@@ -22965,7 +23020,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L556",
+      "source_location": "L559",
       "weight": 1.0
     },
     {
@@ -22977,7 +23032,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L565",
+      "source_location": "L568",
       "weight": 1.0
     },
     {
@@ -22989,7 +23044,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L817",
+      "source_location": "L820",
       "weight": 1.0
     },
     {
@@ -23025,19 +23080,19 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1064",
+      "source_location": "L1067",
       "weight": 1.0
     },
     {
       "source": "aircatchclient_clientmanager_clientmanager_resolveandconnect",
-      "target": "aircatchclient_clientmanager_swift_discoveredhost",
+      "target": "discoveredhost",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L656",
+      "source_location": "L659",
       "weight": 1.0
     },
     {
@@ -23061,19 +23116,19 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L786",
+      "source_location": "L789",
       "weight": 1.0
     },
     {
       "source": "aircatchclient_clientmanager_clientmanager_sendcontrol",
-      "target": "aircatchclient_clientmanager_swift_packettype",
+      "target": "packettype",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L786",
+      "source_location": "L789",
       "weight": 1.0
     },
     {
@@ -23085,7 +23140,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L760",
+      "source_location": "L763",
       "weight": 1.0
     },
     {
@@ -23097,7 +23152,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1023",
+      "source_location": "L1026",
       "weight": 1.0
     },
     {
@@ -23109,7 +23164,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1023",
+      "source_location": "L1026",
       "weight": 1.0
     },
     {
@@ -23121,7 +23176,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1023",
+      "source_location": "L1026",
       "weight": 1.0
     },
     {
@@ -23133,7 +23188,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1023",
+      "source_location": "L1026",
       "weight": 1.0
     },
     {
@@ -23145,7 +23200,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1055",
+      "source_location": "L1058",
       "weight": 1.0
     },
     {
@@ -23157,7 +23212,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1055",
+      "source_location": "L1058",
       "weight": 1.0
     },
     {
@@ -23169,7 +23224,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1000",
+      "source_location": "L1003",
       "weight": 1.0
     },
     {
@@ -23181,7 +23236,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1013",
+      "source_location": "L1016",
       "weight": 1.0
     },
     {
@@ -23193,7 +23248,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1039",
+      "source_location": "L1042",
       "weight": 1.0
     },
     {
@@ -23205,7 +23260,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L980",
+      "source_location": "L983",
       "weight": 1.0
     },
     {
@@ -23217,7 +23272,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L980",
+      "source_location": "L983",
       "weight": 1.0
     },
     {
@@ -23229,7 +23284,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1068",
+      "source_location": "L1071",
       "weight": 1.0
     },
     {
@@ -23241,7 +23296,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1209",
+      "source_location": "L1212",
       "weight": 1.0
     },
     {
@@ -23253,7 +23308,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1255",
+      "source_location": "L1258",
       "weight": 1.0
     },
     {
@@ -23265,7 +23320,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23277,7 +23332,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23289,7 +23344,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23301,7 +23356,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23313,19 +23368,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
-      "weight": 1.0
-    },
-    {
-      "source": "aircatchclient_clientmanager_udpstreamprocessor_init",
-      "target": "aircatchclient_clientmanager_swift_void",
-      "relation": "references",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "parameter_type",
-      "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23337,7 +23380,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23349,7 +23392,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23361,7 +23404,19 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
+      "weight": 1.0
+    },
+    {
+      "source": "aircatchclient_clientmanager_udpstreamprocessor_init",
+      "target": "void",
+      "relation": "references",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "parameter_type",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -23373,7 +23428,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1091",
+      "source_location": "L1094",
       "weight": 1.0
     },
     {
@@ -23385,7 +23440,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306",
+      "source_location": "L1309",
       "weight": 1.0
     },
     {
@@ -23397,7 +23452,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306",
+      "source_location": "L1309",
       "weight": 1.0
     },
     {
@@ -23409,7 +23464,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306",
+      "source_location": "L1309",
       "weight": 1.0
     },
     {
@@ -23421,19 +23476,19 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306",
+      "source_location": "L1309",
       "weight": 1.0
     },
     {
       "source": "aircatchclient_clientmanager_videoreassembler_process",
-      "target": "aircatchclient_clientmanager_swift_void",
+      "target": "void",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306",
+      "source_location": "L1309",
       "weight": 1.0
     },
     {
@@ -25497,7 +25552,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1342",
+      "source_location": "L1348",
       "weight": 1.0
     },
     {
@@ -25509,7 +25564,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1244",
+      "source_location": "L1250",
       "weight": 1.0
     },
     {
@@ -25521,7 +25576,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1219",
+      "source_location": "L1225",
       "weight": 1.0
     },
     {
@@ -25533,7 +25588,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1219",
+      "source_location": "L1225",
       "weight": 1.0
     },
     {
@@ -25545,12 +25600,12 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1219",
+      "source_location": "L1225",
       "weight": 1.0
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_cleartcpauthchallenge",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -25569,7 +25624,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1456",
+      "source_location": "L1462",
       "weight": 1.0
     },
     {
@@ -25622,7 +25677,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handleclientdisconnect",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -25646,7 +25701,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handlehandshake",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -25658,7 +25713,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handleincomingpacket",
-      "target": "aircatchhost_hostmanager_swift_nwendpoint",
+      "target": "aircatchhost_hostmanager_swift_packet",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -25670,7 +25725,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handleincomingpacket",
-      "target": "aircatchhost_hostmanager_swift_packet",
+      "target": "nwendpoint",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -25790,7 +25845,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handlepingpacket",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -25838,18 +25893,6 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handletcppacket",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
-      "relation": "references",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "parameter_type",
-      "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L326",
-      "weight": 1.0
-    },
-    {
-      "source": "aircatchhost_hostmanager_hostmanager_handletcppacket",
       "target": "aircatchhost_hostmanager_swift_packet",
       "relation": "references",
       "_origin": "ast",
@@ -25861,6 +25904,18 @@
       "weight": 1.0
     },
     {
+      "source": "aircatchhost_hostmanager_hostmanager_handletcppacket",
+      "target": "nwconnection",
+      "relation": "references",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "parameter_type",
+      "source_file": "AirCatchHost/HostManager.swift",
+      "source_location": "L326",
+      "weight": 1.0
+    },
+    {
       "source": "aircatchhost_hostmanager_hostmanager_handletouchevent",
       "target": "aircatchhost_hostmanager_swift_data",
       "relation": "references",
@@ -25893,19 +25948,19 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1368",
+      "source_location": "L1374",
       "weight": 1.0
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handlevideochunknack",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1368",
+      "source_location": "L1374",
       "weight": 1.0
     },
     {
@@ -25917,7 +25972,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1420",
+      "source_location": "L1426",
       "weight": 1.0
     },
     {
@@ -25929,7 +25984,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1420",
+      "source_location": "L1426",
       "weight": 1.0
     },
     {
@@ -25941,7 +25996,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1209",
+      "source_location": "L1215",
       "weight": 1.0
     },
     {
@@ -25953,7 +26008,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1416",
+      "source_location": "L1422",
       "weight": 1.0
     },
     {
@@ -25970,7 +26025,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_sendtcpauthchallenge",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -26049,7 +26104,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1431",
+      "source_location": "L1437",
       "weight": 1.0
     },
     {
@@ -26061,7 +26116,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1431",
+      "source_location": "L1437",
       "weight": 1.0
     },
     {
@@ -26078,7 +26133,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_verifytcpauthresponse",
-      "target": "aircatchhost_hostmanager_swift_nwconnection",
+      "target": "aircatchhost_hostmanager_swift_string",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -26090,7 +26145,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_verifytcpauthresponse",
-      "target": "aircatchhost_hostmanager_swift_string",
+      "target": "nwconnection",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -28371,7 +28426,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1115",
+      "source_location": "L1118",
       "weight": 1.0
     },
     {
@@ -28386,7 +28441,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1102",
+      "source_location": "L1105",
       "weight": 1.0
     },
     {
@@ -28401,7 +28456,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1140",
+      "source_location": "L1143",
       "weight": 1.0
     },
     {
@@ -28416,7 +28471,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1164",
+      "source_location": "L1167",
       "weight": 1.0
     },
     {
@@ -28431,7 +28486,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1157",
+      "source_location": "L1160",
       "weight": 1.0
     },
     {
@@ -28446,7 +28501,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L777",
+      "source_location": "L780",
       "weight": 1.0
     },
     {
@@ -28626,7 +28681,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1456",
+      "source_location": "L1462",
       "weight": 1.0
     },
     {
@@ -28641,7 +28696,7 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1445",
+      "source_location": "L1451",
       "weight": 1.0
     },
     {
@@ -28656,12 +28711,12 @@
         "swift_plain_return": true
       },
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1420",
+      "source_location": "L1426",
       "weight": 1.0
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_mainscreenframe",
-      "target": "aircatchhost_hostmanager_swift_cgrect",
+      "target": "cgrect",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -28676,7 +28731,7 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_targetdisplayframe",
-      "target": "aircatchhost_hostmanager_swift_cgrect",
+      "target": "cgrect",
       "relation": "references",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -28845,7 +28900,7 @@
       "confidence_score": 1.0,
       "context": "return_type",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L794",
+      "source_location": "L797",
       "weight": 1.0
     },
     {
@@ -30599,7 +30654,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1089",
+      "source_location": "L1092",
       "weight": 1.0
     },
     {
@@ -30610,7 +30665,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1094",
+      "source_location": "L1097",
       "weight": 1.0
     },
     {
@@ -30621,7 +30676,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1126",
+      "source_location": "L1129",
       "weight": 1.0
     },
     {
@@ -30632,7 +30687,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1149",
+      "source_location": "L1152",
       "weight": 1.0
     },
     {
@@ -30643,7 +30698,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1175",
+      "source_location": "L1178",
       "weight": 1.0
     },
     {
@@ -30654,7 +30709,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1287",
+      "source_location": "L1290",
       "weight": 1.0
     },
     {
@@ -30698,7 +30753,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1288",
+      "source_location": "L1291",
       "weight": 1.0
     },
     {
@@ -30709,7 +30764,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1293",
+      "source_location": "L1296",
       "weight": 1.0
     },
     {
@@ -31864,7 +31919,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1089",
+      "source_location": "L1092",
       "weight": 1.0
     },
     {
@@ -33074,7 +33129,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1094",
+      "source_location": "L1097",
       "weight": 1.0
     },
     {
@@ -33085,7 +33140,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1126",
+      "source_location": "L1129",
       "weight": 1.0
     },
     {
@@ -33096,7 +33151,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1149",
+      "source_location": "L1152",
       "weight": 1.0
     },
     {
@@ -33118,7 +33173,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1287",
+      "source_location": "L1290",
       "weight": 1.0
     },
     {
@@ -33470,7 +33525,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1098",
+      "source_location": "L1101",
       "weight": 1.0
     },
     {
@@ -33481,7 +33536,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1102",
+      "source_location": "L1105",
       "weight": 1.0
     },
     {
@@ -33492,7 +33547,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1109",
+      "source_location": "L1112",
       "weight": 1.0
     },
     {
@@ -33503,7 +33558,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1115",
+      "source_location": "L1118",
       "weight": 1.0
     },
     {
@@ -33514,7 +33569,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1130",
+      "source_location": "L1133",
       "weight": 1.0
     },
     {
@@ -33525,7 +33580,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1134",
+      "source_location": "L1137",
       "weight": 1.0
     },
     {
@@ -33536,7 +33591,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1140",
+      "source_location": "L1143",
       "weight": 1.0
     },
     {
@@ -33547,7 +33602,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1153",
+      "source_location": "L1156",
       "weight": 1.0
     },
     {
@@ -33558,7 +33613,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1157",
+      "source_location": "L1160",
       "weight": 1.0
     },
     {
@@ -33569,7 +33624,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1164",
+      "source_location": "L1167",
       "weight": 1.0
     },
     {
@@ -33580,7 +33635,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1000",
+      "source_location": "L1003",
       "weight": 1.0
     },
     {
@@ -33591,7 +33646,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1013",
+      "source_location": "L1016",
       "weight": 1.0
     },
     {
@@ -33602,7 +33657,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1023",
+      "source_location": "L1026",
       "weight": 1.0
     },
     {
@@ -33613,7 +33668,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1039",
+      "source_location": "L1042",
       "weight": 1.0
     },
     {
@@ -33624,7 +33679,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1055",
+      "source_location": "L1058",
       "weight": 1.0
     },
     {
@@ -33635,7 +33690,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1064",
+      "source_location": "L1067",
       "weight": 1.0
     },
     {
@@ -33646,7 +33701,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1068",
+      "source_location": "L1071",
       "weight": 1.0
     },
     {
@@ -33822,7 +33877,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L556",
+      "source_location": "L559",
       "weight": 1.0
     },
     {
@@ -33833,7 +33888,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L565",
+      "source_location": "L568",
       "weight": 1.0
     },
     {
@@ -33844,7 +33899,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L579",
+      "source_location": "L582",
       "weight": 1.0
     },
     {
@@ -33855,7 +33910,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L591",
+      "source_location": "L594",
       "weight": 1.0
     },
     {
@@ -33866,7 +33921,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L600",
+      "source_location": "L603",
       "weight": 1.0
     },
     {
@@ -33877,7 +33932,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L631",
+      "source_location": "L634",
       "weight": 1.0
     },
     {
@@ -33888,7 +33943,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L656",
+      "source_location": "L659",
       "weight": 1.0
     },
     {
@@ -33899,7 +33954,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L710",
+      "source_location": "L713",
       "weight": 1.0
     },
     {
@@ -33910,7 +33965,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L760",
+      "source_location": "L763",
       "weight": 1.0
     },
     {
@@ -33921,7 +33976,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L777",
+      "source_location": "L780",
       "weight": 1.0
     },
     {
@@ -33932,7 +33987,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L786",
+      "source_location": "L789",
       "weight": 1.0
     },
     {
@@ -33943,7 +33998,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L794",
+      "source_location": "L797",
       "weight": 1.0
     },
     {
@@ -33954,7 +34009,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L817",
+      "source_location": "L820",
       "weight": 1.0
     },
     {
@@ -33965,7 +34020,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L887",
+      "source_location": "L890",
       "weight": 1.0
     },
     {
@@ -33976,7 +34031,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L944",
+      "source_location": "L947",
       "weight": 1.0
     },
     {
@@ -33987,7 +34042,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L980",
+      "source_location": "L983",
       "weight": 1.0
     },
     {
@@ -34053,7 +34108,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1187",
+      "source_location": "L1190",
       "weight": 1.0
     },
     {
@@ -34064,7 +34119,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1209",
+      "source_location": "L1212",
       "weight": 1.0
     },
     {
@@ -34075,7 +34130,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1249",
+      "source_location": "L1252",
       "weight": 1.0
     },
     {
@@ -34086,7 +34141,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1255",
+      "source_location": "L1258",
       "weight": 1.0
     },
     {
@@ -34097,7 +34152,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1091",
+      "source_location": "L1094",
       "weight": 1.0
     },
     {
@@ -34108,7 +34163,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1306",
+      "source_location": "L1309",
       "weight": 1.0
     },
     {
@@ -35791,7 +35846,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1196",
+      "source_location": "L1202",
       "weight": 1.0
     },
     {
@@ -35802,7 +35857,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1209",
+      "source_location": "L1215",
       "weight": 1.0
     },
     {
@@ -35813,7 +35868,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1219",
+      "source_location": "L1225",
       "weight": 1.0
     },
     {
@@ -35824,7 +35879,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1244",
+      "source_location": "L1250",
       "weight": 1.0
     },
     {
@@ -35835,7 +35890,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1342",
+      "source_location": "L1348",
       "weight": 1.0
     },
     {
@@ -35846,7 +35901,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1368",
+      "source_location": "L1374",
       "weight": 1.0
     },
     {
@@ -35857,7 +35912,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1410",
+      "source_location": "L1416",
       "weight": 1.0
     },
     {
@@ -35868,7 +35923,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1416",
+      "source_location": "L1422",
       "weight": 1.0
     },
     {
@@ -35879,7 +35934,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1420",
+      "source_location": "L1426",
       "weight": 1.0
     },
     {
@@ -35890,7 +35945,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1431",
+      "source_location": "L1437",
       "weight": 1.0
     },
     {
@@ -35901,7 +35956,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1445",
+      "source_location": "L1451",
       "weight": 1.0
     },
     {
@@ -35912,7 +35967,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1456",
+      "source_location": "L1462",
       "weight": 1.0
     },
     {
@@ -37764,7 +37819,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L963",
+      "source_location": "L966",
       "weight": 1.0
     },
     {
@@ -37776,7 +37831,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L858",
+      "source_location": "L861",
       "weight": 1.0
     },
     {
@@ -37812,7 +37867,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L889",
+      "source_location": "L892",
       "weight": 1.0
     },
     {
@@ -37824,7 +37879,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L896",
+      "source_location": "L899",
       "weight": 1.0
     },
     {
@@ -37848,7 +37903,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1242",
+      "source_location": "L1245",
       "weight": 1.0
     },
     {
@@ -37956,7 +38011,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1359",
+      "source_location": "L1365",
       "weight": 1.0
     },
     {
@@ -37968,7 +38023,7 @@
       "confidence_score": 0.8,
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L1269",
+      "source_location": "L1275",
       "weight": 1.0
     },
     {
@@ -38232,7 +38287,19 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L559",
+      "source_location": "L562",
+      "weight": 1.0
+    },
+    {
+      "source": "aircatchclient_clientmanager_clientmanager_makehandshakerequest",
+      "target": "cgrect",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "call",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L515",
       "weight": 1.0
     },
     {
@@ -38244,7 +38311,19 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L923",
+      "source_location": "L926",
+      "weight": 1.0
+    },
+    {
+      "source": "aircatchclient_clientmanager_clientmanager_resolveandconnect",
+      "target": "nwconnection",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "call",
+      "source_file": "AirCatchClient/ClientManager.swift",
+      "source_location": "L676",
       "weight": 1.0
     },
     {
@@ -38256,7 +38335,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1025",
+      "source_location": "L1028",
       "weight": 1.0
     },
     {
@@ -38268,7 +38347,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1057",
+      "source_location": "L1060",
       "weight": 1.0
     },
     {
@@ -38280,7 +38359,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1005",
+      "source_location": "L1008",
       "weight": 1.0
     },
     {
@@ -38292,7 +38371,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L603",
+      "source_location": "L606",
       "weight": 1.0
     },
     {
@@ -38304,7 +38383,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L620",
+      "source_location": "L623",
       "weight": 1.0
     },
     {
@@ -38316,7 +38395,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1015",
+      "source_location": "L1018",
       "weight": 1.0
     },
     {
@@ -38328,7 +38407,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L1043",
+      "source_location": "L1046",
       "weight": 1.0
     },
     {
@@ -38340,7 +38419,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "AirCatchClient/ClientManager.swift",
-      "source_location": "L986",
+      "source_location": "L989",
       "weight": 1.0
     },
     {
@@ -38417,18 +38496,6 @@
     },
     {
       "source": "aircatchhost_hostmanager_hostmanager_handlehandshake",
-      "target": "cgsize",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "INFERRED",
-      "confidence_score": 0.85,
-      "context": "call",
-      "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L748",
-      "weight": 1.0
-    },
-    {
-      "source": "aircatchhost_hostmanager_hostmanager_handlehandshake",
       "target": "aircatchhost_sharedmodels_handshakeack",
       "relation": "calls",
       "_origin": "ast",
@@ -38437,18 +38504,6 @@
       "context": "call",
       "source_file": "AirCatchHost/HostManager.swift",
       "source_location": "L751",
-      "weight": 1.0
-    },
-    {
-      "source": "aircatchhost_hostmanager_hostmanager_handlempchandshake",
-      "target": "cgsize",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "INFERRED",
-      "confidence_score": 0.85,
-      "context": "call",
-      "source_file": "AirCatchHost/HostManager.swift",
-      "source_location": "L609",
       "weight": 1.0
     },
     {
@@ -38513,5 +38568,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "26659972b049d7ec1d4d6138b80acf9facb54d08"
+  "built_at_commit": "af8deeb141b048ba6cf97fd221941fbd4e893b71"
 }

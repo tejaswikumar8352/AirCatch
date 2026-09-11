@@ -189,6 +189,134 @@ final class ClientManager: ObservableObject {
     /// When false, scales to client's display resolution for pixel-perfect fit.
     @Published var optimizeForHostDisplay: Bool = false
     
+    // MARK: - Saved Hosts (Sunshine/Moonlight-style pairing)
+
+    /// Persistently paired host. Pairing once stores the address and the PIN
+    /// (Keychain), so reconnects from the UI are one tap with no re-entry.
+    struct SavedHost: Codable, Identifiable, Equatable {
+        /// Stable identity for pairing. For manual-address hosts this is the IP/hostname
+        /// ("manual-<address>"); for Bonjour-discovered hosts the Bonjour instance name.
+        let id: String
+        /// Display name shown in the UI (host's advertised name or raw address).
+        var name: String
+        /// Direct address to dial for manual/Tailscale pairing; nil for Bonjour-only hosts.
+        var address: String?
+        /// Last time a stream succeeded against this host.
+        var lastConnectedAt: Date
+    }
+
+    @Published private(set) var savedHosts: [SavedHost] = []
+
+    /// Set when a saved host rejects our stored PIN (i.e., the host rotated its PIN).
+    /// Cleared when the user re-pairs or dismisses the prompt.
+    @Published var pairingFailedHost: SavedHost?
+
+    private static let savedHostsDefaultsKey = "com.aircatch.savedHosts"
+    private static let pinKeychainService = "com.aircatch.hostpin"
+
+    private func savePairingDefaults() {
+        if let data = try? JSONEncoder().encode(savedHosts) {
+            UserDefaults.standard.set(data, forKey: Self.savedHostsDefaultsKey)
+        }
+    }
+
+    private func loadPairingDefaults() {
+        guard let data = UserDefaults.standard.data(forKey: Self.savedHostsDefaultsKey),
+              let hosts = try? JSONDecoder().decode([SavedHost].self, from: data) else { return }
+        savedHosts = hosts
+    }
+
+    // Per-host PIN Keychain helpers (service-scoped, account = saved host id)
+    private func savePIN(_ pin: String, for hostID: String) {
+        guard !pin.isEmpty, let data = pin.data(using: .utf8) else { return }
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.pinKeychainService,
+            kSecAttrAccount as String: hostID
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    private func loadPIN(for hostID: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.pinKeychainService,
+            kSecAttrAccount as String: hostID,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func deletePIN(for hostID: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.pinKeychainService,
+            kSecAttrAccount as String: hostID
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// Record a successful pairing so the next connect needs zero entry.
+    /// Call after a successful handshake ack establishes auth.
+    func savePairing(host: DiscoveredHost, pin: String, address: String?) {
+        var entry = SavedHost(id: host.id, name: host.name, address: address, lastConnectedAt: Date())
+        if let idx = savedHosts.firstIndex(where: { $0.id == host.id }) {
+            entry = savedHosts[idx]
+            entry.lastConnectedAt = Date()
+            entry.name = host.name
+            if let address, !address.isEmpty { entry.address = address }
+            savedHosts[idx] = entry
+        } else {
+            savedHosts.insert(entry, at: 0)
+        }
+        savePairingDefaults()
+        savePIN(pin, for: entry.id)
+    }
+
+    /// Unpair (forget) a saved host.
+    func forgetSavedHost(id: String) {
+        savedHosts.removeAll { $0.id == id }
+        savePairingDefaults()
+        deletePIN(for: id)
+    }
+
+    /// Returns the Keychain PIN for a saved host, if paired.
+    func savedPIN(forHostID hostID: String) -> String? {
+        guard savedHosts.contains(where: { $0.id == hostID }) else { return nil }
+        return loadPIN(for: hostID)
+    }
+
+    /// One-tap reconnect against a saved host: restores PIN from Keychain and connects.
+    /// For manual-address hosts it goes straight to the stored address.
+    /// For Bonjour-saved hosts it looks for a currently-discovered match.
+    func connectToSavedHost(_ saved: SavedHost) {
+        guard let pin = loadPIN(for: saved.id), !pin.isEmpty else {
+            // PIN was deleted (Keychain wipe or data reset) — force re-pair.
+            forgetSavedHost(id: saved.id)
+            state = .error("Pairing expired. Enter PIN again.")
+            return
+        }
+        enteredPIN = pin
+
+        if let address = saved.address, !address.isEmpty {
+            connectManually(toIPAddress: address, requestVideo: true)
+            return
+        }
+        if let live = discoveredHosts.first(where: { $0.id == saved.id || $0.name == saved.name }) {
+            connect(to: live, requestVideo: true)
+            return
+        }
+        state = .error("Host not online or not discoverable")
+    }
+
     // MARK: - Components
     // NOTE: latestFrameData was removed - use videoFrameSubject (PassthroughSubject) instead
     // to avoid SwiftUI view thrashing at 60 FPS
@@ -199,6 +327,8 @@ final class ClientManager: ObservableObject {
 
     private nonisolated let crypto = CryptoManager()  // E2EE decryption
     private var usingPeerToPeerTransport = false
+    /// Address of the current connection attempt (used to pin saved pairings).
+    private var currentConnectionAddress: String?
     private var cancellables = Set<AnyCancellable>()
 
     
@@ -216,6 +346,7 @@ final class ClientManager: ObservableObject {
     private init() {
         setupBonjourCallbacks()
         setupAutoConnectLogic()
+        loadPairingDefaults()
         audioEnabledFlag.set(audioEnabled)
         // Do not start discovery immediately on init
     }
@@ -292,6 +423,7 @@ final class ClientManager: ObservableObject {
             mpcPeerName: nil,
             hostId: nil
         )
+        currentConnectionAddress = host
         debugConnectionStatus = "Connecting to \(host)..."
 
         // SECURITY: Derive E2EE key from the entered PIN — direct-IP sessions use the
@@ -712,6 +844,9 @@ final class ClientManager: ObservableObject {
     
     private func establishConnection(hostIP: String) {
         usingPeerToPeerTransport = (connectionOption == .udpPeerToPeerAWDL)
+        // Record the address actually dialed so successful pairings keep it as a
+        // direct reconnect target (works for both manual entries and Bonjour-resolved IPs).
+        currentConnectionAddress = hostIP
         #if DEBUG
         debugConnectionStatus = "Connecting to \(hostIP)..."
         AirCatchLog.info(" Connecting to \(hostIP)")
@@ -861,12 +996,19 @@ final class ClientManager: ObservableObject {
                 audioPlayer.playAudioPacket(audioData)
             }
         case .pairingFailed:
-            // Wrong PIN - disconnect and show error
+            // Wrong PIN - disconnect and show error.
+            // If this was a one-tap reconnect to a paired host, the host likely reset
+            // its PIN — surface that to the UI so the user can re-pair with the new PIN
+            // instead of the tap appearing to do nothing.
             #if DEBUG
             AirCatchLog.info(" Pairing failed - wrong PIN")
             #endif
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                if let failedHost = self.connectedHost,
+                   let saved = self.savedHosts.first(where: { $0.id == failedHost.id }) {
+                    self.pairingFailedHost = saved
+                }
                 self.state = .error("Wrong PIN")
                 self.enteredPIN = "" // Clear the PIN
             }
@@ -966,6 +1108,12 @@ final class ClientManager: ObservableObject {
             self.streamingFlag.set(false)
             self.state = .connected
             self.startTelemetry()
+
+            // Pairing: after a successful PIN/auth handshake, persist the host so
+            // future connects are one tap (Sunshine/Moonlight-style).
+            if let host = self.connectedHost, !self.enteredPIN.isEmpty {
+                self.savePairing(host: host, pin: self.enteredPIN, address: self.currentConnectionAddress)
+            }
         }
         
         #if DEBUG

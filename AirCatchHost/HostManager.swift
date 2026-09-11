@@ -87,15 +87,81 @@ final class HostManager: ObservableObject {
         }
     }
     
-    /// Generates a new random 6-character alphanumeric PIN (729 million combinations vs 10,000)
+    // MARK: - Persistent Pairing (Sunshine/Moonlight-style)
+    //
+    // The PIN is the shared secret from which the AES-256-GCM key is derived on both
+    // sides. If the PIN were regenerated on every launch, every paired client would be
+    // unusable after a simple app restart — which is what pairing is supposed to avoid.
+    // So: the PIN is stored in the Keychain once and only changes when the user
+    // explicitly resets it (which also invalidates all session tokens).
+
+    private static let pinKeychainService = "com.aircatch.host.pairingpin"
+    private static let pinKeychainAccount = "pairingPIN"
+    private static let sessionTokensDefaultsKey = "com.aircatch.host.sessionTokens"
+
+    /// Loads the persisted PIN, or generates and persists a new one on first launch.
+    private func loadOrCreatePIN() {
+        if let pin = Self.loadPINFromKeychain() {
+            currentPIN = pin
+            crypto.deriveKey(from: pin)
+            AirCatchLog.info("Pairing PIN restored from Keychain")
+            return
+        }
+        regeneratePIN()
+    }
+
+    private static func loadPINFromKeychain() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: pinKeychainService,
+            kSecAttrAccount as String: pinKeychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func savePINToKeychain(_ pin: String) {
+        guard let data = pin.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: pinKeychainService,
+            kSecAttrAccount as String: pinKeychainAccount
+        ]
+        SecItemDelete(query as CFDictionary)
+        var add = query
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    /// Generates (or rotates) the pairing PIN and persists it to the Keychain.
+    /// Resets all stored session tokens — existing paired devices must re-pair.
     func regeneratePIN() {
         // Use uppercase letters + digits, excluding confusing characters (0, O, I, 1, L)
         let allowedChars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
         currentPIN = String((0..<6).map { _ in allowedChars.randomElement()! })
         AirCatchLog.info("New PIN generated")
         crypto.deriveKey(from: currentPIN)  // E2EE: Derive encryption key from PIN
+        Self.savePINToKeychain(currentPIN)
+        // Rotating the PIN invalidates all previously granted session tokens.
+        trustedSessionTokens.removeAll()
+        persistSessionTokens()
     }
-    
+
+    private func persistSessionTokens() {
+        UserDefaults.standard.set(trustedSessionTokens, forKey: Self.sessionTokensDefaultsKey)
+    }
+
+    private func restoreSessionTokens() {
+        guard let stored = UserDefaults.standard.dictionary(forKey: Self.sessionTokensDefaultsKey) as? [String: TimeInterval] else { return }
+        trustedSessionTokens = stored
+        pruneExpiredSessionTokens()  // Drop tokens that expired while the app was closed
+    }
+
     // MARK: - Network Components
     
     private let networkManager = NetworkManager.shared
@@ -187,9 +253,11 @@ final class HostManager: ObservableObject {
     
     func start() {
         guard !isRunning else { return }
-        
-        // Generate a new PIN for this session
-        regeneratePIN()
+
+        // Restore the persisted pairing PIN (or create one on first launch) instead of
+        // regenerating it per launch — regenerating would invalidate saved pairings.
+        loadOrCreatePIN()
+        restoreSessionTokens()
         
         Task {
             do {
@@ -1431,20 +1499,22 @@ final class HostManager: ObservableObject {
         }
         // Sliding TTL keeps active devices connected while expiring stale tokens.
         trustedSessionTokens[token] = now + Self.sessionTokenTTL
+        persistSessionTokens()
         return true
     }
     
     private func storeTrustedSessionToken(_ token: String, now: TimeInterval = Date().timeIntervalSince1970) {
         pruneExpiredSessionTokens(now: now)
         trustedSessionTokens[token] = now + Self.sessionTokenTTL
-        
+
         let overflow = trustedSessionTokens.count - Self.maxTrustedSessionTokens
-        guard overflow > 0 else { return }
-        
-        let byExpiry = trustedSessionTokens.sorted { $0.value < $1.value }
-        for (tokenToRemove, _) in byExpiry.prefix(overflow) {
-            trustedSessionTokens.removeValue(forKey: tokenToRemove)
+        if overflow > 0 {
+            let byExpiry = trustedSessionTokens.sorted { $0.value < $1.value }
+            for (tokenToRemove, _) in byExpiry.prefix(overflow) {
+                trustedSessionTokens.removeValue(forKey: tokenToRemove)
+            }
         }
+        persistSessionTokens()
     }
     
     /// SECURITY: Generate cryptographically secure session token using SecRandomCopyBytes

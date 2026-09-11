@@ -57,7 +57,7 @@ final class InputInjector: @unchecked Sendable {
             injectMouseUp(at: point)
         }
     }
-    
+
     /// Simulates a single left click at the given screen coordinate.
     nonisolated func injectSingleClick(at point: CGPoint) {
         injectMouseDown(at: point)

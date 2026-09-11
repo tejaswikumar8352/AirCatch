@@ -19,7 +19,10 @@ struct ContentView: View {
 
     // Manual direct-IP connection state (e.g., Tailscale address)
     @State private var showManualOverlay = false
+    @State private var manualPrefillAddress: String = ""
 
+    // Re-pair prompt shown when a paired host rotated its PIN
+    @State private var rePairTarget: ClientManager.SavedHost? = nil
 
     fileprivate enum SidebarItem: Hashable {
         case devices
@@ -42,6 +45,13 @@ struct ContentView: View {
                         DevicesScreen(
                             selectedHostId: $selectedHostId,
                             onConnectTapped: { host in
+                                // Paired hosts reconnect with the stored PIN — no overlay.
+                                if let savedPIN = clientManager.savedPIN(forHostID: host.id),
+                                   !savedPIN.isEmpty {
+                                    clientManager.enteredPIN = savedPIN
+                                    clientManager.connect(to: host, requestVideo: true)
+                                    return
+                                }
                                 pinTargetHost = host
                                 clientManager.enteredPIN = ""
                                 showPINOverlay = true
@@ -92,14 +102,17 @@ struct ContentView: View {
         .overlay {
             if showManualOverlay {
                 ManualConnectOverlay(
+                    prefilledAddress: manualPrefillAddress,
                     pin: $clientManager.enteredPIN,
                     audioEnabled: $clientManager.audioEnabled,
                     onConnect: { ipAddress in
                         showManualOverlay = false
+                        manualPrefillAddress = ""
                         clientManager.connectManually(toIPAddress: ipAddress, requestVideo: true)
                     },
                     onCancel: {
                         showManualOverlay = false
+                        manualPrefillAddress = ""
                         clientManager.enteredPIN = ""
                     }
                 )
@@ -108,6 +121,32 @@ struct ContentView: View {
         }
         .animation(.snappy(duration: 0.25), value: showPINOverlay)
         .animation(.snappy(duration: 0.25), value: showManualOverlay)
+        .onChange(of: clientManager.pairingFailedHost) { _, failed in
+            // Host rotated its PIN — prompt to re-pair instead of silently failing
+            rePairTarget = failed
+        }
+        .alert(item: $rePairTarget) { failed in
+            Alert(
+                title: Text("PIN Changed on \(failed.name)"),
+                message: Text("The host generated a new PIN. Re-pair with the new PIN shown on it, or forget this device."),
+                primaryButton: .default(Text("Re-pair")) {
+                    if let address = failed.address, !address.isEmpty {
+                        manualPrefillAddress = address
+                        clientManager.enteredPIN = ""
+                        showManualOverlay = true
+                    } else if let live = clientManager.discoveredHosts.first(where: { $0.id == failed.id || $0.name == failed.name }) {
+                        pinTargetHost = live
+                        clientManager.enteredPIN = ""
+                        showPINOverlay = true
+                    }
+                    clientManager.pairingFailedHost = nil
+                },
+                secondaryButton: .destructive(Text("Forget Host")) {
+                    clientManager.forgetSavedHost(id: failed.id)
+                    clientManager.pairingFailedHost = nil
+                }
+            )
+        }
     }
 }
 
@@ -182,6 +221,28 @@ private struct DevicesScreen: View {
                         }
                     }
                     .buttonStyle(.plain)
+
+                    // Paired Hosts — one-tap reconnect, no PIN re-entry
+                    if !clientManager.savedHosts.isEmpty {
+                        Text("Paired Hosts")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .padding(.top, 8)
+
+                        ForEach(clientManager.savedHosts) { saved in
+                            SavedHostCard(
+                                savedHost: saved,
+                                isSelected: selectedHostId == saved.id,
+                                onTap: {
+                                    selectedHostId = saved.id
+                                    clientManager.connectToSavedHost(saved)
+                                },
+                                onForget: {
+                                    clientManager.forgetSavedHost(id: saved.id)
+                                }
+                            )
+                        }
+                    }
 
                     Text("Local Network")
                         .font(.caption.weight(.semibold))
@@ -288,6 +349,63 @@ private struct HostCard: View {
     }
 }
 
+
+private struct SavedHostCard: View {
+    let savedHost: ClientManager.SavedHost
+    let isSelected: Bool
+    let onTap: () -> Void
+    let onForget: () -> Void
+
+    private var subtitle: String {
+        if let address = savedHost.address, !address.isEmpty {
+            return "Paired • \(address)"
+        }
+        return "Paired • local network"
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text(savedHost.name)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .background(
+            isSelected ? Color.white.opacity(0.14) : Color.white.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.35) : Color.white.opacity(0.12), lineWidth: 1)
+        }
+        // Long-press to unpair — keeps the list tidy without a one-tap mis-delete.
+        .contextMenu {
+            Button(role: .destructive, action: onForget) {
+                Label("Forget This Host", systemImage: "trash")
+            }
+        }
+    }
+}
 
 private struct DevicesBackground: View {
     var body: some View {
@@ -444,6 +562,8 @@ private struct PINEntryOverlay: View {
 // MARK: - Manual Connect Overlay
 
 private struct ManualConnectOverlay: View {
+    /// Initial address shown in the field (used when re-pairing a saved host).
+    let prefilledAddress: String
     @Binding var pin: String
     @Binding var audioEnabled: Bool
     let onConnect: (String) -> Void
@@ -536,7 +656,11 @@ private struct ManualConnectOverlay: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .frame(maxWidth: 380)
         }
-        .onAppear { focusedField = .address }
+        .onAppear {
+            // Pre-fill address (re-pair flow) and jump focus straight to the PIN
+            ipAddress = prefilledAddress
+            focusedField = prefilledAddress.isEmpty ? .address : .pin
+        }
     }
 }
 
