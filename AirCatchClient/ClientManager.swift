@@ -72,6 +72,7 @@ final class ClientManager: ObservableObject {
     private static let jsonEncoder = JSONEncoder()
 
     enum ConnectionOption: String, CaseIterable, Identifiable {
+        case automatic = "auto"
         case udpPeerToPeerAWDL = "udp_p2p_awdl"
         case udpNetworkFramework = "udp_network"
 
@@ -79,8 +80,10 @@ final class ClientManager: ObservableObject {
 
         var displayName: String {
             switch self {
+            case .automatic:
+                return "Automatic"
             case .udpPeerToPeerAWDL:
-                return "AWDL"
+                return "AWDL (Peer-to-Peer)"
             case .udpNetworkFramework:
                 return "Local Network"
             }
@@ -88,12 +91,26 @@ final class ClientManager: ObservableObject {
 
         var includePeerToPeer: Bool {
             switch self {
+            case .automatic:
+                return false  // Resolved dynamically during fallback
             case .udpPeerToPeerAWDL:
                 return true
             case .udpNetworkFramework:
                 return false
             }
         }
+    }
+
+    /// When `connectionOption == .automatic`, a stalled Bonjour/Local-Network connect
+    /// is retried once over AWDL (peer-to-peer). This tracks that retry has been used.
+    private var fallbackTriedPeerToPeer = false
+
+    /// The effective transport for the current attempt — automatic mode resolves this.
+    private var effectiveIncludePeerToPeer: Bool {
+        if connectionOption == .automatic {
+            return fallbackTriedPeerToPeer
+        }
+        return connectionOption.includePeerToPeer
     }
     
     // MARK: - Published State
@@ -174,7 +191,7 @@ final class ClientManager: ObservableObject {
     /// Connection mode for video/control. Persisted so the user's transport
     /// choice (AWDL vs. Local Network) survives app restarts.
     @Published var connectionOption: ConnectionOption =
-        ConnectionOption(rawValue: UserDefaults.standard.string(forKey: "defaultConnectionOption") ?? "") ?? .udpPeerToPeerAWDL {
+        ConnectionOption(rawValue: UserDefaults.standard.string(forKey: "defaultConnectionOption") ?? "") ?? .automatic {
         didSet { UserDefaults.standard.set(connectionOption.rawValue, forKey: "defaultConnectionOption") }
     }
 
@@ -381,6 +398,7 @@ final class ClientManager: ObservableObject {
     
     func disconnect(shouldRetry: Bool = false) {
         usingPeerToPeerTransport = false
+        fallbackTriedPeerToPeer = false
         disarmConnectionWatchdog()
         networkManager.stopAll()
         stopTelemetry()
@@ -542,7 +560,7 @@ final class ClientManager: ObservableObject {
         packet.append(UInt8(length & 0xFF))
         packet.append(payload)
 
-        conn.stateUpdateHandler = { state in
+        conn.stateUpdateHandler = { [packet] state in
             switch state {
             case .ready:
                 conn.send(content: packet, completion: .contentProcessed { _ in
@@ -593,21 +611,33 @@ final class ClientManager: ObservableObject {
 
     // MARK: - Connection Watchdog
 
-    /// If a connection attempt stalls (network unreachable, host firewall, wrong IP),
-    /// surface an error and return to the home screen instead of hanging in "Connecting".
+    /// If a connection attempt stalls (network unreachable, host firewall, wrong IP):
+    /// - in Automatic mode, retry once over AWDL (peer-to-peer) before failing;
+    /// - otherwise surface an error and return to the home screen.
     private var connectionWatchdog: Task<Void, Never>?
 
     private func armConnectionWatchdog() {
         connectionWatchdog?.cancel()
         connectionWatchdog = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(8))
+            let stallTimeout: TimeInterval = (self?.connectionOption == .automatic && !(self?.fallbackTriedPeerToPeer ?? true)) ? 3 : 8
+            try? await Task.sleep(for: .seconds(stallTimeout))
             guard let self, !Task.isCancelled else { return }
-            if self.state == .connecting {
-                self.state = .error("Connection timed out")
-                self.videoRequested = false
-                self.connectedHost = nil
-                self.debugConnectionStatus = "Timed out"
+            guard self.state == .connecting else { return }
+
+            if self.connectionOption == .automatic, !self.fallbackTriedPeerToPeer, let host = self.connectedHost {
+                // Stage 2 of the automatic fallback chain: Bonjour/LAN stalled → retry over AWDL.
+                self.fallbackTriedPeerToPeer = true
+                self.debugConnectionStatus = "Retrying over AWDL (peer-to-peer)…"
+                self.networkManager.stopAll()
+                self.armConnectionWatchdog()
+                self.resolveAndConnect(host: host)
+                return
             }
+
+            self.state = .error("Connection timed out")
+            self.videoRequested = false
+            self.connectedHost = nil
+            self.debugConnectionStatus = "Timed out"
         }
     }
 
@@ -630,12 +660,13 @@ final class ClientManager: ObservableObject {
         state = .connecting
         connectedHost = host
         reconnectAttempts = 0 // Reset on manual connect
+        fallbackTriedPeerToPeer = false // Reset for a fresh automatic attempt
         armConnectionWatchdog()
-        
+
         // E2EE: Derive encryption key from PIN
         crypto.deriveKey(from: enteredPIN)
 
-        // AWDL mode: use Network.framework peer-to-peer sockets end-to-end.
+        // AWDL-only mode: use Network.framework peer-to-peer sockets end-to-end.
         if connectionOption == .udpPeerToPeerAWDL {
             debugConnectionStatus = "Connecting over AWDL (Network.framework)..."
             if host.endpoint == nil {
@@ -646,7 +677,8 @@ final class ClientManager: ObservableObject {
             return
         }
 
-        // Local Network mode: resolve host endpoint and connect over TCP/UDP.
+        // Automatic / Local Network mode: resolve host endpoint and connect over TCP/UDP.
+        // (Automatic mode retries over AWDL if this stalls — handled by the watchdog.)
         resolveAndConnect(host: host)
     }
 
@@ -754,7 +786,7 @@ final class ClientManager: ObservableObject {
         // Tailscale (direct IP/100.x.x.x) performs poorly with high-rate UDP chunking.
         let isTailscale = connectedHost?.id.hasPrefix("manual-") == true || connectedHost?.name.starts(with: "100.") == true
         let preferLowLatency = !isTailscale
-        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework && !isTailscale
+        let useLosslessChunkRetransmit = (connectionOption == .udpNetworkFramework || connectionOption == .automatic) && !isTailscale && !effectiveIncludePeerToPeer
         // Get iPad display properties for Sidecar-like hardware handshake
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -891,6 +923,9 @@ final class ClientManager: ObservableObject {
         
         reconnectAttempts += 1
         let delay = pow(2.0, Double(reconnectAttempts)) // 2, 4, 8, 16...
+        // During a retry cycle the stream overlay was torn down in disconnect();
+        // re-arm the pending request so the video re-appears once we're connected again.
+        videoRequested = pendingRequestVideo
         #if DEBUG
         AirCatchLog.info(" Reconnecting in \(delay)s (Attempt \(reconnectAttempts))")
         #endif
@@ -923,7 +958,7 @@ final class ClientManager: ObservableObject {
         // Create a connection to resolve the endpoint
         // Bonjour service is UDP, so we use UDP to resolving the endpoint
         let parameters = NWParameters.udp
-        parameters.includePeerToPeer = connectionOption.includePeerToPeer
+        parameters.includePeerToPeer = effectiveIncludePeerToPeer
         let connection = NWConnection(to: endpoint, using: parameters)
         
         connection.stateUpdateHandler = { (newState: NWConnection.State) in
@@ -962,7 +997,7 @@ final class ClientManager: ObservableObject {
     }
     
     private func establishConnection(hostIP: String) {
-        usingPeerToPeerTransport = (connectionOption == .udpPeerToPeerAWDL)
+        usingPeerToPeerTransport = effectiveIncludePeerToPeer
         // Record the address actually dialed so successful pairings keep it as a
         // direct reconnect target (works for both manual entries and Bonjour-resolved IPs).
         currentConnectionAddress = hostIP
@@ -979,7 +1014,7 @@ final class ClientManager: ObservableObject {
         networkManager.connectTCP(
             to: hostIP,
             port: tcpPort,
-            includePeerToPeer: connectionOption.includePeerToPeer,
+            includePeerToPeer: effectiveIncludePeerToPeer,
             requiredInterfaceType: nil,
             onConnected: { _ in
                 Task { @MainActor in
@@ -995,7 +1030,7 @@ final class ClientManager: ObservableObject {
         networkManager.connectUDP(
             to: hostIP,
             port: udpPort,
-            includePeerToPeer: connectionOption.includePeerToPeer,
+            includePeerToPeer: effectiveIncludePeerToPeer,
             requiredInterfaceType: nil
         ) { packet, _ in
             udpProcessingQueue.async {
@@ -1035,7 +1070,7 @@ final class ClientManager: ObservableObject {
         switch connectionOption {
         case .udpPeerToPeerAWDL:
             return .localPeerToPeer
-        case .udpNetworkFramework:
+        case .udpNetworkFramework, .automatic:
             return .localNetwork
         }
     }

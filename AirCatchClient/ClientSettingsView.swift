@@ -20,7 +20,7 @@ struct ClientSettingsView: View {
                             Text(option.displayName).tag(option)
                         }
                     }
-                    Text("AWDL is peer-to-peer between devices (faster, no Wi-Fi router needed). Local Network uses your LAN and is more reliable on shared networks.")
+                    Text("Automatic discovers hosts via Bonjour and falls back to AWDL peer-to-peer if Wi-Fi is congested. Use the other modes only if you know what you're doing.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {

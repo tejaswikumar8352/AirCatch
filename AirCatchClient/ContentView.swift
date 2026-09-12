@@ -88,7 +88,8 @@ struct ContentView: View {
                     pin: $clientManager.enteredPIN,
                     audioEnabled: $clientManager.audioEnabled,
                     connectionOption: $clientManager.connectionOption,
-                    showsQualityOptions: true,
+                    // Transport choice lives in Settings; pairing uses Automatic fallback.
+                    showsQualityOptions: false,
                     onConnect: {
                         guard let host = pinTargetHost else {
                             showPINOverlay = false
@@ -567,19 +568,8 @@ private struct PINEntryOverlay: View {
                     .frame(maxWidth: 260)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    if showsQualityOptions {
-                        HStack {
-                            Text("Connection")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Picker("", selection: $connectionOption) {
-                                ForEach(ClientManager.ConnectionOption.allCases) { option in
-                                    Text(option.displayName).tag(option)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        }
-                    }
+                    // Transport picker removed: Automatic mode (default) picks Bonjour →
+                    // AWDL fallback. Override lives in Settings > Connection.
 
                     // Audio toggle available for all modes
                     Toggle("Stream Audio", isOn: $audioEnabled)

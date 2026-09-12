@@ -72,6 +72,7 @@ final class ClientManager: ObservableObject {
     private static let jsonEncoder = JSONEncoder()
 
     enum ConnectionOption: String, CaseIterable, Identifiable {
+        case automatic = "auto"
         case udpPeerToPeerAWDL = "udp_p2p_awdl"
         case udpNetworkFramework = "udp_network"
 
@@ -79,8 +80,10 @@ final class ClientManager: ObservableObject {
 
         var displayName: String {
             switch self {
+            case .automatic:
+                return "Automatic"
             case .udpPeerToPeerAWDL:
-                return "AWDL"
+                return "AWDL (Peer-to-Peer)"
             case .udpNetworkFramework:
                 return "Local Network"
             }
@@ -88,12 +91,26 @@ final class ClientManager: ObservableObject {
 
         var includePeerToPeer: Bool {
             switch self {
+            case .automatic:
+                return false  // Resolved dynamically during fallback
             case .udpPeerToPeerAWDL:
                 return true
             case .udpNetworkFramework:
                 return false
             }
         }
+    }
+
+    /// When `connectionOption == .automatic`, a stalled Bonjour/Local-Network connect
+    /// is retried once over AWDL (peer-to-peer). This tracks that retry has been used.
+    private var fallbackTriedPeerToPeer = false
+
+    /// The effective transport for the current attempt — automatic mode resolves this.
+    private var effectiveIncludePeerToPeer: Bool {
+        if connectionOption == .automatic {
+            return fallbackTriedPeerToPeer
+        }
+        return connectionOption.includePeerToPeer
     }
     
     // MARK: - Published State
@@ -171,24 +188,159 @@ final class ClientManager: ObservableObject {
         return String(data: data, encoding: .utf8)
     }
     
-    /// Connection mode for video/control.
-    @Published var connectionOption: ConnectionOption = .udpPeerToPeerAWDL
+    /// Connection mode for video/control. Persisted so the user's transport
+    /// choice (AWDL vs. Local Network) survives app restarts.
+    @Published var connectionOption: ConnectionOption =
+        ConnectionOption(rawValue: UserDefaults.standard.string(forKey: "defaultConnectionOption") ?? "") ?? .automatic {
+        didSet { UserDefaults.standard.set(connectionOption.rawValue, forKey: "defaultConnectionOption") }
+    }
 
     /// Whether the current/next handshake is requesting video streaming.
     @Published private(set) var videoRequested: Bool = false
-    
+
     /// User preference: Stream audio from host
-    @Published var audioEnabled: Bool = false {
+    @Published var audioEnabled: Bool = UserDefaults.standard.bool(forKey: "defaultStreamAudio") {
         didSet {
             audioEnabledFlag.set(audioEnabled)
+            UserDefaults.standard.set(audioEnabled, forKey: "defaultStreamAudio")
         }
     }
-    
+
     /// User preference: Optimize streaming for host display resolution
     /// When true, streams at host's native resolution (may require letterboxing on client).
     /// When false, scales to client's display resolution for pixel-perfect fit.
-    @Published var optimizeForHostDisplay: Bool = false
+    @Published var optimizeForHostDisplay: Bool = UserDefaults.standard.bool(forKey: "defaultOptimizeForHostDisplay") {
+        didSet { UserDefaults.standard.set(optimizeForHostDisplay, forKey: "defaultOptimizeForHostDisplay") }
+    }
     
+    // MARK: - Saved Hosts (Sunshine/Moonlight-style pairing)
+
+    /// Persistently paired host. Pairing once stores the address and the PIN
+    /// (Keychain), so reconnects from the UI are one tap with no re-entry.
+    struct SavedHost: Codable, Identifiable, Equatable {
+        /// Stable identity for pairing. For manual-address hosts this is the IP/hostname
+        /// ("manual-<address>"); for Bonjour-discovered hosts the Bonjour instance name.
+        let id: String
+        /// Display name shown in the UI (host's advertised name or raw address).
+        var name: String
+        /// Direct address to dial for manual/Tailscale pairing; nil for Bonjour-only hosts.
+        var address: String?
+        /// Last time a stream succeeded against this host.
+        var lastConnectedAt: Date
+    }
+
+    @Published private(set) var savedHosts: [SavedHost] = []
+
+    /// Set when a saved host rejects our stored PIN (i.e., the host rotated its PIN).
+    /// Cleared when the user re-pairs or dismisses the prompt.
+    @Published var pairingFailedHost: SavedHost?
+
+    private static let savedHostsDefaultsKey = "com.aircatch.savedHosts"
+    private static let pinKeychainService = "com.aircatch.hostpin"
+
+    private func savePairingDefaults() {
+        if let data = try? JSONEncoder().encode(savedHosts) {
+            UserDefaults.standard.set(data, forKey: Self.savedHostsDefaultsKey)
+        }
+    }
+
+    private func loadPairingDefaults() {
+        guard let data = UserDefaults.standard.data(forKey: Self.savedHostsDefaultsKey),
+              let hosts = try? JSONDecoder().decode([SavedHost].self, from: data) else { return }
+        savedHosts = hosts
+    }
+
+    // Per-host PIN Keychain helpers (service-scoped, account = saved host id)
+    private func savePIN(_ pin: String, for hostID: String) {
+        guard !pin.isEmpty, let data = pin.data(using: .utf8) else { return }
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.pinKeychainService,
+            kSecAttrAccount as String: hostID
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    private func loadPIN(for hostID: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.pinKeychainService,
+            kSecAttrAccount as String: hostID,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func deletePIN(for hostID: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.pinKeychainService,
+            kSecAttrAccount as String: hostID
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// Record a successful pairing so the next connect needs zero entry.
+    /// Call after a successful handshake ack establishes auth.
+    func savePairing(host: DiscoveredHost, pin: String, address: String?) {
+        var entry = SavedHost(id: host.id, name: host.name, address: address, lastConnectedAt: Date())
+        if let idx = savedHosts.firstIndex(where: { $0.id == host.id }) {
+            entry = savedHosts[idx]
+            entry.lastConnectedAt = Date()
+            entry.name = host.name
+            if let address, !address.isEmpty { entry.address = address }
+            savedHosts[idx] = entry
+        } else {
+            savedHosts.insert(entry, at: 0)
+        }
+        savePairingDefaults()
+        savePIN(pin, for: entry.id)
+    }
+
+    /// Unpair (forget) a saved host.
+    func forgetSavedHost(id: String) {
+        savedHosts.removeAll { $0.id == id }
+        savePairingDefaults()
+        deletePIN(for: id)
+    }
+
+    /// Returns the Keychain PIN for a saved host, if paired.
+    func savedPIN(forHostID hostID: String) -> String? {
+        guard savedHosts.contains(where: { $0.id == hostID }) else { return nil }
+        return loadPIN(for: hostID)
+    }
+
+    /// One-tap reconnect against a saved host: restores PIN from Keychain and connects.
+    /// For manual-address hosts it goes straight to the stored address.
+    /// For Bonjour-saved hosts it looks for a currently-discovered match.
+    func connectToSavedHost(_ saved: SavedHost) {
+        guard let pin = loadPIN(for: saved.id), !pin.isEmpty else {
+            // PIN was deleted (Keychain wipe or data reset) — force re-pair.
+            forgetSavedHost(id: saved.id)
+            state = .error("Pairing expired. Enter PIN again.")
+            return
+        }
+        enteredPIN = pin
+
+        if let address = saved.address, !address.isEmpty {
+            connectManually(toIPAddress: address, requestVideo: true)
+            return
+        }
+        if let live = discoveredHosts.first(where: { $0.id == saved.id || $0.name == saved.name }) {
+            connect(to: live, requestVideo: true)
+            return
+        }
+        state = .error("Host not online or not discoverable")
+    }
+
     // MARK: - Components
     // NOTE: latestFrameData was removed - use videoFrameSubject (PassthroughSubject) instead
     // to avoid SwiftUI view thrashing at 60 FPS
@@ -199,6 +351,8 @@ final class ClientManager: ObservableObject {
 
     private nonisolated let crypto = CryptoManager()  // E2EE decryption
     private var usingPeerToPeerTransport = false
+    /// Address of the current connection attempt (used to pin saved pairings).
+    private var currentConnectionAddress: String?
     private var cancellables = Set<AnyCancellable>()
 
     
@@ -216,6 +370,7 @@ final class ClientManager: ObservableObject {
     private init() {
         setupBonjourCallbacks()
         setupAutoConnectLogic()
+        loadPairingDefaults()
         audioEnabledFlag.set(audioEnabled)
         // Do not start discovery immediately on init
     }
@@ -243,11 +398,14 @@ final class ClientManager: ObservableObject {
     
     func disconnect(shouldRetry: Bool = false) {
         usingPeerToPeerTransport = false
+        fallbackTriedPeerToPeer = false
+        disarmConnectionWatchdog()
         networkManager.stopAll()
         stopTelemetry()
         audioPlayer.stop()
         streamingFlag.set(false)
         screenInfo = nil
+        videoRequested = false  // Tear down the stream overlay on every disconnect path
 
         if shouldRetry {
              attemptReconnect()
@@ -279,6 +437,7 @@ final class ClientManager: ObservableObject {
         videoRequested = requestVideo
         state = .connecting
         reconnectAttempts = 0
+        armConnectionWatchdog()
 
         // Manual/Tailscale connections run over the routable network (utun), not AWDL.
         connectionOption = .udpNetworkFramework
@@ -292,6 +451,7 @@ final class ClientManager: ObservableObject {
             mpcPeerName: nil,
             hostId: nil
         )
+        currentConnectionAddress = host
         debugConnectionStatus = "Connecting to \(host)..."
 
         // SECURITY: Derive E2EE key from the entered PIN — direct-IP sessions use the
@@ -353,18 +513,138 @@ final class ClientManager: ObservableObject {
     }
 
     // MARK: - Auto-Connect Logic
-    
+
     private func setupAutoConnectLogic() {
         // Auto-connect logic removed as AR is disabled.
         // Users now select a host manually from the list.
     }
-    
+
+    // MARK: - Pairing Announcement
+
+    /// Notifies the host that we want to pair, so it reveals its PIN on its screen.
+    /// Opens a short-lived TCP connection just to deliver the pairing request — the
+    /// real connection is opened later by `connect(to:)` once the user has the PIN.
+    func announcePairing(to host: DiscoveredHost) {
+        // Manual entries: the address is the name. Bonjour entries: resolve the endpoint.
+        if host.id.hasPrefix("manual-") {
+            sendPairingRequest(to: host.name, name: host.name)
+            return
+        }
+        sendPairingRequest(to: nil, name: host.name, endpoint: host.endpoint)
+    }
+
+    private func sendPairingRequest(to address: String?, name: String, endpoint: NWEndpoint? = nil) {
+        let targetHost: String
+        if let address, !address.isEmpty {
+            targetHost = address
+        } else {
+            // Resolve from any Bonjour endpoint if we have one — best effort.
+            // If we can't resolve, we simply skip; the user can also show the PIN manually.
+            guard let endpoint else { return }
+            resolutionForPairing(endpoint: endpoint) { [weak self] resolvedIP in
+                guard let ip = resolvedIP else { return }
+                self?.sendPairingRequest(to: ip, name: name)
+            }
+            return
+        }
+
+        guard let port = NWEndpoint.Port(rawValue: AirCatchConfig.tcpPort) else { return }
+        let conn = NWConnection(host: NWEndpoint.Host(targetHost), port: port, using: .tcp)
+        let payload = Data()  // empty payload — type alone is the signal
+        var packet = Data()
+        packet.append(PacketType.pairingRequest.rawValue)
+        let length = UInt32(payload.count)
+        packet.append(UInt8((length >> 24) & 0xFF))
+        packet.append(UInt8((length >> 16) & 0xFF))
+        packet.append(UInt8((length >> 8) & 0xFF))
+        packet.append(UInt8(length & 0xFF))
+        packet.append(payload)
+
+        conn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                conn.send(content: packet, completion: .contentProcessed { _ in
+                    // Hit-and-run: the host only needed the signal, no response required.
+                    conn.cancel()
+                })
+            case .failed, .cancelled:
+                break
+            default:
+                break
+            }
+        }
+        conn.start(queue: DispatchQueue(label: "com.aircatch.pairing-announce", qos: .utility))
+    }
+
+    private func resolutionForPairing(endpoint: NWEndpoint, completion: @escaping (String?) -> Void) {
+        let probe = NWConnection(to: endpoint, using: .udp)
+        probe.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let ip: String?
+                if let path = probe.currentPath,
+                   case .hostPort(let resolvedHost, _) = path.remoteEndpoint {
+                    ip = "\(resolvedHost)"
+                } else {
+                    ip = nil
+                }
+                probe.stateUpdateHandler = nil
+                probe.cancel()
+                completion(ip)
+            case .failed:
+                probe.stateUpdateHandler = nil
+                probe.cancel()
+                completion(nil)
+            default:
+                break
+            }
+        }
+        probe.start(queue: .global(qos: .utility))
+    }
+
     // MARK: - Connection
-    
+
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
 
     private var pendingRequestVideo: Bool = true
+
+    // MARK: - Connection Watchdog
+
+    /// If a connection attempt stalls (network unreachable, host firewall, wrong IP):
+    /// - in Automatic mode, retry once over AWDL (peer-to-peer) before failing;
+    /// - otherwise surface an error and return to the home screen.
+    private var connectionWatchdog: Task<Void, Never>?
+
+    private func armConnectionWatchdog() {
+        connectionWatchdog?.cancel()
+        connectionWatchdog = Task { @MainActor [weak self] in
+            let stallTimeout: TimeInterval = (self?.connectionOption == .automatic && !(self?.fallbackTriedPeerToPeer ?? true)) ? 3 : 8
+            try? await Task.sleep(for: .seconds(stallTimeout))
+            guard let self, !Task.isCancelled else { return }
+            guard self.state == .connecting else { return }
+
+            if self.connectionOption == .automatic, !self.fallbackTriedPeerToPeer, let host = self.connectedHost {
+                // Stage 2 of the automatic fallback chain: Bonjour/LAN stalled → retry over AWDL.
+                self.fallbackTriedPeerToPeer = true
+                self.debugConnectionStatus = "Retrying over AWDL (peer-to-peer)…"
+                self.networkManager.stopAll()
+                self.armConnectionWatchdog()
+                self.resolveAndConnect(host: host)
+                return
+            }
+
+            self.state = .error("Connection timed out")
+            self.videoRequested = false
+            self.connectedHost = nil
+            self.debugConnectionStatus = "Timed out"
+        }
+    }
+
+    private func disarmConnectionWatchdog() {
+        connectionWatchdog?.cancel()
+        connectionWatchdog = nil
+    }
 
     /// Connects to a host with the requested session features.
     func connect(
@@ -376,15 +656,17 @@ final class ClientManager: ObservableObject {
 
         pendingRequestVideo = requestVideo
         videoRequested = requestVideo
-        
+
         state = .connecting
         connectedHost = host
         reconnectAttempts = 0 // Reset on manual connect
-        
+        fallbackTriedPeerToPeer = false // Reset for a fresh automatic attempt
+        armConnectionWatchdog()
+
         // E2EE: Derive encryption key from PIN
         crypto.deriveKey(from: enteredPIN)
 
-        // AWDL mode: use Network.framework peer-to-peer sockets end-to-end.
+        // AWDL-only mode: use Network.framework peer-to-peer sockets end-to-end.
         if connectionOption == .udpPeerToPeerAWDL {
             debugConnectionStatus = "Connecting over AWDL (Network.framework)..."
             if host.endpoint == nil {
@@ -395,7 +677,8 @@ final class ClientManager: ObservableObject {
             return
         }
 
-        // Local Network mode: resolve host endpoint and connect over TCP/UDP.
+        // Automatic / Local Network mode: resolve host endpoint and connect over TCP/UDP.
+        // (Automatic mode retries over AWDL if this stalls — handled by the watchdog.)
         resolveAndConnect(host: host)
     }
 
@@ -503,7 +786,7 @@ final class ClientManager: ObservableObject {
         // Tailscale (direct IP/100.x.x.x) performs poorly with high-rate UDP chunking.
         let isTailscale = connectedHost?.id.hasPrefix("manual-") == true || connectedHost?.name.starts(with: "100.") == true
         let preferLowLatency = !isTailscale
-        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework && !isTailscale
+        let useLosslessChunkRetransmit = (connectionOption == .udpNetworkFramework || connectionOption == .automatic) && !isTailscale && !effectiveIncludePeerToPeer
         // Get iPad display properties for Sidecar-like hardware handshake
         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -640,6 +923,9 @@ final class ClientManager: ObservableObject {
         
         reconnectAttempts += 1
         let delay = pow(2.0, Double(reconnectAttempts)) // 2, 4, 8, 16...
+        // During a retry cycle the stream overlay was torn down in disconnect();
+        // re-arm the pending request so the video re-appears once we're connected again.
+        videoRequested = pendingRequestVideo
         #if DEBUG
         AirCatchLog.info(" Reconnecting in \(delay)s (Attempt \(reconnectAttempts))")
         #endif
@@ -672,7 +958,7 @@ final class ClientManager: ObservableObject {
         // Create a connection to resolve the endpoint
         // Bonjour service is UDP, so we use UDP to resolving the endpoint
         let parameters = NWParameters.udp
-        parameters.includePeerToPeer = connectionOption.includePeerToPeer
+        parameters.includePeerToPeer = effectiveIncludePeerToPeer
         let connection = NWConnection(to: endpoint, using: parameters)
         
         connection.stateUpdateHandler = { (newState: NWConnection.State) in
@@ -711,7 +997,10 @@ final class ClientManager: ObservableObject {
     }
     
     private func establishConnection(hostIP: String) {
-        usingPeerToPeerTransport = (connectionOption == .udpPeerToPeerAWDL)
+        usingPeerToPeerTransport = effectiveIncludePeerToPeer
+        // Record the address actually dialed so successful pairings keep it as a
+        // direct reconnect target (works for both manual entries and Bonjour-resolved IPs).
+        currentConnectionAddress = hostIP
         #if DEBUG
         debugConnectionStatus = "Connecting to \(hostIP)..."
         AirCatchLog.info(" Connecting to \(hostIP)")
@@ -725,7 +1014,7 @@ final class ClientManager: ObservableObject {
         networkManager.connectTCP(
             to: hostIP,
             port: tcpPort,
-            includePeerToPeer: connectionOption.includePeerToPeer,
+            includePeerToPeer: effectiveIncludePeerToPeer,
             requiredInterfaceType: nil,
             onConnected: { _ in
                 Task { @MainActor in
@@ -741,7 +1030,7 @@ final class ClientManager: ObservableObject {
         networkManager.connectUDP(
             to: hostIP,
             port: udpPort,
-            includePeerToPeer: connectionOption.includePeerToPeer,
+            includePeerToPeer: effectiveIncludePeerToPeer,
             requiredInterfaceType: nil
         ) { packet, _ in
             udpProcessingQueue.async {
@@ -781,7 +1070,7 @@ final class ClientManager: ObservableObject {
         switch connectionOption {
         case .udpPeerToPeerAWDL:
             return .localPeerToPeer
-        case .udpNetworkFramework:
+        case .udpNetworkFramework, .automatic:
             return .localNetwork
         }
     }
@@ -861,12 +1150,19 @@ final class ClientManager: ObservableObject {
                 audioPlayer.playAudioPacket(audioData)
             }
         case .pairingFailed:
-            // Wrong PIN - disconnect and show error
+            // Wrong PIN - disconnect and show error.
+            // If this was a one-tap reconnect to a paired host, the host likely reset
+            // its PIN — surface that to the UI so the user can re-pair with the new PIN
+            // instead of the tap appearing to do nothing.
             #if DEBUG
             AirCatchLog.info(" Pairing failed - wrong PIN")
             #endif
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                if let failedHost = self.connectedHost,
+                   let saved = self.savedHosts.first(where: { $0.id == failedHost.id }) {
+                    self.pairingFailedHost = saved
+                }
                 self.state = .error("Wrong PIN")
                 self.enteredPIN = "" // Clear the PIN
             }
@@ -965,7 +1261,14 @@ final class ClientManager: ObservableObject {
             self.screenInfo = ack
             self.streamingFlag.set(false)
             self.state = .connected
+            self.disarmConnectionWatchdog()
             self.startTelemetry()
+
+            // Pairing: after a successful PIN/auth handshake, persist the host so
+            // future connects are one tap (Sunshine/Moonlight-style).
+            if let host = self.connectedHost, !self.enteredPIN.isEmpty {
+                self.savePairing(host: host, pin: self.enteredPIN, address: self.currentConnectionAddress)
+            }
         }
         
         #if DEBUG
@@ -1333,8 +1636,8 @@ nonisolated private final class VideoReassembler: @unchecked Sendable {
             guard let self else { return }
 
             let now = Date().timeIntervalSinceReferenceDate
-            let nackDelay: TimeInterval = 0.02
-            let nackMinInterval: TimeInterval = 0.03
+            let nackDelay: TimeInterval = 0.08
+            let nackMinInterval: TimeInterval = 0.10
             let maxMissingPerNack = 64
             
             // Cleanup old frames - collect keys first to avoid mutation during iteration

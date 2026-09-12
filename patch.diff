@@ -1,23 +1,11 @@
 --- AirCatchClient/ClientManager.swift
 +++ AirCatchClient/ClientManager.swift
-@@ -482,7 +482,10 @@
-     }
+@@ -562,7 +562,7 @@
+         packet.append(UInt8(length & 0xFF))
+         packet.append(payload)
  
-     private func makeHandshakeRequest(authResponse: Data?, connectionMode: ConnectionMode?) -> HandshakeRequest {
--        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework
-+        // Tailscale (direct IP/100.x.x.x) performs poorly with high-rate UDP chunking.
-+        let isTailscale = connectedHost?.id.hasPrefix("manual-") == true || connectedHost?.name.starts(with: "100.") == true
-+        let preferLowLatency = !isTailscale
-+        let useLosslessChunkRetransmit = connectionOption == .udpNetworkFramework && !isTailscale
-         // Get iPad display properties for Sidecar-like hardware handshake
-         // nativeBounds always returns PIXELS (unaffected by Display Zoom)
-         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-@@ -522,7 +525,7 @@
-             displayConfig: nil,  // Mirror mode only (extend display removed)
-             requestVideo: pendingRequestVideo,
-             requestAudio: audioEnabled,
--            preferLowLatency: true,
-+            preferLowLatency: preferLowLatency,
-             losslessVideo: useLosslessChunkRetransmit,
-             pin: nil,
-             authResponse: authResponse,
+-        conn.stateUpdateHandler = { state in
++        conn.stateUpdateHandler = { [packet] state in
+             switch state {
+             case .ready:
+                 conn.send(content: packet, completion: .contentProcessed { _ in
