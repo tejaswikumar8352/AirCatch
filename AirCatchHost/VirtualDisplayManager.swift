@@ -167,13 +167,17 @@ final class VirtualDisplayManager {
         
         // Create virtual display at PHYSICAL resolution with HiDPI enabled
         // macOS will then offer a HiDPI mode that renders at full resolution
+        let maxBacking = preset.maxBackingResolution
         if let displayID = createCGVirtualDisplay(
             width: physicalWidth,
             height: physicalHeight,
+            maxPixelsWide: maxBacking.width,
+            maxPixelsHigh: maxBacking.height,
             widthMM: widthMM,
             heightMM: heightMM,
             logicalWidth: logicalWidth,
-            logicalHeight: logicalHeight
+            logicalHeight: logicalHeight,
+            preset: preset
         ) {
             virtualDisplayID = displayID
             // Store LOGICAL dimensions (what macOS UI renders at)
@@ -271,7 +275,11 @@ final class VirtualDisplayManager {
         guard let displayID = virtualDisplayID else {
             return CGDisplayBounds(CGMainDisplayID())
         }
-        return CGDisplayBounds(displayID)
+        let bounds = CGDisplayBounds(displayID)
+        displayWidth = Int(bounds.width)
+        displayHeight = Int(bounds.height)
+        displayFrame = bounds
+        return bounds
     }
     
     /// Returns the frame of the virtual display, or nil if not active.
@@ -296,10 +304,13 @@ final class VirtualDisplayManager {
     private func createCGVirtualDisplay(
         width: Int,
         height: Int,
+        maxPixelsWide: Int,
+        maxPixelsHigh: Int,
         widthMM: Double,
         heightMM: Double,
         logicalWidth: Int,
-        logicalHeight: Int
+        logicalHeight: Int,
+        preset: iPadDisplayPreset
     ) -> CGDirectDisplayID? {
         // Load CGVirtualDisplay class dynamically
         guard let virtualDisplayClass = NSClassFromString("CGVirtualDisplay") as? NSObject.Type else {
@@ -326,8 +337,8 @@ final class VirtualDisplayManager {
         let descriptor = descriptorClass.init()
         descriptor.setValue(DispatchQueue.main, forKey: "queue")
         descriptor.setValue("AirCatch Virtual Display", forKey: "name")
-        descriptor.setValue(width, forKey: "maxPixelsWide")   // Physical width
-        descriptor.setValue(height, forKey: "maxPixelsHigh")  // Physical height
+        descriptor.setValue(maxPixelsWide, forKey: "maxPixelsWide")   // Max backing width
+        descriptor.setValue(maxPixelsHigh, forKey: "maxPixelsHigh")  // Max backing height
         descriptor.setValue(CGSize(width: widthMM, height: heightMM), forKey: "sizeInMillimeters")
         descriptor.setValue(UInt32(12345), forKey: "serialNum")
         descriptor.setValue(UInt32(0xAC01), forKey: "productID")  // "AC" for AirCatch
@@ -344,15 +355,18 @@ final class VirtualDisplayManager {
                 modeClass: modeClass,
                 width: width,
                 height: height,
+                maxPixelsWide: maxPixelsWide,
+                maxPixelsHigh: maxPixelsHigh,
                 widthMM: widthMM,
                 heightMM: heightMM,
                 logicalWidth: logicalWidth,
-                logicalHeight: logicalHeight
+                logicalHeight: logicalHeight,
+                preset: preset
             )
         }
         
         let display = virtualDisplayClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() as? NSObject
-        guard let virtualDisplay = display?.perform(initSelector, with: descriptor)?.takeUnretainedValue() as? NSObject else {
+        guard let virtualDisplay = display?.perform(initSelector, with: descriptor)?.takeRetainedValue() as? NSObject else {
             AirCatchLog.error("Failed to init CGVirtualDisplay with descriptor")
             return nil
         }
@@ -361,29 +375,43 @@ final class VirtualDisplayManager {
         let settings = settingsClass.init()
         settings.setValue(true, forKey: "hiDPI")  // CRITICAL: Enable HiDPI
         
-        // Create multiple modes:
-        // 1. HiDPI mode at logical resolution (will render at 2x = physical)
-        // 2. Non-HiDPI mode at physical resolution (for compatibility)
+        // Build resolution ladder from preset's scaled logical resolutions
         var modes: [NSObject] = []
+        var seenKeys = Set<String>()
         
-        // Mode 1: HiDPI at logical resolution (preferred)
-        // This is the Sidecar-like mode - logical 1194×834 renders at 2388×1668 pixels
-        if let hiDPIMode = modeClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() as? NSObject {
-            hiDPIMode.setValue(logicalWidth, forKey: "width")
-            hiDPIMode.setValue(logicalHeight, forKey: "height")
-            hiDPIMode.setValue(60.0, forKey: "refreshRate")
-            modes.append(hiDPIMode)
-            AirCatchLog.info("Adding HiDPI mode: \(logicalWidth)×\(logicalHeight) @ 60Hz (renders at \(width)×\(height))")
+        // Helper to add a mode if not already seen
+        func addModeIfNew(_ w: Int, _ h: Int) {
+            let key = "\(w)x\(h)"
+            guard !seenKeys.contains(key) else { return }
+            seenKeys.insert(key)
+            if let mode = modeClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() as? NSObject {
+                mode.setValue(w, forKey: "width")
+                mode.setValue(h, forKey: "height")
+                mode.setValue(60.0, forKey: "refreshRate")
+                modes.append(mode)
+            }
         }
         
-        // Mode 2: Full physical resolution (non-HiDPI fallback)
-        if let physicalMode = modeClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() as? NSObject {
-            physicalMode.setValue(width, forKey: "width")
-            physicalMode.setValue(height, forKey: "height")
-            physicalMode.setValue(60.0, forKey: "refreshRate")
-            modes.append(physicalMode)
-            AirCatchLog.info("Adding physical mode: \(width)×\(height) @ 60Hz")
+        // Native physical and logical resolutions first
+        addModeIfNew(width, height)            // e.g. 2388×1668
+        addModeIfNew(logicalWidth, logicalHeight) // e.g. 1194×834
+        
+        // Collect remaining modes from scaledLogicalResolutions
+        var remaining: [(w2x: Int, h2x: Int, w1x: Int, h1x: Int)] = []
+        for (w, h) in preset.scaledLogicalResolutions {
+            remaining.append((w * 2, h * 2, w, h))
         }
+        // Sort descending by 2x width, then 2x height
+        remaining.sort { lhs, rhs in
+            if lhs.w2x != rhs.w2x { return lhs.w2x > rhs.w2x }
+            return lhs.h2x > rhs.h2x
+        }
+        for entry in remaining {
+            addModeIfNew(entry.w2x, entry.h2x)
+            addModeIfNew(entry.w1x, entry.h1x)
+        }
+        
+        AirCatchLog.info("Registered \(modes.count) display modes for resolution ladder")
         
         settings.setValue(modes, forKey: "modes")
         
@@ -409,10 +437,13 @@ final class VirtualDisplayManager {
         modeClass: NSObject.Type,
         width: Int,
         height: Int,
+        maxPixelsWide: Int,
+        maxPixelsHigh: Int,
         widthMM: Double,
         heightMM: Double,
         logicalWidth: Int,
-        logicalHeight: Int
+        logicalHeight: Int,
+        preset: iPadDisplayPreset
     ) -> CGDirectDisplayID? {
         // Alternative creation method for different macOS versions
         AirCatchLog.info("Trying alternate virtual display creation method")
@@ -420,12 +451,12 @@ final class VirtualDisplayManager {
         // Create using property-based initialization
         let descriptor = descriptorClass.init()
         
-        // Set all properties using KVC - use PHYSICAL resolution for max pixels
+        // Set all properties using KVC - use maxBackingResolution for max pixels
         let properties: [String: Any] = [
             "queue": DispatchQueue.main,
             "name": "AirCatch Virtual Display",
-            "maxPixelsWide": width,      // Physical width
-            "maxPixelsHigh": height,     // Physical height
+            "maxPixelsWide": maxPixelsWide,
+            "maxPixelsHigh": maxPixelsHigh,
             "sizeInMillimeters": CGSize(width: widthMM, height: heightMM),
             "serialNum": UInt32(12345),
             "productID": UInt32(0xAC01),
@@ -447,22 +478,37 @@ final class VirtualDisplayManager {
                 let settings = settingsClass.init()
                 settings.setValue(true, forKey: "hiDPI")
                 
-                // Add both HiDPI and physical modes
+                // Build resolution ladder from preset's scaled logical resolutions
                 var modes: [NSObject] = []
+                var seenKeys = Set<String>()
                 
-                // HiDPI mode at logical resolution
-                let hiDPIMode = modeClass.init()
-                hiDPIMode.setValue(logicalWidth, forKey: "width")
-                hiDPIMode.setValue(logicalHeight, forKey: "height")
-                hiDPIMode.setValue(60.0, forKey: "refreshRate")
-                modes.append(hiDPIMode)
+                func addModeIfNew(_ w: Int, _ h: Int) {
+                    let key = "\(w)x\(h)"
+                    guard !seenKeys.contains(key) else { return }
+                    seenKeys.insert(key)
+                    let mode = modeClass.init()
+                    mode.setValue(w, forKey: "width")
+                    mode.setValue(h, forKey: "height")
+                    mode.setValue(60.0, forKey: "refreshRate")
+                    modes.append(mode)
+                }
                 
-                // Physical mode
-                let physicalMode = modeClass.init()
-                physicalMode.setValue(width, forKey: "width")
-                physicalMode.setValue(height, forKey: "height")
-                physicalMode.setValue(60.0, forKey: "refreshRate")
-                modes.append(physicalMode)
+                // Native physical and logical resolutions first
+                addModeIfNew(width, height)
+                addModeIfNew(logicalWidth, logicalHeight)
+                
+                var remaining: [(w2x: Int, h2x: Int, w1x: Int, h1x: Int)] = []
+                for (w, h) in preset.scaledLogicalResolutions {
+                    remaining.append((w * 2, h * 2, w, h))
+                }
+                remaining.sort { lhs, rhs in
+                    if lhs.w2x != rhs.w2x { return lhs.w2x > rhs.w2x }
+                    return lhs.h2x > rhs.h2x
+                }
+                for entry in remaining {
+                    addModeIfNew(entry.w2x, entry.h2x)
+                    addModeIfNew(entry.w1x, entry.h1x)
+                }
                 
                 settings.setValue(modes, forKey: "modes")
                 
@@ -479,6 +525,8 @@ final class VirtualDisplayManager {
     private func updateDisplayFrame() {
         guard let displayID = virtualDisplayID else { return }
         displayFrame = CGDisplayBounds(displayID)
+        displayWidth = Int(displayFrame.width)
+        displayHeight = Int(displayFrame.height)
         AirCatchLog.info("Virtual display frame updated: \(displayFrame)")
     }
 }
@@ -486,12 +534,18 @@ final class VirtualDisplayManager {
 // MARK: - Resolution Helper
 
 extension VirtualDisplayManager {
-    /// The logical width (same as displayWidth since we create at logical resolution)
+    /// The logical width (reads live CGDisplayBounds when active)
     var logicalWidth: Int {
+        if isVirtualDisplayActive, let id = virtualDisplayID {
+            return Int(CGDisplayBounds(id).width)
+        }
         return displayWidth
     }
     
     var logicalHeight: Int {
+        if isVirtualDisplayActive, let id = virtualDisplayID {
+            return Int(CGDisplayBounds(id).height)
+        }
         return displayHeight
     }
     
@@ -503,11 +557,11 @@ extension VirtualDisplayManager {
     /// Returns the physical (pixel) resolution for video encoding
     /// This is 2x the logical resolution (Sidecar-like HiDPI)
     var physicalWidth: Int {
-        return displayWidth * 2
+        return logicalWidth * 2
     }
     
     var physicalHeight: Int {
-        return displayHeight * 2
+        return logicalHeight * 2
     }
     
     /// Returns the detected iPad preset name (for debugging)

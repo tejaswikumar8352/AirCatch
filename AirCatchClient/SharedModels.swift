@@ -91,6 +91,7 @@ enum PacketType: UInt8 {
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
     case authResponse = 0x11   // SECURITY: Client responds with HMAC proof of PIN
     case pairingRequest = 0x12  // Client asks the host to reveal its pairing PIN in the UI
+    case keyFrameRequest = 0x13 // Client requests host to emit an IDR keyframe
 }
 
 // MARK: - Connection/Codec Preferences
@@ -242,13 +243,16 @@ struct HandshakeAck: Codable {
     let displayPosition: ExtendedDisplayPosition?
     /// Session token granted to client for reconnection without PIN
     let sessionToken: String?
+    /// Persistent media encryption key wrapped with PIN
+    let wrappedMediaKey: Data?
     
     init(width: Int, height: Int, frameRate: Int, hostName: String,
          bitrate: Int? = nil,
          isVirtualDisplay: Bool? = nil,
          displayMode: StreamDisplayMode? = nil,
          displayPosition: ExtendedDisplayPosition? = nil,
-         sessionToken: String? = nil) {
+         sessionToken: String? = nil,
+         wrappedMediaKey: Data? = nil) {
         self.width = width
         self.height = height
         self.frameRate = frameRate
@@ -258,6 +262,7 @@ struct HandshakeAck: Codable {
         self.displayMode = displayMode
         self.displayPosition = displayPosition
         self.sessionToken = sessionToken
+        self.wrappedMediaKey = wrappedMediaKey
     }
 }
 

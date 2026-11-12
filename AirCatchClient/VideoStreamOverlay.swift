@@ -46,7 +46,7 @@ struct VideoStreamOverlay: View {
                         // Touch layer
                         MouseInputView()
                     }
-                    .frame(width: contentFrame.width, height: contentFrame.height)
+                    .frame(width: max(1, contentFrame.width), height: max(1, contentFrame.height))
                     .position(x: contentFrame.midX, y: contentFrame.midY)
 
                 } else {
@@ -74,7 +74,7 @@ struct VideoStreamOverlay: View {
     private func calculateAspectFitFrame(videoSize: CGSize, containerSize: CGSize) -> CGRect {
         guard videoSize.width > 0, videoSize.height > 0,
               containerSize.width > 0, containerSize.height > 0 else {
-            return CGRect(origin: .zero, size: containerSize)
+            return CGRect(origin: .zero, size: CGSize(width: max(1, containerSize.width), height: max(1, containerSize.height)))
         }
         
         let videoAspect = videoSize.width / videoSize.height
@@ -96,7 +96,7 @@ struct VideoStreamOverlay: View {
         let x = (containerSize.width - fitWidth) / 2
         let y = (containerSize.height - fitHeight) / 2
         
-        return CGRect(x: x, y: y, width: fitWidth, height: fitHeight)
+        return CGRect(x: x, y: y, width: max(1, fitWidth), height: max(1, fitHeight))
     }
 }
 
@@ -117,6 +117,9 @@ final class VideoStreamViewModel: NSObject, ObservableObject {
     override init() {
         super.init()
         decoder.delegate = self
+        decoder.onRequestKeyFrame = {
+            ClientManager.shared.requestVideoKeyFrame()
+        }
     }
     
     func decode(frameData: Data) {

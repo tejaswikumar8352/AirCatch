@@ -118,4 +118,6 @@ relay.zip
 *.zip
 *.pem
 node_modules/
+.zcode/
+
 

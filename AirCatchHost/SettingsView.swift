@@ -13,10 +13,21 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showResetConfirm = false
 
+    private var preferredFrameRateBinding: Binding<Int> {
+        Binding(
+            get: { hostManager.preferredFrameRate },
+            set: { newValue in
+                DispatchQueue.main.async {
+                    hostManager.preferredFrameRate = newValue
+                }
+            }
+        )
+    }
+
     var body: some View {
         Form {
             Section("Streaming") {
-                Picker("Preferred framerate", selection: $hostManager.preferredFrameRate) {
+                Picker("Preferred framerate", selection: preferredFrameRateBinding) {
                     Text("30 fps").tag(30)
                     Text("60 fps").tag(60)
                 }

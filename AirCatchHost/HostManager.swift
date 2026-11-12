@@ -16,32 +16,45 @@ import Security
 
 /// Central manager for the AirCatch host functionality.
 nonisolated private final class InputStateCache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var isVirtualDisplayActive = false
-        private var clientDimensions: (width: Int, height: Int)?
+    private let lock = NSLock()
+    private var isVirtualDisplayActive = false
+    private var virtualDisplayID: CGDirectDisplayID?
+    private var clientDimensions: (width: Int, height: Int)?
+    private var targetScreenFrame: CGRect = CGDisplayBounds(CGMainDisplayID())
 
     nonisolated init() {}
 
-
-        nonisolated func snapshot() -> (isVirtualDisplayActive: Bool, clientDimensions: (width: Int, height: Int)?) {
-            lock.lock()
-            let snapshot = (isVirtualDisplayActive, clientDimensions)
-            lock.unlock()
-            return snapshot
-        }
-
-        nonisolated func setVirtualDisplayActive(_ value: Bool) {
-            lock.lock()
-            isVirtualDisplayActive = value
-            lock.unlock()
-        }
-
-        nonisolated func setClientDimensions(_ value: (width: Int, height: Int)?) {
-            lock.lock()
-            clientDimensions = value
-            lock.unlock()
-        }
+    nonisolated func snapshot() -> (isVirtualDisplayActive: Bool, virtualDisplayID: CGDirectDisplayID?, clientDimensions: (width: Int, height: Int)?, targetScreenFrame: CGRect) {
+        lock.lock()
+        let snapshot = (isVirtualDisplayActive, virtualDisplayID, clientDimensions, targetScreenFrame)
+        lock.unlock()
+        return snapshot
     }
+
+    nonisolated func setVirtualDisplayActive(_ value: Bool) {
+        lock.lock()
+        isVirtualDisplayActive = value
+        lock.unlock()
+    }
+
+    nonisolated func setVirtualDisplayID(_ value: CGDirectDisplayID?) {
+        lock.lock()
+        virtualDisplayID = value
+        lock.unlock()
+    }
+
+    nonisolated func setClientDimensions(_ value: (width: Int, height: Int)?) {
+        lock.lock()
+        clientDimensions = value
+        lock.unlock()
+    }
+
+    nonisolated func setTargetScreenFrame(_ frame: CGRect) {
+        lock.lock()
+        targetScreenFrame = frame
+        lock.unlock()
+    }
+}
 
 @MainActor
 final class HostManager: ObservableObject {
@@ -82,7 +95,10 @@ final class HostManager: ObservableObject {
 
     /// User preference from Settings: the target framerate new streams start with.
     /// Adaptive logic may still step it down under congestion.
-    @Published var preferredFrameRate: Int = UserDefaults.standard.integer(forKey: "hostPreferredFrameRate") {
+    @Published var preferredFrameRate: Int = {
+        let saved = UserDefaults.standard.integer(forKey: "hostPreferredFrameRate")
+        return saved > 0 ? saved : AirCatchConfig.defaultFrameRate
+    }() {
         didSet { UserDefaults.standard.set(preferredFrameRate, forKey: "hostPreferredFrameRate") }
     }
 
@@ -284,7 +300,32 @@ final class HostManager: ObservableObject {
     private var targetDisplayID: CGDirectDisplayID? = nil
     private var targetScreenFrame: CGRect? = nil
     
-    private init() {}
+    // Authenticated TCP client connections (for deduplication and disconnect tracking)
+    private var activeClientConnections: Set<ObjectIdentifier> = []
+    
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            AirCatchLog.info("Application will terminate, synchronously cleaning up displays")
+            self?.virtualDisplayManager.destroyVirtualDisplay()
+            DisplayManager.shared.restoreOriginalResolution()
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let id = self.targetDisplayID ?? CGMainDisplayID()
+            let frame = CGDisplayBounds(id)
+            self.targetScreenFrame = frame
+            self.setCachedTargetScreenFrame(frame)
+        }
+    }
     
     // MARK: - Lifecycle
     
@@ -313,6 +354,11 @@ final class HostManager: ObservableObject {
                     },
                     onPacket: { packet, connection in
                         self.handleTCPPacket(packet, from: connection)
+                    },
+                    onDisconnect: { [weak self] connection in
+                        DispatchQueue.main.async {
+                            self?.handleClientDisconnect(connection)
+                        }
                     }
                 )
                 
@@ -570,6 +616,7 @@ final class HostManager: ObservableObject {
             // Destroy virtual display if active
             virtualDisplayManager.destroyVirtualDisplay()
             self.setCachedVirtualDisplayActive(false)
+            self.setCachedVirtualDisplayID(nil)
             // Also restore main display if it was changed
             DisplayManager.shared.restoreOriginalResolution()
         }
@@ -799,7 +846,8 @@ final class HostManager: ObservableObject {
             #if DEBUG
             AirCatchLog.debug("Auth verified successfully for: \(connection.endpoint)", category: .network)
             #endif
-            connectedClients += 1
+            activeClientConnections.insert(ObjectIdentifier(connection))
+            connectedClients = activeClientConnections.count
             pairingRequested = false  // Pairing prompt fulfilled — hide the PIN again
             
             mpcSessionActive = false
@@ -910,7 +958,9 @@ final class HostManager: ObservableObject {
     private func handleQualityReport(_ payload: Data) {
         guard let report = try? JSONDecoder().decode(QualityReport.self, from: payload) else { return }
 
-        if let estimated = report.estimatedBandwidthBps, estimated > 0 {
+        // Only update estimated bandwidth if it's above minimumBitrate.
+        // During static screens, transmitted bytes are tiny and do not reflect link capacity.
+        if let estimated = report.estimatedBandwidthBps, estimated > BitrateCalculator.minimumBitrate {
             lastEstimatedBandwidthBps = estimated
         }
 
@@ -944,11 +994,14 @@ final class HostManager: ObservableObject {
 
         let refWidth = currentClientDimensions?.width ?? screenStreamer?.captureWidth ?? 1920
         let refHeight = currentClientDimensions?.height ?? screenStreamer?.captureHeight ?? 1080
+        // Only cap by measured bandwidth if there are dropped frames (actual packet loss).
+        // Otherwise, when droppedFrames == 0, stay at the full resolution-based bitrate (e.g. 16 Mbps).
+        let bandwidthToConsider = report.droppedFrames > 0 ? lastEstimatedBandwidthBps : nil
         let baseBitrate = BitrateCalculator.calculateOptimal(
             width: refWidth,
             height: refHeight,
             fps: currentFrameRate,
-            measuredBandwidth: lastEstimatedBandwidthBps
+            measuredBandwidth: bandwidthToConsider
         )
 
         var newBitrate = currentBitrate
@@ -1019,34 +1072,36 @@ final class HostManager: ObservableObject {
         }
         let cachedState = cachedInputStateSnapshot()
         
-        // Get the target display frame - use main display bounds (thread-safe)
-        let screenFrame = CGDisplayBounds(CGMainDisplayID())
+        // Resolve active target display: use virtual display if active, otherwise main
+        let targetDisplayID: CGDirectDisplayID = (cachedState.isVirtualDisplayActive ? cachedState.virtualDisplayID : nil) ?? CGMainDisplayID()
+        
+        // Read logical display frame from zero-IPC cached state (fallback to CoreGraphics if uninitialized)
+        let screenFrame = cachedState.targetScreenFrame.width > 0 ? cachedState.targetScreenFrame : CGDisplayBounds(targetDisplayID)
 
-        // With virtual display, touch mapping is direct (1:1 pixel-perfect)
-        // No letterboxing adjustment needed as the virtual display matches iPad exactly
         var finalNormX = touch.normalizedX
         var finalNormY = touch.normalizedY
 
-        // Only adjust for letterboxing if NOT using virtual display
-        // (i.e., when streaming main display with different aspect ratio)
-        if !cachedState.isVirtualDisplayActive {
-            if let (clientW, clientH) = cachedState.clientDimensions, clientW > 0, clientH > 0 {
-                let hostW = screenFrame.width
-                let hostH = screenFrame.height
+        // Compute live host aspect from the actual display bounds
+        let hostAspect = Double(max(1.0, screenFrame.width)) / Double(max(1.0, screenFrame.height))
 
-                if hostW > 0 && hostH > 0 {
-                    let hostAspect = hostW / hostH
-                    let clientAspect = Double(clientW) / Double(clientH)
+        // Apply letterbox/pillarbox correction when host and client aspect ratios differ.
+        // This handles:
+        // - Mirroring a non-iPad-aspect main display
+        // - Virtual display in a 4:3 mode (e.g. 1600×1200) where SCStream pillarboxes
+        //   inside the fixed client-resolution stream (e.g. 2388×1668)
+        // When aspects match (native-aspect virtual display modes), coords pass through 1:1.
+        if let (clientW, clientH) = cachedState.clientDimensions, clientW > 0, clientH > 0 {
+            let clientAspect = Double(clientW) / Double(clientH)
 
-                    if hostAspect > clientAspect {
-                        let coverageH = clientAspect / hostAspect
-                        let barH = (1.0 - coverageH) / 2.0
-                        finalNormY = (touch.normalizedY - barH) / coverageH
-                    } else {
-                        let coverageW = hostAspect / clientAspect
-                        let barW = (1.0 - coverageW) / 2.0
-                        finalNormX = (touch.normalizedX - barW) / coverageW
-                    }
+            if abs(hostAspect - clientAspect) > 0.005 {
+                if hostAspect > clientAspect {
+                    let coverageH = clientAspect / hostAspect
+                    let barH = (1.0 - coverageH) / 2.0
+                    finalNormY = (touch.normalizedY - barH) / coverageH
+                } else {
+                    let coverageW = hostAspect / clientAspect
+                    let barW = (1.0 - coverageW) / 2.0
+                    finalNormX = (touch.normalizedX - barW) / coverageW
                 }
             }
         }
@@ -1147,17 +1202,19 @@ final class HostManager: ObservableObject {
         
         Task { @MainActor in
             self.clearTCPAuthChallenge(for: connection)
-            connectedClients = max(0, connectedClients - 1)
-            postStatusChange()
+            self.activeClientConnections.remove(ObjectIdentifier(connection))
+            self.connectedClients = self.activeClientConnections.count
+            self.postStatusChange()
             
             // Stop streaming if no clients
-            if connectedClients == 0 {
-                stopStreamingAndRestore()
+            if self.connectedClients == 0 {
+                self.networkManager.clearUDPClients()
+                self.stopStreamingAndRestore()
             }
         }
     }
     
-    private nonisolated func cachedInputStateSnapshot() -> (isVirtualDisplayActive: Bool, clientDimensions: (width: Int, height: Int)?) {
+    private nonisolated func cachedInputStateSnapshot() -> (isVirtualDisplayActive: Bool, virtualDisplayID: CGDirectDisplayID?, clientDimensions: (width: Int, height: Int)?, targetScreenFrame: CGRect) {
         inputStateCache.snapshot()
     }
 
@@ -1165,8 +1222,16 @@ final class HostManager: ObservableObject {
         inputStateCache.setVirtualDisplayActive(value)
     }
 
+    private nonisolated func setCachedVirtualDisplayID(_ value: CGDirectDisplayID?) {
+        inputStateCache.setVirtualDisplayID(value)
+    }
+
     private nonisolated func setCachedClientDimensions(_ value: (width: Int, height: Int)?) {
         inputStateCache.setClientDimensions(value)
+    }
+
+    private nonisolated func setCachedTargetScreenFrame(_ frame: CGRect) {
+        inputStateCache.setTargetScreenFrame(frame)
     }
 
     // MARK: - Screen Streaming
@@ -1203,6 +1268,7 @@ final class HostManager: ObservableObject {
         // - Match iPad's ~4:3 aspect ratio to avoid letterboxing
         var virtualDisplayID: CGDirectDisplayID? = nil
         setCachedVirtualDisplayActive(false)
+        setCachedVirtualDisplayID(nil)
         if !optimizeForHostDisplay,
            let w = clientMaxWidth, let h = clientMaxHeight, w > 0, h > 0 {
             // Pass device model for better iPad detection (Sidecar-like hardware handshake)
@@ -1213,9 +1279,25 @@ final class HostManager: ObservableObject {
             )
             if virtualDisplayID != nil {
                 self.setCachedVirtualDisplayActive(true)
+                self.setCachedVirtualDisplayID(virtualDisplayID)
                 // Wait for virtual display to be ready
                 try? await Task.sleep(for: .milliseconds(500))
+                if let vID = virtualDisplayID {
+                    let frame = CGDisplayBounds(vID)
+                    self.targetScreenFrame = frame
+                    self.setCachedTargetScreenFrame(frame)
+                }
                 AirCatchLog.info("✅ Using Sidecar-like virtual display: \(virtualDisplayManager.presetName)", category: .video)
+                
+                // Update again at +1.5s (+1s more) after display mode stabilizes
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1))
+                    if let vID = self.virtualDisplayManager.virtualDisplayID {
+                        let frame = CGDisplayBounds(vID)
+                        self.targetScreenFrame = frame
+                        self.setCachedTargetScreenFrame(frame)
+                    }
+                }
             } else {
                 AirCatchLog.info("Virtual display unavailable, using main display", category: .video)
             }
@@ -1236,6 +1318,9 @@ final class HostManager: ObservableObject {
         // Use virtual display if available, otherwise main display
         let captureDisplayID = virtualDisplayID ?? CGMainDisplayID()
         self.targetDisplayID = captureDisplayID
+        let activeBounds = CGDisplayBounds(captureDisplayID)
+        self.targetScreenFrame = activeBounds
+        self.setCachedTargetScreenFrame(activeBounds)
 
         let targetFPS = effectiveDefaultFrameRate
         currentFrameRate = targetFPS
@@ -1244,7 +1329,7 @@ final class HostManager: ObservableObject {
                 width: clientW,
                 height: clientH,
                 fps: targetFPS,
-                measuredBandwidth: lastEstimatedBandwidthBps
+                measuredBandwidth: nil
             )
 
             currentBitrate = initialBitrate
@@ -1525,7 +1610,10 @@ final class HostManager: ObservableObject {
     // MARK: - Notifications
     
     private func postStatusChange() {
-        NotificationCenter.default.post(name: Self.statusDidChange, object: isStreaming)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(name: Self.statusDidChange, object: self.isStreaming)
+        }
     }
     
     // MARK: - Security Helpers

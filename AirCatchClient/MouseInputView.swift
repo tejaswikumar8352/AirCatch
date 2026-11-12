@@ -29,11 +29,11 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     private var twoFingerPanGesture: UIPanGestureRecognizer?
     private var activeTouchCount: Int = 0
 
-    // PERFORMANCE: Throttle continuous events.
+    // PERFORMANCE: Throttle continuous events to 0.008s (~120Hz max).
     private var lastMoveTime: CFTimeInterval = 0
     private var lastPanTime: CFTimeInterval = 0
     private var lastPinchTime: CFTimeInterval = 0
-    private let localThrottleInterval: CFTimeInterval = 1.0 / 120.0
+    private let localThrottleInterval: CFTimeInterval = 0.008
 
     private func activeThrottleInterval() -> CFTimeInterval {
         localThrottleInterval
@@ -177,9 +177,9 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
             let deltaX = translation.x * scrollScale
             let deltaY = translation.y * scrollScale  // Natural scrolling direction
             
-            if abs(deltaX) > 0.5 || abs(deltaY) > 0.5 {
-                clientManager?.sendScrollEvent(deltaX: Double(deltaX), deltaY: Double(deltaY))
-            }
+            // Filter out zero-delta scroll events
+            if abs(deltaX) < 0.5 && abs(deltaY) < 0.5 { return }
+            clientManager?.sendScrollEvent(deltaX: Double(deltaX), deltaY: Double(deltaY))
         default:
             break
         }
@@ -212,9 +212,10 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
     // MARK: - Helper
     
     private func sendEvent(location: CGPoint, type: TouchEventType) {
+        guard let scene = window?.windowScene, scene.activationState == .foregroundActive else { return }
         let width = bounds.width
         let height = bounds.height
-        guard width > 0, height > 0 else { return }
+        guard width > 1, height > 1 else { return }
         
         // Since this view is now sized to match the video content exactly,
         // normalization is straightforward
@@ -241,11 +242,22 @@ class MouseHandlingView: UIView, UIGestureRecognizerDelegate {
 
     // iOS delivers hardware-keyboard presses to the key window's first responder,
     // so this view must take focus while the stream is on screen.
-    override var canBecomeFirstResponder: Bool { true }
+    override var canBecomeFirstResponder: Bool {
+        guard let scene = window?.windowScene, scene.activationState == .foregroundActive else { return false }
+        guard bounds.width > 1 && bounds.height > 1 else { return false }
+        return true
+    }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil && !isFirstResponder {
+        if window != nil && canBecomeFirstResponder && !isFirstResponder {
+            becomeFirstResponder()
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if window != nil && canBecomeFirstResponder && !isFirstResponder {
             becomeFirstResponder()
         }
     }

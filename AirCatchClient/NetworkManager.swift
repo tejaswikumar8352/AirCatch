@@ -20,6 +20,7 @@ final class NetworkManager {
     // MARK: - TCP Components
     private var tcpClientConnection: NWConnection?
     private var tcpReceiveHandler: (@MainActor (Packet, NWConnection) -> Void)?
+    var onTCPDisconnect: (() -> Void)?
 
     private init() {}
 
@@ -121,8 +122,16 @@ final class NetworkManager {
                 onConnected?(connection)
             case .failed(let error):
                 AirCatchLog.error("TCP connection failed: \(error)", category: .network)
+                connection.cancel()
+                self?.tcpClientConnection = nil
+                DispatchQueue.main.async {
+                    self?.onTCPDisconnect?()
+                }
             case .cancelled:
-                break
+                self?.tcpClientConnection = nil
+                DispatchQueue.main.async {
+                    self?.onTCPDisconnect?()
+                }
             default:
                 break
             }
@@ -215,14 +224,25 @@ final class NetworkManager {
             
             if let error {
                 AirCatchLog.error("TCP receive error: \(error)")
+                connection.cancel()
+                self.tcpClientConnection = nil
+                DispatchQueue.main.async {
+                    self.onTCPDisconnect?()
+                }
                 return
             }
             
             if isComplete {
                 // Connection closed
+                AirCatchLog.info("TCP connection closed by host", category: .network)
+                connection.cancel()
+                self.tcpClientConnection = nil
                 let handler = self.tcpReceiveHandler
                 Task { @MainActor in
                     handler?(Packet(type: .disconnect, payload: Data()), connection)
+                }
+                DispatchQueue.main.async {
+                    self.onTCPDisconnect?()
                 }
                 return
             }
@@ -264,6 +284,12 @@ final class NetworkManager {
                 
                 if let error {
                     AirCatchLog.error("TCP payload receive error: \(error)")
+                    connection.cancel()
+                    self.tcpClientConnection = nil
+                    DispatchQueue.main.async {
+                        self.onTCPDisconnect?()
+                    }
+                    return
                 }
                 
                 if let payloadData {

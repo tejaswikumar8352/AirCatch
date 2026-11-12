@@ -35,6 +35,8 @@ final class NetworkManager {
     private var tcpListener: NWListener?
     private var tcpConnections: [NWConnection] = []
     private var tcpReceiveHandler: ((Packet, NWConnection) -> Void)?
+    private var tcpConnectionLostHandler: ((NWConnection) -> Void)?
+    private var tcpDisconnectHandler: ((NWConnection) -> Void)?
     private var tcpClientConnection: NWConnection?
     
     // MARK: - Actual bound ports
@@ -42,6 +44,7 @@ final class NetworkManager {
     private(set) var actualTCPPort: UInt16 = 0
 
     private init() {}
+
 
     /// Starts a UDP listener - uses port 0 to let OS pick an available port
     func startUDPListener(port: UInt16 = 0, onPacket: @escaping (Packet, NWEndpoint?) -> Void) throws {
@@ -101,10 +104,16 @@ final class NetworkManager {
     func startTCPListener(
         port: UInt16 = 0,
         onConnection: ((NWConnection) -> Void)? = nil,
-        onPacket: @escaping (Packet, NWConnection) -> Void
+        onPacket: @escaping (Packet, NWConnection) -> Void,
+        // Fires whenever an accepted client socket dies (remote close, network drop,
+        // keepalive timeout) — the host needs this to count/stop clients correctly.
+        onConnectionLost: ((NWConnection) -> Void)? = nil,
+        onDisconnect: ((NWConnection) -> Void)? = nil
     ) throws {
         guard tcpListener == nil else { return }
         tcpReceiveHandler = onPacket
+        tcpConnectionLostHandler = onConnectionLost
+        tcpDisconnectHandler = onDisconnect
         
         // Bind to ALL interfaces (wildcard 0.0.0.0 / ::): no requiredInterface or
         // requiredInterfaceType is set, so the listener accepts connections on every
@@ -283,23 +292,53 @@ final class NetworkManager {
     func registerUDPClient(endpoint: NWEndpoint) {
         queue.async { [weak self] in
             guard let self else { return }
+            
+            // If we already have a connection to this host IP on an older port or endpoint, replace it
+            if case .hostPort(let host, _) = endpoint {
+                let staleEndpoints = self.udpClientEndpoints.filter { ep in
+                    if case .hostPort(let oldHost, _) = ep {
+                        return oldHost == host && ep != endpoint
+                    }
+                    return false
+                }
+                for stale in staleEndpoints {
+                    self.udpClientEndpoints.removeAll(where: { $0 == stale })
+                    if let idx = self.registeredUDPClients.firstIndex(where: { $0.endpoint == stale }) {
+                        let oldConn = self.registeredUDPClients.remove(at: idx)
+                        oldConn.cancel()
+                    }
+                }
+                self.udpEndpointByHost["\(host)"] = endpoint
+            }
+
             // Check if already registered
             guard !self.udpClientEndpoints.contains(where: { $0 == endpoint }) else { return }
             
             self.udpClientEndpoints.append(endpoint)
-
-            if case .hostPort(let host, _) = endpoint {
-                self.udpEndpointByHost["\(host)"] = endpoint
-            }
             
             // Create a connection to send data back to this client
             let connection = NWConnection(to: endpoint, using: .udp)
-            connection.stateUpdateHandler = { state in
+            connection.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
                     AirCatchLog.info("UDP client connection ready: \(endpoint)")
                 case .failed(let error):
                     AirCatchLog.info("UDP client connection failed: \(error)")
+                    if let self {
+                        self.queue.async {
+                            self.registeredUDPClients.removeAll(where: { $0 === connection })
+                            self.udpClientEndpoints.removeAll(where: { $0 == endpoint })
+                            self.updateConnectionCache()
+                        }
+                    }
+                case .cancelled:
+                    if let self {
+                        self.queue.async {
+                            self.registeredUDPClients.removeAll(where: { $0 === connection })
+                            self.udpClientEndpoints.removeAll(where: { $0 == endpoint })
+                            self.updateConnectionCache()
+                        }
+                    }
                 default:
                     break
                 }
@@ -313,6 +352,39 @@ final class NetworkManager {
             #if DEBUG
             AirCatchLog.info(" Registered UDP client: \(endpoint)")
             #endif
+        }
+    }
+
+    /// Clears all manually registered UDP clients (called when all sessions disconnect).
+    func clearRegisteredClients() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            for conn in self.registeredUDPClients {
+                conn.cancel()
+            }
+            self.registeredUDPClients.removeAll()
+            self.udpClientEndpoints.removeAll()
+            self.udpEndpointByHost.removeAll()
+            self.updateConnectionCache()
+        }
+    }
+
+    /// Clears all UDP clients (cancels and removes all entries in udpConnections and registeredUDPClients).
+    func clearUDPClients() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            for conn in self.udpConnections {
+                conn.cancel()
+            }
+            self.udpConnections.removeAll()
+            for conn in self.registeredUDPClients {
+                conn.cancel()
+            }
+            self.registeredUDPClients.removeAll()
+            self.udpClientEndpoints.removeAll()
+            self.udpEndpointByHost.removeAll()
+            self.updateConnectionCache()
+            AirCatchLog.info("Cleared all UDP clients")
         }
     }
 
@@ -461,18 +533,23 @@ final class NetworkManager {
     
     // MARK: - TCP Connection Setup
     
+    private func notifyTCPDisconnect(_ connection: NWConnection) {
+        if removeConnection(connection, from: &tcpConnections) {
+            updateConnectionCache()
+            connection.cancel()
+            tcpConnectionLostHandler?(connection)
+            tcpDisconnectHandler?(connection)
+        }
+    }
+
     private func prepareTCPConnection(_ connection: NWConnection) {
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .failed(let error):
                 AirCatchLog.info("TCP connection failed: \(error)")
-                if let self {
-                    self.removeConnection(connection, from: &self.tcpConnections)
-                }
+                self?.notifyTCPDisconnect(connection)
             case .cancelled:
-                if let self {
-                    self.removeConnection(connection, from: &self.tcpConnections)
-                }
+                self?.notifyTCPDisconnect(connection)
             default:
                 break
             }
@@ -488,12 +565,13 @@ final class NetworkManager {
             
             if let error {
                 AirCatchLog.info("TCP receive error: \(error)")
+                self.notifyTCPDisconnect(connection)
                 return
             }
             
             if isComplete {
                 // Connection closed
-                self.tcpReceiveHandler?(Packet(type: .disconnect, payload: Data()), connection)
+                self.notifyTCPDisconnect(connection)
                 return
             }
             
@@ -531,6 +609,8 @@ final class NetworkManager {
                 
                 if let error {
                     AirCatchLog.info("TCP payload receive error: \(error)")
+                    self.notifyTCPDisconnect(connection)
+                    return
                 }
                 
                 if let payloadData {
@@ -585,7 +665,12 @@ private extension NetworkManager {
         }
     }
     
-    func removeConnection(_ connection: NWConnection, from list: inout [NWConnection]) {
-        list.removeAll { $0 === connection }
+    @discardableResult
+    func removeConnection(_ connection: NWConnection, from list: inout [NWConnection]) -> Bool {
+        if let idx = list.firstIndex(where: { $0 === connection }) {
+            list.remove(at: idx)
+            return true
+        }
+        return false
     }
 }

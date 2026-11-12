@@ -46,6 +46,8 @@ final class HostAppDelegate: NSObject, NSApplicationDelegate {
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         AXIsProcessTrustedWithOptions(options)
         
-        HostManager.shared.start()
+        DispatchQueue.main.async {
+            HostManager.shared.start()
+        }
     }
 }

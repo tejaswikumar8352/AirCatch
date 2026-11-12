@@ -237,6 +237,44 @@ final class ClientManager: ObservableObject {
 
     private static let savedHostsDefaultsKey = "com.aircatch.savedHosts"
     private static let pinKeychainService = "com.aircatch.hostpin"
+    private static let mediaKeyKeychainService = "com.aircatch.client.mediakey"
+
+    private func saveMediaKey(_ key: Data, for hostID: String) {
+        guard !key.isEmpty else { return }
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.mediaKeyKeychainService,
+            kSecAttrAccount as String: hostID
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = key
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    private func loadMediaKey(for hostID: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.mediaKeyKeychainService,
+            kSecAttrAccount as String: hostID,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return data
+    }
+
+    private func deleteMediaKey(for hostID: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.mediaKeyKeychainService,
+            kSecAttrAccount as String: hostID
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 
     private func savePairingDefaults() {
         if let data = try? JSONEncoder().encode(savedHosts) {
@@ -310,6 +348,7 @@ final class ClientManager: ObservableObject {
         savedHosts.removeAll { $0.id == id }
         savePairingDefaults()
         deletePIN(for: id)
+        deleteMediaKey(for: id)
     }
 
     /// Returns the Keychain PIN for a saved host, if paired.
@@ -322,13 +361,22 @@ final class ClientManager: ObservableObject {
     /// For manual-address hosts it goes straight to the stored address.
     /// For Bonjour-saved hosts it looks for a currently-discovered match.
     func connectToSavedHost(_ saved: SavedHost) {
-        guard let pin = loadPIN(for: saved.id), !pin.isEmpty else {
-            // PIN was deleted (Keychain wipe or data reset) — force re-pair.
+        // Preferred path: raw media key — independent of host PIN rotation.
+        if let key = loadMediaKey(for: saved.id) {
+            crypto.setRawKey(key)
+            if let pin = loadPIN(for: saved.id) {
+                enteredPIN = pin
+            }
+        } else if let pin = loadPIN(for: saved.id), !pin.isEmpty {
+            // Legacy paired entry: fall back to PIN.
+            enteredPIN = pin
+            crypto.deriveKey(from: pin)
+        } else {
+            // Both credentials gone (Keychain wipe) — force re-pair.
             forgetSavedHost(id: saved.id)
             state = .error("Pairing expired. Enter PIN again.")
             return
         }
-        enteredPIN = pin
 
         if let address = saved.address, !address.isEmpty {
             connectManually(toIPAddress: address, requestVideo: true)
@@ -367,11 +415,37 @@ final class ClientManager: ObservableObject {
     private var lastReportTimestamp: TimeInterval?
     private nonisolated let receivedBytesCounter: AtomicInt = .init(0)
     
+    // Heartbeat tracking for host liveness
+    private nonisolated let lastHostPacketLock = NSLock()
+    private nonisolated(unsafe) var _lastHostPacketTime: Date = Date()
+    private var lastHostPacketTime: Date {
+        get {
+            lastHostPacketLock.lock()
+            defer { lastHostPacketLock.unlock() }
+            return _lastHostPacketTime
+        }
+        set {
+            lastHostPacketLock.lock()
+            _lastHostPacketTime = newValue
+            lastHostPacketLock.unlock()
+        }
+    }
+    nonisolated func recordHostPacketArrival() {
+        lastHostPacketLock.lock()
+        _lastHostPacketTime = Date()
+        lastHostPacketLock.unlock()
+    }
+    
     private init() {
         setupBonjourCallbacks()
         setupAutoConnectLogic()
         loadPairingDefaults()
         audioEnabledFlag.set(audioEnabled)
+        networkManager.onTCPDisconnect = { [weak self] in
+            Task { @MainActor in
+                self?.disconnect(shouldRetry: false)
+            }
+        }
         // Do not start discovery immediately on init
     }
     
@@ -406,6 +480,7 @@ final class ClientManager: ObservableObject {
         streamingFlag.set(false)
         screenInfo = nil
         videoRequested = false  // Tear down the stream overlay on every disconnect path
+        reassembler.reset()
 
         if shouldRetry {
              attemptReconnect()
@@ -454,9 +529,16 @@ final class ClientManager: ObservableObject {
         currentConnectionAddress = host
         debugConnectionStatus = "Connecting to \(host)..."
 
-        // SECURITY: Derive E2EE key from the entered PIN — direct-IP sessions use the
-        // same AES-256-GCM + challenge-response PIN authentication as discovered hosts.
-        crypto.deriveKey(from: enteredPIN)
+        // SECURITY: E2EE key initialization: use stored media key if already paired,
+        // otherwise derive from the entered PIN.
+        if let mediaKey = loadMediaKey(for: "manual-\(host)") {
+            crypto.setRawKey(mediaKey)
+            #if DEBUG
+            AirCatchLog.info("🔑 E2EE: Restored persistent media key for manual host \(host)")
+            #endif
+        } else if !enteredPIN.isEmpty {
+            crypto.deriveKey(from: enteredPIN)
+        }
 
         establishConnection(hostIP: host)
     }
@@ -663,8 +745,16 @@ final class ClientManager: ObservableObject {
         fallbackTriedPeerToPeer = false // Reset for a fresh automatic attempt
         armConnectionWatchdog()
 
-        // E2EE: Derive encryption key from PIN
-        crypto.deriveKey(from: enteredPIN)
+        // E2EE: If a media key is already stored for this host, install it directly.
+        // Otherwise derive encryption key from PIN.
+        if let mediaKey = loadMediaKey(for: host.id) {
+            crypto.setRawKey(mediaKey)
+            #if DEBUG
+            AirCatchLog.info("🔑 E2EE: Restored persistent media key from Keychain for \(host.name)")
+            #endif
+        } else if !enteredPIN.isEmpty {
+            crypto.deriveKey(from: enteredPIN)
+        }
 
         // AWDL-only mode: use Network.framework peer-to-peer sockets end-to-end.
         if connectionOption == .udpPeerToPeerAWDL {
@@ -701,15 +791,19 @@ final class ClientManager: ObservableObject {
         #endif
         
         let pin = enteredPIN
-        guard !pin.isEmpty else {
-            state = .error("Authentication failed")
+        if !pin.isEmpty {
+            // Send handshake with challenge-response PIN authentication
+            let response = crypto.computeChallengeResponse(challenge: authChallenge.challenge, pin: pin)
+            pendingAuthChallenge = nil
+            sendHandshake(authResponse: response)
+        } else if savedSessionToken != nil {
+            // Reconnecting with saved session token — no PIN needed!
+            pendingAuthChallenge = nil
+            sendHandshake(authResponse: nil)
+        } else {
+            state = .error("Authentication failed. Please enter PIN.")
             return
         }
-
-        // Now send handshake with auth response instead of plaintext PIN
-        let response = crypto.computeChallengeResponse(challenge: authChallenge.challenge, pin: pin)
-        pendingAuthChallenge = nil
-        sendHandshake(authResponse: response)
     }
     
     /// Returns a detailed device model string for Sidecar-like iPad detection.
@@ -869,7 +963,13 @@ final class ClientManager: ObservableObject {
         // Use Task to properly dispatch to MainActor.
         telemetryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.sendPingAndReport()
+                guard let self else { return }
+                if self.state == .connected && Date().timeIntervalSince(self.lastHostPacketTime) > 4.0 {
+                    AirCatchLog.info("Host packet timeout (>4s), disconnecting", category: .network)
+                    self.disconnect(shouldRetry: false)
+                    return
+                }
+                self.sendPingAndReport()
             }
         }
     }
@@ -890,6 +990,8 @@ final class ClientManager: ObservableObject {
         if let data = try? JSONEncoder().encode(ping) {
             sendControl(type: .ping, payload: data)
         }
+        // Keep UDP NAT / port forwarding open with periodic ping
+        NetworkManager.shared.sendUDP(type: .ping, payload: Data())
 
         let bytesSinceLastReport = receivedBytesCounter.swap(0)
         let estimatedBandwidth: Int?
@@ -1032,25 +1134,29 @@ final class ClientManager: ObservableObject {
             port: udpPort,
             includePeerToPeer: effectiveIncludePeerToPeer,
             requiredInterfaceType: nil
-        ) { packet, _ in
+        ) { [weak self] packet, _ in
+            self?.recordHostPacketArrival()
             udpProcessingQueue.async {
                 udpProcessor.handle(packet)
             }
         }
         
-        // Send a dummy UDP packet to "punch a hole" / register the connection with the Host listener
-        // The Host needs to receive at least one packet to know we are here listening for broadcast
+        // Send a burst of UDP packets to reliably punch through Wi-Fi / register with the Host listener.
+        // A single packet can be dropped over Wi-Fi, leaving the Host with 0 registered UDP clients.
+        reassembler.reset()
         Task {
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay to ensure socket ready
-            NetworkManager.shared.sendUDP(type: .handshake, payload: Data())
+            for delayMs in [30, 100, 250, 500, 1000] {
+                try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                NetworkManager.shared.sendUDP(type: .handshake, payload: Data())
+            }
             #if DEBUG
-            AirCatchLog.info(" Sent UDP ping")
+            AirCatchLog.info(" Sent initial UDP registration burst")
             #endif
         }
     }
     
     private func sendHandshake(authResponse: Data?) {
-        guard let authResponse else {
+        guard authResponse != nil || savedSessionToken != nil else {
             state = .error("Authentication failed")
             return
         }
@@ -1077,6 +1183,11 @@ final class ClientManager: ObservableObject {
 
     private func sendControl(type: PacketType, payload: Data) {
         networkManager.sendTCP(type: type, payload: payload)
+    }
+
+    /// Client-side keyframe request: tells the host to emit an IDR frame immediately.
+    func requestVideoKeyFrame() {
+        sendControl(type: .keyFrameRequest, payload: Data())
     }
 
     /// Caps the streaming render resolution to improve sharp text and reduce encoder pressure.
@@ -1107,6 +1218,7 @@ final class ClientManager: ObservableObject {
     // MARK: - Packet Handling
     
     private func handleTCPPacket(_ packet: Packet) {
+        recordHostPacketArrival()
         switch packet.type {
         case .authChallenge:
             DispatchQueue.main.async { [weak self] in
@@ -1255,7 +1367,23 @@ final class ClientManager: ObservableObject {
             AirCatchLog.info("🔐 Saved session token for reconnection")
             #endif
         }
-        
+
+        // If the host included a wrapped media key (PIN pairing just succeeded),
+        // unwrap it with the pairing PIN, install it as the session key, and persist
+        // it alongside the saved host so reconnects survive PIN rotation.
+        if let wrapped = ack.wrappedMediaKey,
+           let host = connectedHost,
+           !enteredPIN.isEmpty,
+           let mediaKey = crypto.unwrapWithPIN(wrapped, pin: enteredPIN) {
+            saveMediaKey(mediaKey, for: host.id)
+            crypto.setRawKey(mediaKey)
+            AirCatchLog.info("🔐 Media key established and persisted", category: .network)
+        } else if let host = connectedHost, let existingKey = loadMediaKey(for: host.id) {
+            // Reconnected via session token — ensure stored media key is active
+            crypto.setRawKey(existingKey)
+            AirCatchLog.info("🔐 Re-activated stored media key for session", category: .network)
+        }
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.screenInfo = ack
@@ -1263,6 +1391,9 @@ final class ClientManager: ObservableObject {
             self.state = .connected
             self.disarmConnectionWatchdog()
             self.startTelemetry()
+
+            // Request a video keyframe immediately so VideoToolbox gets VPS/SPS/PPS right away
+            self.requestVideoKeyFrame()
 
             // Pairing: after a successful PIN/auth handshake, persist the host so
             // future connects are one tap (Sunshine/Moonlight-style).
@@ -1608,6 +1739,15 @@ nonisolated private final class VideoReassembler: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.aircatch.reassembly")
     private nonisolated(unsafe) var chunkCount = 0
     private nonisolated(unsafe) var frameCount = 0
+
+    nonisolated func reset() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.reassemblyBuffer.removeAll()
+            self.chunkCount = 0
+            self.frameCount = 0
+        }
+    }
     
     nonisolated func process(
         chunk data: Data,

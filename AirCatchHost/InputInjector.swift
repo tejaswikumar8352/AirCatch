@@ -229,12 +229,10 @@ final class InputInjector: @unchecked Sendable {
     
     /// Simulates a scroll event.
     nonisolated func injectScroll(deltaX: Int32, deltaY: Int32, at point: CGPoint) {
+        guard deltaX != 0 || deltaY != 0 else { return }
+        
         // First move mouse to position
         moveMouse(to: point)
-        
-        #if DEBUG
-        AirCatchLog.debug(" Scroll at (\(point.x), \(point.y)) deltaX=\(deltaX) deltaY=\(deltaY)")
-        #endif
         
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
@@ -244,9 +242,6 @@ final class InputInjector: @unchecked Sendable {
             wheel2: deltaX,
             wheel3: 0
         ) else {
-            #if DEBUG
-            AirCatchLog.debug(" Failed to create scroll event")
-            #endif
             return
         }
         event.post(tap: .cghidEventTap)

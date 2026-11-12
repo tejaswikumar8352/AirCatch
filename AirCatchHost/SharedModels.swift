@@ -91,6 +91,7 @@ enum PacketType: UInt8 {
     case mediaKeyEvent = 0x10  // Media keys (volume, brightness, play/pause, etc.)
     case authResponse = 0x11   // SECURITY: Client responds with HMAC proof of PIN
     case pairingRequest = 0x12  // Client asks the host to reveal its pairing PIN in the UI
+    case keyFrameRequest = 0x13 // Client requests host to emit an IDR keyframe
 }
 
 // MARK: - Connection/Codec Preferences
@@ -242,13 +243,16 @@ struct HandshakeAck: Codable {
     let displayPosition: ExtendedDisplayPosition?
     /// Session token granted to client for reconnection without PIN
     let sessionToken: String?
+    /// Persistent media encryption key wrapped with PIN
+    let wrappedMediaKey: Data?
     
     init(width: Int, height: Int, frameRate: Int, hostName: String,
          bitrate: Int? = nil,
          isVirtualDisplay: Bool? = nil,
          displayMode: StreamDisplayMode? = nil,
          displayPosition: ExtendedDisplayPosition? = nil,
-         sessionToken: String? = nil) {
+         sessionToken: String? = nil,
+         wrappedMediaKey: Data? = nil) {
         self.width = width
         self.height = height
         self.frameRate = frameRate
@@ -258,6 +262,7 @@ struct HandshakeAck: Codable {
         self.displayMode = displayMode
         self.displayPosition = displayPosition
         self.sessionToken = sessionToken
+        self.wrappedMediaKey = wrappedMediaKey
     }
 }
 
@@ -544,6 +549,45 @@ enum iPadDisplayPreset {
     var aspectRatio: Double {
         let logical = logicalResolution
         return Double(logical.width) / Double(logical.height)
+    }
+    
+    /// All scaled logical resolutions available for this display preset.
+    /// Includes native-aspect modes (via scale multipliers) plus standard 4:3 modes.
+    var scaledLogicalResolutions: [(width: Int, height: Int)] {
+        switch self {
+        case .iPadPro11:
+            return [
+                (1600, 1118), (1557, 1088), (1389, 970), (1344, 938), (1336, 934), (1336, 933), (1280, 894), (1194, 834), (1179, 823), (1042, 728), (1024, 716), (800, 559), (800, 558),
+                (1600, 1200), (1344, 1008), (1280, 960), (1024, 768), (800, 600)
+            ]
+        default:
+            let logical = logicalResolution
+            let multipliers: [Double] = [1.304, 1.163, 1.119, 1.0, 0.987, 0.873]
+            var modes: [(width: Int, height: Int)] = []
+            for m in multipliers {
+                let rawW = Double(logical.width) * m
+                let rawH = Double(logical.height) * m
+                let w = Int(rawW.rounded()) & ~1
+                let h = Int(rawH.rounded()) & ~1
+                modes.append((w, h))
+            }
+            if !modes.contains(where: { $0.width == logical.width && $0.height == logical.height }) {
+                modes.append(logical)
+            }
+            let standard4x3: [(width: Int, height: Int)] = [
+                (1600, 1200), (1344, 1008), (1280, 960), (1024, 768), (800, 600)
+            ]
+            modes.append(contentsOf: standard4x3)
+            return modes
+        }
+    }
+    
+    /// Maximum backing (pixel) resolution across all scaled logical resolutions, at 2x.
+    var maxBackingResolution: (width: Int, height: Int) {
+        let all = scaledLogicalResolutions
+        let maxW = all.map { $0.width }.max() ?? logicalResolution.width
+        let maxH = all.map { $0.height }.max() ?? logicalResolution.height
+        return (maxW * 2, maxH * 2)
     }
     
     /// Display name for UI

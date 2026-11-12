@@ -19,10 +19,15 @@ protocol VideoDecoderDelegate: AnyObject {
 /// Hardware-accelerated HEVC (H.265) and H.264 decoder with Sidecar-level optimization.
 final class VideoDecoder {
     weak var delegate: VideoDecoderDelegate?
+
+    /// Fired when the decoder gives up on the current stream (too many
+    /// consecutive errors) — the owner should ask the host for a fresh IDR.
+    var onRequestKeyFrame: (() -> Void)?
     
     private var decompressionSession: VTDecompressionSession?
     private var formatDescription: CMFormatDescription?
     private var detectedCodec: CMVideoCodecType = kCMVideoCodecType_H264
+    private var awaitingKeyframe = true
     
     // H.264 parameter sets
     private var spsData: Data?
@@ -51,6 +56,8 @@ final class VideoDecoder {
             self?.vpsData = nil
             self?.formatDescription = nil
             self?.detectedCodec = kCMVideoCodecType_H264
+            self?.framesWaitingForSession = 0
+            self?.awaitingKeyframe = true
         }
     }
     
@@ -132,8 +139,6 @@ final class VideoDecoder {
             }
         }
     }
-    private var nalProcessCount = 0
-    
     private func processNALUnit(_ nalUnit: Data) {
         guard !nalUnit.isEmpty else { return }
         
@@ -148,15 +153,6 @@ final class VideoDecoder {
         // Detect HEVC if we see VPS/SPS/PPS types OR if we've already detected HEVC
         let isHEVC = detectedCodec == kCMVideoCodecType_HEVC || 
                      potentialHEVCType == 32 || potentialHEVCType == 33 || potentialHEVCType == 34
-        
-        nalProcessCount += 1
-        #if DEBUG
-        // Only log first 5 NAL units for debugging
-        if nalProcessCount <= 5 {
-            let nalType = isHEVC ? Int(potentialHEVCType) : Int(firstByte & 0x1F)
-            AirCatchLog.debug("NAL #\(nalProcessCount): type=\(nalType), isHEVC=\(isHEVC ? 1 : 0), size=\(nalUnit.count)", category: .video)
-        }
-        #endif
         
         if isHEVC {
             // HEVC NAL type is in bits 1-6 of first byte
@@ -177,22 +173,22 @@ final class VideoDecoder {
                 ppsData = nalUnit
                 detectedCodec = kCMVideoCodecType_HEVC
                 tryCreateFormatDescription()
+
+            case 39, 40: // Prefix / Suffix SEI
+                // Cleanly strip / ignore SEI NAL units without passing to decoder or logging
+                break
                 
             case 19, 20: // IDR slices (IDR_W_RADL, IDR_N_LP)
                 decodeVideoFrame(nalUnit, isIDR: true)
                 
             case 0...9: // Non-IDR slices (TRAIL_N, TRAIL_R, etc.)
+                guard !awaitingKeyframe else { return }
                 decodeVideoFrame(nalUnit, isIDR: false)
                 
             case 16...21: // Other keyframe types (BLA, CRA, etc.)
                 decodeVideoFrame(nalUnit, isIDR: true)
                 
             default:
-                #if DEBUG
-                if nalProcessCount <= 10 {
-                    AirCatchLog.debug(" HEVC unknown NAL type \(nalType), skipping")
-                }
-                #endif
                 break
             }
         } else {
@@ -209,11 +205,15 @@ final class VideoDecoder {
                 ppsData = nalUnit
                 detectedCodec = kCMVideoCodecType_H264
                 tryCreateFormatDescription()
+
+            case 6: // SEI
+                break
                 
             case 5: // IDR slice
                 decodeVideoFrame(nalUnit, isIDR: true)
                 
             case 1: // Non-IDR slice
+                guard !awaitingKeyframe else { return }
                 decodeVideoFrame(nalUnit, isIDR: false)
                 
             default:
@@ -329,6 +329,12 @@ final class VideoDecoder {
                 
                 if status != noErr {
                     decoder.callbackErrorCount += 1
+                    if status == -12909 {
+                        decoder.queue.async {
+                            decoder.awaitingKeyframe = true
+                            decoder.onRequestKeyFrame?()
+                        }
+                    }
                     #if DEBUG
                     if decoder.callbackErrorCount <= 5 {
                         AirCatchLog.debug(" Decompression callback error: \(status), flags: \(infoFlags.rawValue)")
@@ -389,11 +395,21 @@ final class VideoDecoder {
         }
     }
     
+    private var framesWaitingForSession = 0
+
     private func decodeVideoFrame(_ nalUnit: Data, isIDR: Bool) {
         guard let session = decompressionSession,
               let formatDesc = formatDescription else {
+            framesWaitingForSession += 1
+            if framesWaitingForSession % 20 == 1 {
+                #if DEBUG
+                AirCatchLog.debug("Decoder waiting for parameter sets / session (dropped \(framesWaitingForSession) slices), requesting IDR keyframe", category: .video)
+                #endif
+                onRequestKeyFrame?()
+            }
             return
         }
+        framesWaitingForSession = 0
         
         // Convert to AVCC format (length-prefixed)
         var avccData = Data()
@@ -466,19 +482,30 @@ final class VideoDecoder {
             infoFlagsOut: &flagsOut
         )
         
+        if isIDR && decodeStatus == noErr {
+            awaitingKeyframe = false
+        }
+        
         if decodeStatus != noErr {
             decodeErrorCount += 1
             consecutiveErrors += 1
+            if decodeStatus == -12909 {
+                awaitingKeyframe = true
+                onRequestKeyFrame?()
+            }
             #if DEBUG
             if decodeErrorCount <= 5 {
                 AirCatchLog.debug(" ❌ Decode error: \(decodeStatus), isIDR: \(isIDR), NAL size: \(nalUnit.count)")
             }
             #endif
             
-            // Auto-recovery: Reset decoder after too many consecutive errors
+            // Auto-recovery: Reset decoder after too many consecutive errors.
+            // A non-keyframe after loss will keep failing until the next IDR,
+            // so ask the host to emit one immediately.
             if consecutiveErrors >= maxConsecutiveErrors {
                 AirCatchLog.info("Too many decode errors, resetting decoder", category: .video)
                 reset()
+                onRequestKeyFrame?()
             }
         } else {
             consecutiveErrors = 0

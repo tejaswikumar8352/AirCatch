@@ -76,17 +76,19 @@ struct BitrateCalculator {
         // Step 1: Calculate resolution-based bitrate
         let resolutionBitrate = calculateForResolution(width: width, height: height, fps: fps)
         
-        // Step 2: If we have network measurement, cap to safe bandwidth
-        if let bandwidth = measuredBandwidth, bandwidth > 0 {
+        // Step 2: If we have network measurement, only cap if it indicates an active, measured pipe
+        // above minimumBitrate. During static screens, transmitted bitrate drops to ~0.3-1 Mbps,
+        // which must NOT be confused with link capacity.
+        if let bandwidth = measuredBandwidth, bandwidth > minimumBitrate {
             let safeBandwidth = Int(Double(bandwidth) * networkSafetyMargin)
-            let optimalBitrate = min(resolutionBitrate, safeBandwidth)
-            
-            AirCatchLog.info("🌐 Network-capped bitrate: measured=\(bandwidth / 1_000_000)Mbps, safe=\(safeBandwidth / 1_000_000)Mbps → using \(optimalBitrate / 1_000_000) Mbps", category: .network)
-            
-            return max(minimumBitrate, optimalBitrate)
+            if safeBandwidth >= minimumBitrate {
+                let optimalBitrate = min(resolutionBitrate, safeBandwidth)
+                AirCatchLog.info("🌐 Network-capped bitrate: measured=\(bandwidth / 1_000_000)Mbps, safe=\(safeBandwidth / 1_000_000)Mbps → using \(optimalBitrate / 1_000_000) Mbps", category: .network)
+                return max(minimumBitrate, optimalBitrate)
+            }
         }
         
-        // No network measurement available, use resolution-based only
+        // No network measurement available or idle static frames, use resolution-based only
         return resolutionBitrate
     }
     

@@ -118,7 +118,7 @@ final class CryptoManager {
     }
     
     /// Derives a 256-bit AES key from the PIN using PBKDF2-HMAC-SHA256.
-    /// Call this when PIN is generated (host) or entered (client).
+    /// Used during pairing bootstrap: the wrapped media key is sealed with this.
     func deriveKey(from pin: String) {
         guard !pin.isEmpty else {
             lock.lock()
@@ -126,24 +126,51 @@ final class CryptoManager {
             lock.unlock()
             return
         }
-        
         guard let keyData = Self.deriveKeyMaterial(pin: pin, salt: Self.encryptionSalt) else {
             lock.lock()
             key = nil
             lock.unlock()
             return
         }
-        
         lock.lock()
         key = SymmetricKey(data: keyData)
         lock.unlock()
-        
         #if DEBUG
         AirCatchLog.info("E2EE: Key derived from PIN", category: .network)
         #endif
     }
-    
-    /// Clears the encryption key (call on disconnect).
+
+    /// Installs a raw 256-bit key directly (the persistent pairing media key).
+    /// This is what trusted devices reconnect with — it is independent of the PIN,
+    /// so the host PIN may rotate freely without breaking saved clients.
+    func setRawKey(_ data: Data) {
+        guard !data.isEmpty else {
+            lock.lock()
+            key = nil
+            lock.unlock()
+            return
+        }
+        lock.lock()
+        key = SymmetricKey(data: data)
+        lock.unlock()
+    }
+
+    /// Encrypts a payload using a one-off PIN-derived key WITHOUT touching the
+    /// installed session key. Used to wrap the persistent media key for delivery
+    /// to a client during initial pairing.
+    func wrapWithPIN(_ plaintext: Data, pin: String) -> Data? {
+        guard let keyData = Self.deriveKeyMaterial(pin: pin, salt: Self.encryptionSalt) else {
+            return nil
+        }
+        let wrappingKey = SymmetricKey(data: keyData)
+        do {
+            let sealed = try AES.GCM.seal(plaintext, using: wrappingKey)
+            return sealed.combined
+        } catch {
+            return nil
+        }
+    }
+
     func clearKey() {
         lock.lock()
         key = nil

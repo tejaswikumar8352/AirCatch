@@ -93,7 +93,35 @@ nonisolated final class CryptoManager: @unchecked Sendable {
         AirCatchLog.info("E2EE: Key derived from PIN", category: .network)
         #endif
     }
-    
+
+    /// Installs a raw 256-bit key directly (the persistent pairing media key).
+    /// Used after a successful pairing handshake instead of the PIN-derived key, so
+    /// reconnecting is independent of the host's current PIN.
+    nonisolated func setRawKey(_ data: Data) {
+        guard !data.isEmpty else {
+            lock.lock()
+            key = nil
+            lock.unlock()
+            return
+        }
+        lock.lock()
+        key = SymmetricKey(data: data)
+        lock.unlock()
+    }
+
+    /// Decrypts a payload that was sealed with a PIN-derived key, WITHOUT touching
+    /// the installed session key. Used to unwrap the persistent media key delivered
+    /// during initial pairing.
+    nonisolated func unwrapWithPIN(_ ciphertext: Data, pin: String) -> Data? {
+        guard let keyData = Self.deriveKeyMaterial(pin: pin, salt: Self.encryptionSalt) else {
+            return nil
+        }
+        guard ciphertext.count >= 29 else { return nil }
+        let wrappingKey = SymmetricKey(data: keyData)
+        guard let box = try? AES.GCM.SealedBox(combined: ciphertext) else { return nil }
+        return try? AES.GCM.open(box, using: wrappingKey)
+    }
+
     /// Clears the encryption key (call on disconnect).
     nonisolated func clearKey() {
         lock.lock()

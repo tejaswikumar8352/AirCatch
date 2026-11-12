@@ -3,8 +3,11 @@ import SwiftUI
 
 struct HostView: View {
     @ObservedObject private var hostManager = HostManager.shared
-    @State private var isStreaming = false
     @State private var showSettings = false
+
+    private var isStreaming: Bool {
+        hostManager.isStreaming
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -66,9 +69,6 @@ struct HostView: View {
         }
         .frame(width: 400)
         .background(Color(NSColor.windowBackgroundColor))
-        .onReceive(NotificationCenter.default.publisher(for: HostManager.statusDidChange)) { _ in
-            isStreaming = HostManager.shared.isStreaming
-        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .frame(minWidth: 460, minHeight: 420)
@@ -101,7 +101,7 @@ struct HostView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                Text("To pair a new iPad, tap its entry on the iPad — the PIN appears here.\nYou can also reveal it manually below.")
+                Text("Tap an unpaired iPad to pair — it'll ask us to show a PIN here.\nThe PIN changes each time it's revealed; paired devices stay connected regardless.")
                     .font(.caption2)
                     .foregroundColor(.secondary.opacity(0.7))
                     .multilineTextAlignment(.center)

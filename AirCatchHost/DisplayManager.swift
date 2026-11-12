@@ -177,7 +177,11 @@ final class DisplayManager {
         var config: CGDisplayConfigRef?
         CGBeginDisplayConfiguration(&config)
         CGConfigureDisplayWithDisplayMode(config, displayID, original, nil)
-        CGCompleteDisplayConfiguration(config, .forSession)
+        let configErr = CGCompleteDisplayConfiguration(config, .forSession)
+        if configErr != .success {
+            AirCatchLog.info("CGCompleteDisplayConfiguration returned \(configErr), applying fallback via CGDisplaySetDisplayMode")
+        }
+        _ = CGDisplaySetDisplayMode(displayID, original, nil)
         
         isResolutionChanged = false
         originalMode = nil
