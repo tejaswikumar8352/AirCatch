@@ -119,5 +119,7 @@ relay.zip
 *.pem
 node_modules/
 .zcode/
+graphify-out/cache/
+
 
 

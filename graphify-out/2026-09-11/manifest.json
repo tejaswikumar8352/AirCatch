@@ -48,15 +48,15 @@
     "semantic_hash": "30517716bf6754624fdfcdfe6c8d2e97"
   },
   "AirCatchClient/ClientManager.swift": {
-    "mtime": 1789109254.3750863,
-    "seen": 1789110849.8778298,
-    "ast_hash": "f3a5534878b1110d6158ffbf86df5974",
+    "mtime": 1789174604.2967718,
+    "seen": 1789174637.1350021,
+    "ast_hash": "a09d6d084889aeeb18f32a205039e537",
     "semantic_hash": ""
   },
   "AirCatchClient/ContentView.swift": {
-    "mtime": 1789109592.8146496,
-    "seen": 1789110849.877831,
-    "ast_hash": "731b81c79382bc974e6c28988d01c76e",
+    "mtime": 1789173674.3805442,
+    "seen": 1789174637.1350029,
+    "ast_hash": "8a8a16dfeaa92fb7b6f67cb402998a7b",
     "semantic_hash": ""
   },
   "AirCatchClient/CryptoManager.swift": {
@@ -288,9 +288,9 @@
     "semantic_hash": ""
   },
   "AirCatchClient/ClientSettingsView.swift": {
-    "mtime": 1789109671.401495,
-    "seen": 1789110849.877831,
-    "ast_hash": "d441313ea844e2cd9d0faa64a7893705",
+    "mtime": 1789155607.8351212,
+    "seen": 1789174637.1350021,
+    "ast_hash": "d38115ffdd736a789b8132ce2ac2f6ea",
     "semantic_hash": ""
   },
   "AirCatchHost/SettingsView.swift": {
